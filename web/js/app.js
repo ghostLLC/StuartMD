@@ -186,8 +186,21 @@
           .catch(() => {});
       }
     });
-    $$("a", el.preview).forEach((a) => {
-      a.addEventListener("click", (e) => {
+    // Links handled by delegated listener on #preview (bound once)
+
+    // Block edit handled by delegated listeners (bound once)
+
+    updateOutline();
+    updateStats();
+  }
+
+  function bindPreviewDelegates() {
+    if (el.preview.dataset.delegated === "1") return;
+    el.preview.dataset.delegated = "1";
+
+    el.preview.addEventListener("click", (e) => {
+      const a = e.target.closest("a");
+      if (a && el.preview.contains(a)) {
         const href = a.getAttribute("href") || "";
         if (href.startsWith("#")) {
           e.preventDefault();
@@ -198,7 +211,6 @@
           if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
           return;
         }
-        // Open external links outside the app (system browser)
         if (/^https?:\/\//i.test(href) || href.startsWith("mailto:")) {
           e.preventDefault();
           e.stopPropagation();
@@ -206,38 +218,35 @@
             window.pywebview.api.open_url(href);
           }
         }
-      });
+        return;
+      }
+
+      if (e.target.closest("a, button, input, textarea, .md-block-source, pre code, .mermaid-diagram")) {
+        return;
+      }
+      if (state.mode === "source") return;
+      const node = e.target.closest(".md-block");
+      if (!node || node.classList.contains("editing")) return;
+      if (e.detail > 1) return;
+      clearTimeout(bindPreviewDelegates._clickTimer);
+      bindPreviewDelegates._clickTimer = setTimeout(() => {
+        if (!document.contains(node)) return;
+        if (blockNeedsSourceEdit(node)) enterBlockSourceEdit(node);
+        else enterBlockEdit(node);
+      }, 200);
     });
 
-    // Click-to-edit: single click = WYSIWYG; double click = raw source
-    $$(".md-block", el.preview).forEach((node) => {
-      let clickTimer = null;
-      node.addEventListener("click", (e) => {
-        if (e.target.closest("a, button, input, textarea, .md-block-source, pre code, .mermaid-diagram")) {
-          return;
-        }
-        if (state.mode === "source") return;
-        if (node.classList.contains("editing")) return;
-        if (e.detail > 1) return; // wait for dblclick
-        clearTimeout(clickTimer);
-        clickTimer = setTimeout(() => {
-          if (blockNeedsSourceEdit(node)) enterBlockSourceEdit(node);
-          else enterBlockEdit(node);
-        }, 220);
-      });
-      node.addEventListener("dblclick", (e) => {
-        if (e.target.closest("a, button, input, textarea, pre code, .mermaid-diagram")) {
-          return;
-        }
-        if (state.mode === "source") return;
-        e.preventDefault();
-        clearTimeout(clickTimer);
-        enterBlockSourceEdit(node);
-      });
+    el.preview.addEventListener("dblclick", (e) => {
+      if (e.target.closest("a, button, input, textarea, pre code, .mermaid-diagram")) {
+        return;
+      }
+      if (state.mode === "source") return;
+      const node = e.target.closest(".md-block");
+      if (!node) return;
+      e.preventDefault();
+      clearTimeout(bindPreviewDelegates._clickTimer);
+      enterBlockSourceEdit(node);
     });
-
-    updateOutline();
-    updateStats();
   }
 
   function htmlToMarkdown(root) {
@@ -624,20 +633,27 @@
   }
 
   function scheduleRender() {
+    // Source-only typing should not rebuild the hidden preview
+    if (state.mode === "source") return;
     if (renderTimer) cancelAnimationFrame(renderTimer);
     renderTimer = requestAnimationFrame(() => {
-      // slight debounce via timeout for large docs
       clearTimeout(scheduleRender._t);
+      const len = (el.source.value || "").length;
+      const delay = len > 20000 ? 220 : len > 6000 ? 140 : 80;
       scheduleRender._t = setTimeout(() => {
-        // preserve scroll ratio in preview
         const pane = el.previewPane;
         const max = pane.scrollHeight - pane.clientHeight;
         previewScrollRatio = max > 0 ? pane.scrollTop / max : 0;
         renderMarkdown(el.source.value);
         const newMax = pane.scrollHeight - pane.clientHeight;
         pane.scrollTop = previewScrollRatio * newMax;
-      }, 80);
+      }, delay);
     });
+  }
+
+  function updateWindowTitle() {
+    const prefix = state.dirty ? "• " : "";
+    document.title = `${prefix}${state.name || "StuartMD"} — StuartMD`;
   }
 
   function escapeHtml(s) {
@@ -774,7 +790,7 @@
       el.welcome.hidden = true;
       el.editorArea.hidden = true;
       el.statusPath.textContent = path || "";
-      document.title = `${state.name} — StuartMD`;
+      updateWindowTitle();
       if (window.StuartMDPdf?.openPdf) {
         window.StuartMDPdf.openPdf({
           path,
@@ -799,7 +815,7 @@
     const pdfArea = $("#pdf-area");
     if (pdfArea) pdfArea.hidden = true;
     el.statusPath.textContent = path || "未保存文档";
-    document.title = `${state.name} — StuartMD`;
+    updateWindowTitle();
     renderMarkdown(state.content);
     markActiveTreeItem();
   }
@@ -811,6 +827,7 @@
       const tab = state.tabs.find((t) => t.id === state.activeTabId);
       if (tab) tab.dirty = true;
       renderTabs();
+      updateWindowTitle();
     }
   }
 
@@ -1272,6 +1289,7 @@
       state.content = content;
       state.dirty = false;
       el.dirtyDot.hidden = true;
+      updateWindowTitle();
       const tab = state.tabs.find((t) => t.id === state.activeTabId);
       if (tab) {
         tab.content = content;
@@ -1301,7 +1319,7 @@
     el.dirtyDot.hidden = true;
     el.fileTitle.textContent = state.name;
     el.statusPath.textContent = res.path;
-    document.title = `${state.name} — StuartMD`;
+    updateWindowTitle();
     toast("已保存");
     updateAutosaveStatus();
     await refreshRecents();
@@ -2024,13 +2042,7 @@ ${previewHtml}
         return "";
       }
     });
-    setInterval(() => {
-      if (state.dirty) {
-        document.title = `• ${state.name} — StuartMD`;
-      } else {
-        document.title = `${state.name} — StuartMD`;
-      }
-    }, 1000);
+    bindPreviewDelegates();
   }
 
   function wrapSelection(pre, post) {
@@ -2243,12 +2255,12 @@ flowchart LR
         if (state.apiReady) {
           window.pywebview.api.save_settings({ open_mode: state.openMode }).catch(() => {});
         }
-        if (state.openMode === "new_window" && state.tabs.length > 1) {
-          toast("已切换为新窗口；现有标签仍可切换，新打开将使用新窗口");
+        if (state.openMode === "new_window") {
+          toast("已切换为始终新窗口打开");
         } else if (state.openMode === "current_window") {
           toast("已切换为当前窗口标签页");
         } else {
-          toast("已切换为新窗口打开");
+          toast("已切换为智能打开");
         }
         renderTabs();
         refreshSettingsModal();

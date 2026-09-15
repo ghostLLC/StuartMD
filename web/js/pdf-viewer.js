@@ -106,24 +106,63 @@
   async function renderAll() {
     const e = el();
     e.scroll.innerHTML = "";
+    // Create lightweight placeholders first; paint pages as they enter view
+    const pageEls = [];
     for (let n = 1; n <= state.total; n++) {
-      await renderPage(n);
+      const page1 = await state.doc.getPage(1);
+      const rotation = ((page1.rotate || 0) + state.rotation) % 360;
+      // provisional size from page 1; real size set on paint
+      const vp0 = page1.getViewport({ scale: state.scale, rotation });
+      const wrap = document.createElement("div");
+      wrap.className = "pdf-page pending";
+      wrap.dataset.page = String(n);
+      wrap.style.minHeight = Math.max(200, vp0.height * 0.8) + "px";
+      wrap.innerHTML = `<div class="pdf-page-placeholder">第 ${n} 页…</div>`;
+      e.scroll.appendChild(wrap);
+      pageEls.push(wrap);
     }
     bindHighlightLayer();
+
+    const paint = async (wrap) => {
+      if (wrap.dataset.painted === "1") return;
+      wrap.dataset.painted = "1";
+      const num = Number(wrap.dataset.page);
+      await renderPage(num, wrap);
+    };
+
+    if ("IntersectionObserver" in window) {
+      const io = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((en) => {
+            if (en.isIntersecting) {
+              paint(en.target);
+              io.unobserve(en.target);
+            }
+          });
+        },
+        { root: e.scroll, rootMargin: "400px 0px" }
+      );
+      pageEls.forEach((w) => io.observe(w));
+      state._io = io;
+    } else {
+      for (const w of pageEls) await paint(w);
+    }
   }
 
-  async function renderPage(num) {
+  async function renderPage(num, existingWrap) {
     const e = el();
     const page = await state.doc.getPage(num);
     // Include page.Rotate (stored rotation) + user rotation → works for landscape PDFs
     const rotation = ((page.rotate || 0) + state.rotation) % 360;
     const viewport = page.getViewport({ scale: state.scale, rotation });
-    const wrap = document.createElement("div");
+    const wrap = existingWrap || document.createElement("div");
     wrap.className = "pdf-page";
     wrap.dataset.page = String(num);
     wrap.dataset.rotation = String(rotation);
     wrap.style.width = `${viewport.width}px`;
     wrap.style.height = `${viewport.height}px`;
+    wrap.style.minHeight = "";
+    wrap.innerHTML = "";
 
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d");
@@ -151,7 +190,9 @@
     label.textContent = String(num);
     wrap.appendChild(label);
 
-    e.scroll.appendChild(wrap);
+    if (!existingWrap) {
+      e.scroll.appendChild(wrap);
+    }
 
     await page.render({ canvasContext: ctx, viewport, transform: [dpr, 0, 0, dpr, 0, 0] }).promise;
 

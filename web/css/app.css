@@ -1753,6 +1753,20 @@ kbd {
   flex-shrink: 0;
 }
 
+.pdf-page.pending {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  border: 1px dashed var(--border-strong);
+}
+
+.pdf-page-placeholder {
+  color: var(--text-3);
+  font-size: 12px;
+  font-family: var(--font-ui);
+}
+
 .pdf-page canvas {
   display: block;
 }
