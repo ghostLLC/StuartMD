@@ -4,7 +4,7 @@
 
 **项目仓库：** [https://github.com/ghostLLC/StuartMD](https://github.com/ghostLLC/StuartMD)
 
-**当前版本：** 1.3.2
+**当前版本：** 1.4.0
 
 ---
 
@@ -96,14 +96,19 @@ flowchart LR
 | `Ctrl+P` | 打印 / PDF |
 | `Ctrl+T` | 切换主题 |
 | `Ctrl+1/2/3` | 阅读 / 分栏 / 源码 |
-| `Ctrl+B` | 侧边栏 |
+| `Ctrl+B` / `Ctrl+I` | 加粗 / 斜体（编辑中） |
+| `Ctrl+Shift+X` | 删除线 |
+| `Ctrl+Alt+1..4` | 一至四级标题 |
+| `Ctrl+Shift+7` / `8` | 有序 / 无序列表 |
+| `Ctrl+Shift+9` | 任务列表 |
+| `Ctrl+B`（未编辑时） | 侧边栏 |
 
 ---
 
 ## 安装说明
 
 - 安装向导可**自定义安装路径**（默认 `%LOCALAPPDATA%\Programs\StuartMD`，也可改到任意目录）
-- 静默安装示例：`StuartMD-Setup-1.3.2.exe /VERYSILENT /DIR="D:\Apps\StuartMD"`
+- 静默安装示例：`StuartMD-Setup-1.4.0.exe /VERYSILENT /DIR="D:\Apps\StuartMD"`
 - 设置中可**检查更新**；升级时配置、插件、壁纸会自动迁移
 - 欢迎与问题反馈：[GitHub Issues](https://github.com/ghostLLC/StuartMD/issues)
 

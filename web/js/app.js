@@ -266,7 +266,11 @@
           return `*${kids().trim()}*`;
         case "del":
         case "s":
+        case "strike":
           return `~~${kids().trim()}~~`;
+        case "u":
+        case "ins":
+          return kids();
         case "code":
           return node.closest("pre") ? node.textContent : `\`${node.textContent}\``;
         case "pre": {
@@ -486,13 +490,14 @@
         e.preventDefault();
         commit();
       } else if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-        // commit on plain Enter for single-line blocks (headings/paragraphs)
         const tag = (node.firstElementChild?.tagName || "").toLowerCase();
         if (tag && tag[0] === "h" && tag.length === 2) {
           e.preventDefault();
           commit();
+          return;
         }
       }
+      handleBlockEditKeydown(e, node);
     });
   }
 
@@ -1371,12 +1376,8 @@
     if (!state.apiReady) return;
     const path = await window.pywebview.api.open_folder_dialog();
     if (!path) return;
-    // Outside current workspace while real docs open → new window with that folder
-    if (hasRealDocument() && workspaceRoot() && !pathEqualsOrUnder(path, workspaceRoot()) && !pathEqualsOrUnder(workspaceRoot(), path)) {
-      await openInNewWindow(path);
-      return;
-    }
     await loadFolder(path);
+    toast("已打开文件夹");
   }
 
   async function loadFolder(path) {
@@ -1387,9 +1388,12 @@
       return;
     }
     state.folder = res.path;
+    state.workspaceRoot = res.path;
     el.folderName.textContent = res.name || res.path;
     el.folderName.title = res.path;
     renderTree(res.items || [], el.fileTree, 0);
+    toggleSidebar(true);
+    showSidebarPanel("files");
   }
 
   function renderTree(items, container, depth) {
@@ -1944,6 +1948,7 @@ ${previewHtml}
         e.preventDefault();
         wrapSelection("*", "*");
       }
+      handleSourceKeydown(e);
     });
 
     // Keyboard shortcuts
@@ -1965,8 +1970,13 @@ ${previewHtml}
         e.preventDefault();
         newDocument();
       } else if (k === "b") {
-        // only toggle sidebar if focus not in source for bold
-        if (document.activeElement !== el.source) {
+        // Bold in editor; sidebar only when not typing
+        const ae = document.activeElement;
+        const editing =
+          ae === el.source ||
+          (ae && (ae.isContentEditable || ae.closest?.(".md-block.editing")));
+        if (editing) return;
+        if (!e.shiftKey) {
           e.preventDefault();
           toggleSidebar();
         }
@@ -2056,6 +2066,138 @@ ${previewHtml}
     ta.selectionEnd = s + pre.length + selected.length;
     setContent(ta.value, true);
     ta.focus();
+  }
+
+  /** Prefix/suffix current line(s) in source (headings / lists). */
+  function sourceLineTransform(fn) {
+    const ta = el.source;
+    const v = ta.value;
+    const s = ta.selectionStart;
+    const e = ta.selectionEnd;
+    const before = v.slice(0, s);
+    const start = before.lastIndexOf("\n") + 1;
+    let end = v.indexOf("\n", e);
+    if (end < 0) end = v.length;
+    const block = v.slice(start, end);
+    const next = fn(block);
+    if (next == null || next === block) return;
+    ta.value = v.slice(0, start) + next + v.slice(end);
+    ta.focus();
+    ta.setSelectionRange(start, start + next.length);
+    setContent(ta.value, true);
+  }
+
+  function stripHeadingPrefix(line) {
+    return line.replace(/^\s{0,3}#{1,6}\s+/, "");
+  }
+
+  function setLineHeading(level) {
+    sourceLineTransform((block) =>
+      block
+        .split("\n")
+        .map((line) => {
+          const text = stripHeadingPrefix(line).replace(/^\s*(?:[-*+]|\d+[.)])\s+/, "");
+          return "#".repeat(level) + " " + text;
+        })
+        .join("\n")
+    );
+  }
+
+  function toggleLineList(ordered) {
+    sourceLineTransform((block) =>
+      block
+        .split("\n")
+        .map((line, i) => {
+          if (/^\s*(?:[-*+]|\d+[.)])\s+/.test(line)) {
+            return line.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, "");
+          }
+          const text = stripHeadingPrefix(line);
+          return (ordered ? `${i + 1}. ` : "- ") + text;
+        })
+        .join("\n")
+    );
+  }
+
+  /** Feishu-like shortcuts (avoid Ctrl+O/S/N/F/E/P/T/B sidebar conflicts). */
+  function handleSourceKeydown(e) {
+    const mod = e.ctrlKey || e.metaKey;
+    if (!mod) return;
+    // Ctrl+B / Ctrl+I already handled in textarea listener as bold/italic
+    if (e.shiftKey && e.key === "7") {
+      e.preventDefault();
+      toggleLineList(true);
+      return;
+    }
+    if (e.shiftKey && e.key === "8") {
+      e.preventDefault();
+      toggleLineList(false);
+      return;
+    }
+    if (e.shiftKey && e.key === "9") {
+      e.preventDefault();
+      // checklist
+      sourceLineTransform((block) =>
+        block
+          .split("\n")
+          .map((line) => {
+            if (/^\s*- \[[ xX]\]\s+/.test(line)) {
+              return line.replace(/^\s*- \[[ xX]\]\s+/, "");
+            }
+            const text = stripHeadingPrefix(line).replace(/^\s*(?:[-*+]|\d+[.)])\s+/, "");
+            return "- [ ] " + text;
+          })
+          .join("\n")
+      );
+      return;
+    }
+    if (e.altKey && ["1", "2", "3", "4"].includes(e.key)) {
+      e.preventDefault();
+      setLineHeading(Number(e.key));
+    }
+  }
+
+  /** WYSIWYG block: execCommand + convert via htmlToMarkdown on blur. */
+  function handleBlockEditKeydown(e, node) {
+    const mod = e.ctrlKey || e.metaKey;
+    if (!mod) return;
+    if (e.key === "b" || e.key === "B") {
+      e.preventDefault();
+      document.execCommand("bold");
+      return;
+    }
+    if (e.key === "i" || e.key === "I") {
+      e.preventDefault();
+      document.execCommand("italic");
+      return;
+    }
+    if (e.shiftKey && (e.key === "x" || e.key === "X")) {
+      e.preventDefault();
+      document.execCommand("strikeThrough");
+      return;
+    }
+    if (e.shiftKey && e.key === "8") {
+      e.preventDefault();
+      document.execCommand("insertUnorderedList");
+      return;
+    }
+    if (e.shiftKey && e.key === "7") {
+      e.preventDefault();
+      document.execCommand("insertOrderedList");
+      return;
+    }
+    if (e.altKey && ["1", "2", "3", "4"].includes(e.key)) {
+      e.preventDefault();
+      const host = node.firstElementChild || node;
+      const tag = "h" + e.key;
+      try {
+        document.execCommand("formatBlock", false, tag);
+      } catch (_) {
+        const h = document.createElement(tag);
+        h.textContent = host.textContent;
+        node.innerHTML = "";
+        node.appendChild(h);
+      }
+    }
   }
 
   // ---------- Welcome sample ----------

@@ -15,7 +15,7 @@ import webview
 
 APP_NAME = "StuartMD"
 APP_ID = "StuartMD"
-VERSION = "1.3.2"
+VERSION = "1.4.0"
 PUBLISHER = "StuartMD"
 PROG_ID = "StuartMD.Markdown"
 GITHUB_REPO = "ghostLLC/StuartMD"
