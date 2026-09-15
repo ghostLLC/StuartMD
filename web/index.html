@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>StuartMD</title>
+  <link rel="stylesheet" href="libs/katex.min.css" />
+  <link rel="stylesheet" href="libs/github.min.css" id="hl-light" />
+  <link rel="stylesheet" href="libs/github-dark.min.css" id="hl-dark" disabled />
+  <link rel="stylesheet" href="css/app.css" />
+</head>
+<body data-theme="light">
+  <div id="app">
+    <!-- Title bar / toolbar -->
+    <header id="titlebar">
+      <div class="tb-left">
+        <div class="menu-wrap">
+          <button class="menu-trigger" id="btn-file-menu" title="文件：新建 / 打开 / 保存" aria-haspopup="true" aria-expanded="false">
+            文件
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 4l3 3 3-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <div class="file-menu" id="file-menu" hidden>
+            <button class="menu-item" data-action="new">新建文档 <kbd>Ctrl+N</kbd></button>
+            <button class="menu-item" data-action="open">打开文件… <kbd>Ctrl+O</kbd></button>
+            <button class="menu-item" data-action="open-folder">打开文件夹…</button>
+            <button class="menu-item" data-action="open-sample">打开示例</button>
+            <div class="menu-sep"></div>
+            <button class="menu-item" data-action="save">保存 <kbd>Ctrl+S</kbd></button>
+            <button class="menu-item" data-action="save-as">另存为… <kbd>Ctrl+Shift+S</kbd></button>
+          </div>
+        </div>
+        <button class="icon-btn" id="btn-sidebar" title="侧边栏 (Ctrl+B)">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="1" y="2" width="14" height="12" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M6 2v12" stroke="currentColor" stroke-width="1.4"/></svg>
+        </button>
+        <div class="tb-divider"></div>
+        <div class="file-title" id="file-title">未打开文件</div>
+        <span class="dirty-dot" id="dirty-dot" title="未保存" hidden></span>
+      </div>
+      <div class="tb-center">
+        <div class="mode-switch" role="tablist">
+          <button class="mode-btn active" data-mode="preview" title="阅读模式">阅读</button>
+          <button class="mode-btn" data-mode="split" title="分栏编辑">分栏</button>
+          <button class="mode-btn" data-mode="source" title="源码编辑">源码</button>
+        </div>
+      </div>
+      <div class="tb-right">
+        <button class="icon-btn" id="btn-find" title="查找 (Ctrl+F)">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.4"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        </button>
+        <button class="icon-btn" id="btn-outline" title="大纲">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M3 8h7M3 12h10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        </button>
+        <div class="menu-wrap">
+          <button class="icon-btn" id="btn-theme" title="选择主题" aria-haspopup="true">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" id="icon-sun"><circle cx="8" cy="8" r="3" stroke="currentColor" stroke-width="1.4"/><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.05 3.05l1.06 1.06M11.89 11.89l1.06 1.06M3.05 12.95l1.06-1.06M11.89 4.11l1.06-1.06" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          </button>
+          <div class="file-menu align-right" id="theme-menu" hidden>
+            <button class="menu-item" data-theme-choice="light">浅色</button>
+            <button class="menu-item" data-theme-choice="dark">深色</button>
+            <button class="menu-item" data-theme-choice="sepia">羊皮纸</button>
+            <button class="menu-item" data-theme-choice="minion">小黄人</button>
+            <button class="menu-item" data-theme-choice="wallpaper">壁纸</button>
+          </div>
+        </div>
+        <div class="menu-wrap">
+          <button class="icon-btn" id="btn-more-menu" title="更多：导出、打印、窗口" aria-haspopup="true">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="3.5" cy="8" r="1.2" fill="currentColor"/><circle cx="8" cy="8" r="1.2" fill="currentColor"/><circle cx="12.5" cy="8" r="1.2" fill="currentColor"/></svg>
+          </button>
+          <div class="file-menu align-right" id="more-menu" hidden>
+            <button class="menu-item" data-action="export-html">导出 HTML… <kbd>Ctrl+E</kbd></button>
+            <button class="menu-item" data-action="print">打印 / 另存为 PDF… <kbd>Ctrl+P</kbd></button>
+            <div class="menu-sep"></div>
+            <button class="menu-item" data-action="new-window">新窗口打开当前文档</button>
+            <button class="menu-item" data-action="new-empty-window">新建空窗口</button>
+          </div>
+        </div>
+        <button class="icon-btn" id="btn-settings" title="设置">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="1.7"/>
+            <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.5 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.5a1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 .6 1.51 1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.14.37.36.7.64.97.28.27.64.44 1.03.49H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1.54Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Multi-tab bar (shown when open_mode = current_window) -->
+    <div id="tabbar" hidden>
+      <div id="tab-list" class="tab-list"></div>
+      <div class="tab-actions">
+        <button class="icon-btn sm" id="btn-tab-new" title="新建标签">＋</button>
+      </div>
+    </div>
+
+    <div id="main">
+      <!-- Sidebar -->
+      <aside id="sidebar" class="open">
+        <div class="side-tabs">
+          <button class="side-tab active" data-panel="files">文件</button>
+          <button class="side-tab" data-panel="outline">大纲</button>
+        </div>
+
+        <div class="side-panel active" id="panel-files">
+          <div class="folder-bar">
+            <span id="folder-name" title="当前文件夹">最近 / 欢迎</span>
+            <button class="icon-btn sm" id="btn-refresh-folder" title="刷新">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M13 8a5 5 0 11-1.5-3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M13 2v3h-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+          </div>
+          <div id="file-tree" class="file-tree"></div>
+        </div>
+
+        <div class="side-panel" id="panel-outline">
+          <div id="outline-list" class="outline-list">
+            <div class="empty-hint">打开文件后显示大纲</div>
+          </div>
+        </div>
+      </aside>
+
+      <div id="sidebar-resizer"></div>
+
+      <!-- Content -->
+      <section id="content">
+        <!-- Find bar -->
+        <div id="find-bar" hidden>
+          <div class="find-row">
+            <input type="text" id="find-input" placeholder="查找…" />
+            <input type="text" id="replace-input" placeholder="替换为…" />
+            <button class="btn sm" id="btn-find-next">下一个</button>
+            <button class="btn sm" id="btn-find-prev">上一个</button>
+            <button class="btn sm" id="btn-replace">替换</button>
+            <button class="btn sm" id="btn-replace-all">全部</button>
+            <button class="icon-btn sm" id="btn-find-close" title="关闭">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Welcome -->
+        <div id="welcome" class="welcome">
+          <div class="welcome-card">
+            <div class="logo-mark">M↓</div>
+            <h1>StuartMD</h1>
+            <p class="sub">简约美观的 Markdown 阅读与编辑器</p>
+            <div class="welcome-actions">
+              <button class="btn primary" id="w-open">打开文件</button>
+              <button class="btn" id="w-folder">打开文件夹</button>
+              <button class="btn" id="w-new">新建文档</button>
+              <button class="btn" id="w-sample">打开示例</button>
+            </div>
+            <div class="shortcuts">
+              <div><kbd>Ctrl</kbd>+<kbd>O</kbd> 打开</div>
+              <div><kbd>Ctrl</kbd>+<kbd>S</kbd> 保存</div>
+              <div><kbd>Ctrl</kbd>+<kbd>B</kbd> 侧栏</div>
+              <div><kbd>Ctrl</kbd>+<kbd>F</kbd> 查找</div>
+              <div><kbd>Ctrl</kbd>+<kbd>1</kbd>/<kbd>2</kbd>/<kbd>3</kbd> 模式</div>
+              <div><kbd>Ctrl</kbd>+<kbd>E</kbd> 导出</div>
+              <div><kbd>Ctrl</kbd>+<kbd>P</kbd> 打印</div>
+              <div><kbd>Ctrl</kbd>+<kbd>T</kbd> 主题</div>
+            </div>
+            <div id="recent-list" class="recent-list"></div>
+          </div>
+        </div>
+
+        <!-- Editor area -->
+        <div id="editor-area" hidden>
+          <div id="source-pane" class="pane">
+            <textarea id="source" spellcheck="false" placeholder="在此输入 Markdown…"></textarea>
+          </div>
+          <div id="split-resizer" hidden></div>
+          <div id="preview-pane" class="pane">
+            <div class="preview-hint">点击段落即可直接编辑</div>
+            <article id="preview" class="markdown-body"></article>
+          </div>
+        </div>
+
+        <!-- PDF viewer area -->
+        <div id="pdf-area" hidden>
+          <div id="pdf-toolbar">
+            <div class="pdf-tb-left">
+              <button class="icon-btn sm" id="pdf-prev" title="上一页">◀</button>
+              <input type="number" id="pdf-page-input" min="1" value="1" title="页码" />
+              <span id="pdf-page-label">/ 1</span>
+              <button class="icon-btn sm" id="pdf-next" title="下一页">▶</button>
+              <button class="icon-btn sm" id="pdf-zoom-out" title="缩小">−</button>
+              <button class="icon-btn sm" id="pdf-zoom-in" title="放大">＋</button>
+              <button class="icon-btn sm" id="pdf-fit" title="适应宽度">宽</button>
+              <button class="icon-btn sm" id="pdf-fit-h" title="适应高度">高</button>
+              <button class="icon-btn sm" id="pdf-rotate" title="旋转 90°">转</button>
+            </div>
+            <div class="pdf-tb-right">
+              <button class="btn sm" id="pdf-highlight" title="选中文字后标黄">标黄</button>
+              <button class="btn sm" id="pdf-copy" title="复制选中文本">复制</button>
+              <button class="btn sm" id="pdf-erase" title="点击高亮以擦除">擦除</button>
+              <button class="btn sm" id="pdf-clear" title="清除全部高亮">清除</button>
+            </div>
+          </div>
+          <div id="pdf-scroll" class="pane"></div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Status bar -->
+    <footer id="statusbar">
+      <div class="status-left">
+        <span id="status-path">—</span>
+      </div>
+      <div class="status-right">
+        <span id="status-autosave">自动保存：开</span>
+        <span class="sep">·</span>
+        <span id="status-words">0 字</span>
+        <span class="sep">·</span>
+        <span id="status-lines">0 行</span>
+        <span class="sep">·</span>
+        <span id="status-mode">阅读</span>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" hidden></div>
+
+  <!-- Settings modal -->
+  <div id="settings-modal" class="modal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2>设置</h2>
+        <button class="icon-btn sm" id="btn-settings-close" title="关闭">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <section class="set-section">
+          <h3>默认打开方式</h3>
+          <p class="hint" id="assoc-status">正在检查关联状态…</p>
+          <div class="row">
+            <button class="btn primary" id="btn-register-md">注册为 Markdown 打开程序</button>
+            <button class="btn" id="btn-default-apps">打开系统默认应用设置</button>
+          </div>
+          <p class="hint small">注册后，系统「打开方式」中会出现 StuartMD；若要成为双击默认，还需在系统设置中选择一次。</p>
+        </section>
+        <section class="set-section">
+          <h3>应用信息</h3>
+          <div class="kv" id="app-info-kv"></div>
+        </section>
+        <section class="set-section">
+          <h3>数据目录</h3>
+          <p class="hint" id="data-dir-path">—</p>
+          <div class="row">
+            <button class="btn" id="btn-open-data">打开设置目录</button>
+          </div>
+        </section>
+        <section class="set-section">
+          <h3>更新</h3>
+          <div class="row">
+            <button class="btn" id="btn-check-update">检查更新</button>
+            <button class="btn" id="btn-open-releases">打开发布页</button>
+          </div>
+          <p class="hint small" id="update-status">当前版本 — · 升级不会丢失设置与插件</p>
+        </section>
+        <section class="set-section">
+          <h3 data-i18n="language">语言</h3>
+          <div class="row">
+            <button class="btn lang-pick" data-lang="zh-CN">简体中文</button>
+            <button class="btn lang-pick" data-lang="zh-TW">繁體中文</button>
+            <button class="btn lang-pick" data-lang="en-US">English</button>
+          </div>
+        </section>
+        <section class="set-section">
+          <h3 data-i18n="theme">外观</h3>
+          <div class="row">
+            <button class="btn theme-pick" data-theme="light" data-i18n="light">浅色</button>
+            <button class="btn theme-pick" data-theme="dark" data-i18n="dark">深色</button>
+            <button class="btn theme-pick" data-theme="sepia" data-i18n="sepia">羊皮纸</button>
+            <button class="btn theme-pick" data-theme="minion" data-i18n="minion">小黄人</button>
+            <button class="btn theme-pick" data-theme="wallpaper" data-i18n="wallpaper">壁纸</button>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <button class="btn" id="btn-upload-wallpaper" data-i18n="uploadWallpaper">上传壁纸图片…</button>
+            <button class="btn" id="btn-clear-wallpaper" data-i18n="clearWallpaper">移除壁纸</button>
+          </div>
+          <input type="file" id="wallpaper-input" accept="image/*" hidden />
+          <p class="hint small" data-i18n="wallpaperHint">上传图片后自动提取主色，用于界面强调色。</p>
+          <div id="wallpaper-preview" class="wallpaper-preview" hidden></div>
+        </section>
+        <section class="set-section">
+          <h3 data-i18n="plugins">插件</h3>
+          <p class="hint small" data-i18n="pluginHint">将 .js 插件放入插件目录后重启，即可即插即用。</p>
+          <div class="row">
+            <button class="btn" id="btn-open-plugins" data-i18n="openPluginDir">打开插件目录</button>
+          </div>
+          <div id="plugin-list" class="plugin-list"></div>
+        </section>
+        <section class="set-section">
+          <h3>打开方式</h3>
+          <div class="row">
+            <button class="btn open-mode-pick" data-open-mode="smart">智能（推荐）</button>
+            <button class="btn open-mode-pick" data-open-mode="new_window">始终新窗口</button>
+            <button class="btn open-mode-pick" data-open-mode="current_window">始终当前窗口标签页</button>
+          </div>
+          <p class="hint small">智能：空窗口/仅示例时在当前窗口打开；同文件夹树内文件用标签；路径外文件用新窗口。左侧目录点击始终在当前窗口打开。</p>
+        </section>
+        <section class="set-section">
+          <h3>编辑</h3>
+          <div class="row">
+            <button class="btn" id="btn-autosave">自动保存：开</button>
+          </div>
+          <p class="hint small">开启后，已保存路径的文档会在停止输入约 1.5 秒后自动写入磁盘。</p>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <script src="libs/markdown-it.min.js"></script>
+  <script src="libs/markdown-it-task-lists.min.js"></script>
+  <script src="libs/highlight.min.js"></script>
+  <script src="libs/katex.min.js"></script>
+  <script src="libs/auto-render.min.js"></script>
+  <script src="libs/mermaid.min.js"></script>
+  <script src="libs/pdf.min.js"></script>
+  <script src="js/i18n.js"></script>
+  <script src="js/plugins.js"></script>
+  <script src="js/pdf-viewer.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

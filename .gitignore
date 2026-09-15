@@ -1,0 +1,25 @@
+# Build / installers
+build/
+dist/
+dist-installer/
+*.spec.bak
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# User settings (local)
+settings.json
+*.log
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Editor
+.idea/
+.vscode/
+*.swp
