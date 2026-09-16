@@ -1,4 +1,4 @@
-[package]
+﻿[package]
 name = "stuartmd"
 version = "1.8.0"
 description = "StuartMD desktop shell (P2 scaffold)"
