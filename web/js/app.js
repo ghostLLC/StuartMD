@@ -156,6 +156,15 @@
     return blocks.join("\n\n");
   }
 
+  function blockNeedsPostProcess(block) {
+    // Skip KaTeX / image resolve on plain paragraphs for speed
+    if (!block) return false;
+    if (block.indexOf("$") >= 0) return true;
+    if (block.indexOf("\\(") >= 0 || block.indexOf("\\[") >= 0) return true;
+    if (/!\[[^\]]*\]\(/.test(block)) return true;
+    return false;
+  }
+
   function createBlockNode(block, index) {
     const wrap = document.createElement("div");
     wrap.className = "md-block";
@@ -186,9 +195,11 @@
         });
       } catch (_) {}
     }
-    $$("img", node).forEach((img) => {
+    const imgs = node.getElementsByTagName("img");
+    for (let i = 0; i < imgs.length; i++) {
+      const img = imgs[i];
       const src = img.getAttribute("src") || "";
-      if (!src || src.startsWith("http") || src.startsWith("data:") || src.startsWith("file:")) return;
+      if (!src || src.startsWith("http") || src.startsWith("data:") || src.startsWith("file:")) continue;
       if (state.apiReady && state.path && window.pywebview?.api?.resolve_asset) {
         window.pywebview.api
           .resolve_asset(state.path, src)
@@ -197,7 +208,7 @@
           })
           .catch(() => {});
       }
-    });
+    }
   }
 
   function applyBlockEditing() {
@@ -213,7 +224,6 @@
     const prev = lastPreviewBlocks;
     const childNodes = () => [...el.preview.children].filter((n) => n.classList?.contains("md-block"));
 
-    // Full rebuild when first paint or structure changed too much
     let prefix = 0;
     const minLen = Math.min(prev.length, blocks.length);
     while (prefix < minLen && prev[prefix] === blocks[prefix]) prefix++;
@@ -232,52 +242,41 @@
       const frag = document.createDocumentFragment();
       blocks.forEach((block, index) => {
         const wrap = createBlockNode(block, index);
-        postProcessBlock(wrap);
+        if (blockNeedsPostProcess(block)) postProcessBlock(wrap);
         frag.appendChild(wrap);
       });
       el.preview.appendChild(frag);
     } else {
-      // Reuse prefix nodes; rebuild middle; reuse suffix nodes
-      let kids = childNodes();
-      // Ensure we have at least prefix nodes
-      while (kids.length < prefix) {
-        const wrap = createBlockNode(blocks[kids.length], kids.length);
-        el.preview.appendChild(wrap);
-        kids = childNodes();
-      }
-      // Remove extra nodes after common suffix from the end of "change region"
-      // Strategy: rebuild from prefix to (len - suffix)
-      const keepTailCount = suffix;
       const total = blocks.length;
-      // Drop all nodes from prefix onward, keep first prefix
+      const keepTailCount = suffix;
+      const existing = childNodes();
+      // Detach suffix nodes for reuse (avoid re-layout of unchanged tail)
+      const suffixNodes = existing.slice(existing.length - keepTailCount);
       while (el.preview.children.length > prefix) {
         el.preview.removeChild(el.preview.lastElementChild);
       }
       const frag = document.createDocumentFragment();
       for (let i = prefix; i < total - keepTailCount; i++) {
         const wrap = createBlockNode(blocks[i], i);
-        postProcessBlock(wrap);
+        if (blockNeedsPostProcess(blocks[i])) postProcessBlock(wrap);
         frag.appendChild(wrap);
       }
-      // re-create suffix (safer than moving, content may be same but indices shift)
-      for (let i = total - keepTailCount; i < total; i++) {
-        const wrap = createBlockNode(blocks[i], i);
-        // suffix rarely needs katex re-run but cheap enough for correctness
-        postProcessBlock(wrap);
-        frag.appendChild(wrap);
+      for (let i = 0; i < suffixNodes.length; i++) {
+        const node = suffixNodes[i];
+        node.dataset.index = String(total - keepTailCount + i);
+        frag.appendChild(node);
       }
       el.preview.appendChild(frag);
-      // fix prefix indices
       const all = childNodes();
       for (let i = 0; i < all.length; i++) {
         all[i].dataset.index = String(i);
       }
     }
 
-    // Mermaid only when mermaid sources exist in changed set or full rebuild
+    const midStart = prefix;
+    const midEnd = blocks.length - suffix;
     const needMermaid =
-      heavy ||
-      blocks.slice(prefix, blocks.length - suffix).some((b) => /```\s*mermaid/i.test(b));
+      heavy || blocks.slice(midStart, midEnd).some((b) => /```\s*mermaid/i.test(b));
     if (needMermaid) renderMermaid();
 
     lastPreviewBlocks = blocks;
