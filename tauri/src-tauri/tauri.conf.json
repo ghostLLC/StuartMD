@@ -1,0 +1,36 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "StuartMD",
+  "version": "1.8.0",
+  "identifier": "com.stuartmd.app",
+  "build": {
+    "frontendDist": "../../web",
+    "devUrl": null
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "StuartMD",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 900,
+        "minHeight": 580,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "../../assets/app.ico"
+    ],
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper" }
+    }
+  }
+}
