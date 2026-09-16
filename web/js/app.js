@@ -91,6 +91,19 @@
 
   let renderTimer = null;
   let previewScrollRatio = 0;
+  /** P0: skip full preview rebuild when content is unchanged */
+  let lastPreviewSource = null;
+  let lastOutlineSig = "";
+  let lastTreePath = null;
+  let mermaidIdleId = null;
+
+  function scheduleIdle(fn) {
+    if (typeof requestIdleCallback === "function") {
+      const id = requestIdleCallback(fn, { timeout: 400 });
+      return () => cancelIdleCallback(id);
+    }
+    return setTimeout(fn, 50);
+  }
 
   function splitMarkdownBlocks(text) {
     const src = text || "";
@@ -602,6 +615,19 @@
   function renderMermaid() {
     const nodes = $$("pre.mermaid-src[data-mermaid]", el.preview);
     if (!nodes.length) return;
+    if (mermaidIdleId) {
+      if (typeof cancelIdleCallback === "function") cancelIdleCallback(mermaidIdleId);
+      else clearTimeout(mermaidIdleId);
+    }
+    // Defer expensive SVG layout off the critical paint path
+    mermaidIdleId = scheduleIdle(() => {
+      mermaidIdleId = null;
+      runMermaidRender(nodes);
+    });
+  }
+
+  function runMermaidRender(nodes) {
+    if (!nodes.length || !document.contains(nodes[0])) return;
     (async () => {
       const ok = await ensureMermaid();
       if (!ok || !window.mermaid) {
@@ -647,10 +673,17 @@
       const len = (el.source.value || "").length;
       const delay = len > 20000 ? 220 : len > 6000 ? 140 : 80;
       scheduleRender._t = setTimeout(() => {
+        const next = el.source.value;
+        // P0: identical content → skip expensive DOM rebuild
+        if (next === lastPreviewSource) {
+          updateStats();
+          return;
+        }
         const pane = el.previewPane;
         const max = pane.scrollHeight - pane.clientHeight;
         previewScrollRatio = max > 0 ? pane.scrollTop / max : 0;
-        renderMarkdown(el.source.value);
+        renderMarkdown(next);
+        lastPreviewSource = next;
         const newMax = pane.scrollHeight - pane.clientHeight;
         pane.scrollTop = previewScrollRatio * newMax;
       }, delay);
@@ -673,6 +706,12 @@
   // ---------- Outline ----------
   function updateOutline() {
     const heads = $$("h1,h2,h3,h4,h5,h6", el.preview);
+    let sig = "";
+    for (let i = 0; i < heads.length; i++) {
+      sig += heads[i].tagName + "|" + (heads[i].textContent || "") + "\n";
+    }
+    if (sig === lastOutlineSig) return;
+    lastOutlineSig = sig;
     if (!heads.length) {
       el.outlineList.innerHTML = `<div class="empty-hint">暂无大纲</div>`;
       return;
@@ -824,6 +863,7 @@
     el.statusPath.textContent = path || "未保存文档";
     updateWindowTitle();
     renderMarkdown(state.content);
+    lastPreviewSource = state.content;
     markActiveTreeItem();
     updatePinUi();
   }
@@ -840,12 +880,14 @@
   }
 
   function setContent(text, fromUser) {
-    el.source.value = text;
-    state.content = text;
+    if (el.source.value !== text) el.source.value = text;
+    if (state.content !== text) state.content = text;
     if (fromUser) {
       markDirty();
       scheduleAutoSave();
     }
+    // Always refresh word count; preview render is debounced & skipped if unchanged
+    updateStats();
     scheduleRender();
   }
 
@@ -1597,6 +1639,9 @@
   }
 
   function markActiveTreeItem() {
+    // P0: skip full tree walk when active path is unchanged
+    if (state.path === lastTreePath) return;
+    lastTreePath = state.path;
     $$(".tree-item.file").forEach((n) => {
       n.classList.toggle("active", !!state.path && n.dataset.path === state.path);
     });
