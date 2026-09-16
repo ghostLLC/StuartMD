@@ -785,7 +785,9 @@
     } else if (payload?.welcome || isWelcomeOrSamplePath(path, name)) {
       state.isSampleDoc = true;
     }
-    if (kind === "pdf" || (path && String(path).toLowerCase().endsWith(".pdf"))) {
+    // Hide welcome whenever a real document is applied
+    el.welcome.hidden = true;
+    if (kind === "pdf" || b64 || (path && String(path).toLowerCase().endsWith(".pdf"))) {
       state.path = path || null;
       state.name = name || "文档.pdf";
       state.content = "";
@@ -2538,12 +2540,18 @@ flowchart LR
         window.dispatchEvent(new CustomEvent("stuart-ready"));
         if (info?.startup_file) {
           const res = await window.pywebview.api.open_path(info.startup_file);
-          if (res?.kind === "pdf" || res?.b64) {
-            setDocument(res);
-          } else if (res?.kind === "file" && res.content != null) {
-            setDocument(res);
+          if (res?.error) {
+            toast(res.error);
           } else if (res?.kind === "folder") {
             await loadFolder(res.path);
+          } else if (res?.b64 || res?.content != null) {
+            // Always open documents from CLI / file association
+            if (state.openMode === "current_window" || state.tabs.length) {
+              await addOrFocusTab(res);
+            } else {
+              setDocument(res);
+            }
+            if (res.path) setWorkspaceFromPath(res.path);
           }
         } else if (window.pywebview.api.open_welcome) {
           const welcome = await window.pywebview.api.open_welcome();

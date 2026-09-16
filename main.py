@@ -15,7 +15,7 @@ import webview
 
 APP_NAME = "StuartMD"
 APP_ID = "StuartMD"
-VERSION = "1.4.0"
+VERSION = "1.4.1"
 PUBLISHER = "StuartMD"
 PROG_ID = "StuartMD.Markdown"
 GITHUB_REPO = "ghostLLC/StuartMD"
@@ -753,7 +753,14 @@ class API:
             self.settings["last_folder"] = str(p)
             self.save_settings({})
             return {"kind": "folder", "path": str(p)}
-        return {"kind": "file", **self.read_file(str(p))}
+        data = self.read_file(str(p))
+        if data.get("error"):
+            return data
+        # read_file sets kind=markdown/pdf; keep a stable kind= for boot
+        data["kind"] = data.get("kind") or ("pdf" if p.suffix.lower() == ".pdf" else "file")
+        if data["kind"] not in ("pdf", "markdown"):
+            data["kind"] = "markdown" if p.suffix.lower() != ".pdf" else "pdf"
+        return data
 
     # ---------- Windows file association ----------
     def get_file_association_status(self) -> dict:
