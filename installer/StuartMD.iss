@@ -2,7 +2,7 @@
 ; Build: ISCC.exe installer\StuartMD.iss
 
 #define MyAppName "StuartMD"
-#define MyAppVersion "1.4.1"
+#define MyAppVersion "1.4.2"
 #define MyAppPublisher "StuartMD"
 #define MyAppURL "https://github.com/ghostLLC/StuartMD"
 #define MyAppExeName "StuartMD.exe"

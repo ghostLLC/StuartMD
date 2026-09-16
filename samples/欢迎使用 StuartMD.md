@@ -4,7 +4,7 @@
 
 **项目仓库：** [https://github.com/ghostLLC/StuartMD](https://github.com/ghostLLC/StuartMD)
 
-**当前版本：** 1.4.1
+**当前版本：** 1.4.2
 
 ---
 
@@ -108,7 +108,7 @@ flowchart LR
 ## 安装说明
 
 - 安装向导可**自定义安装路径**（默认 `%LOCALAPPDATA%\Programs\StuartMD`，也可改到任意目录）
-- 静默安装示例：`StuartMD-Setup-1.4.1.exe /VERYSILENT /DIR="D:\Apps\StuartMD"`
+- 静默安装示例：`StuartMD-Setup-1.4.2.exe /VERYSILENT /DIR="D:\Apps\StuartMD"`
 - 设置中可**检查更新**；升级时配置、插件、壁纸会自动迁移
 - 欢迎与问题反馈：[GitHub Issues](https://github.com/ghostLLC/StuartMD/issues)
 

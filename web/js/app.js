@@ -1264,7 +1264,12 @@
       toast("桌面桥接尚未就绪");
       return;
     }
-    await openDocumentSmart(path, opts);
+    try {
+      await openDocumentSmart(path, opts);
+    } catch (err) {
+      console.error("openFile failed", path, err);
+      toast("打开失败：" + (err && err.message ? err.message : err));
+    }
   }
 
   async function openInNewWindow(path) {
@@ -1387,6 +1392,12 @@
     const res = await window.pywebview.api.read_dir_tree(path);
     if (res?.error) {
       toast(res.error);
+      // Stale last_folder from an older install/machine
+      try {
+        await window.pywebview.api.save_settings({ last_folder: "" });
+      } catch (_) {}
+      el.folderName.textContent = "最近 / 欢迎";
+      el.fileTree.innerHTML = `<div class="empty-hint">目录不可用，请重新打开文件夹</div>`;
       return;
     }
     state.folder = res.path;
@@ -1396,6 +1407,53 @@
     renderTree(res.items || [], el.fileTree, 0);
     toggleSidebar(true);
     showSidebarPanel("files");
+  }
+
+  function bindTreeDelegates() {
+    if (el.fileTree.dataset.delegated === "1") return;
+    el.fileTree.dataset.delegated = "1";
+
+    el.fileTree.addEventListener("click", (e) => {
+      const dir = e.target.closest(".tree-item.dir");
+      if (dir) {
+        const kids = dir.nextElementSibling;
+        if (kids && kids.classList.contains("tree-children")) {
+          const open = kids.classList.toggle("open");
+          dir.classList.toggle("expanded", open);
+        }
+        return;
+      }
+      const file = e.target.closest(".tree-item.file");
+      if (!file) return;
+      const path = file.dataset.path || "";
+      if (!path) {
+        toast("无效的文件路径");
+        return;
+      }
+      if (e.ctrlKey || e.metaKey || e.button === 1) {
+        e.preventDefault();
+        openInNewWindow(path);
+        return;
+      }
+      openFile(path, { fromTree: true }).catch((err) => {
+        toast("打开失败：" + (err && err.message ? err.message : err));
+      });
+    });
+
+    el.fileTree.addEventListener("auxclick", (e) => {
+      if (e.button !== 1) return;
+      const file = e.target.closest(".tree-item.file");
+      if (!file) return;
+      e.preventDefault();
+      openInNewWindow(file.dataset.path || "");
+    });
+
+    el.fileTree.addEventListener("contextmenu", (e) => {
+      const file = e.target.closest(".tree-item.file");
+      if (!file) return;
+      e.preventDefault();
+      openInNewWindow(file.dataset.path || "");
+    });
   }
 
   function renderTree(items, container, depth) {
@@ -1414,37 +1472,17 @@
         const kids = document.createElement("div");
         kids.className = "tree-children";
         if (item.children?.length) renderTree(item.children, kids, depth + 1);
-        row.addEventListener("click", () => {
-          const open = kids.classList.toggle("open");
-          row.classList.toggle("expanded", open);
-        });
+        // expand/collapse via delegated click on #file-tree
         container.appendChild(row);
         container.appendChild(kids);
       } else {
         const row = document.createElement("div");
         row.className = "tree-item file";
-        row.dataset.path = item.path;
+        row.dataset.path = item.path || "";
         row.style.paddingLeft = `${8 + depth * 14 + 14}px`;
         row.textContent = item.name;
         row.title = `${item.path}（中键或右键：新窗口打开）`;
-        row.addEventListener("click", (e) => {
-          if (e.button === 1 || e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            openInNewWindow(item.path);
-            return;
-          }
-          openFile(item.path, { fromTree: true });
-        });
-        row.addEventListener("auxclick", (e) => {
-          if (e.button === 1) {
-            e.preventDefault();
-            openInNewWindow(item.path);
-          }
-        });
-        row.addEventListener("contextmenu", (e) => {
-          e.preventDefault();
-          openInNewWindow(item.path);
-        });
+        // Delegated on #file-tree — bound once in bindTreeDelegates
         container.appendChild(row);
       }
     });
@@ -2502,6 +2540,7 @@ flowchart LR
     bindEvents();
     bindSettingsEvents();
     bindTabBar();
+    bindTreeDelegates();
     updateAutosaveStatus();
     renderTabs();
 
@@ -2515,7 +2554,18 @@ flowchart LR
         state.openMode = s.open_mode;
       }
       if (s?.last_folder) {
-        await loadFolder(s.last_folder);
+        // Restore folder tree across versions if the path still exists
+        try {
+          const exists = await window.pywebview.api.file_exists(s.last_folder);
+          if (exists) {
+            await loadFolder(s.last_folder);
+          } else {
+            el.folderName.textContent = "最近 / 欢迎";
+            await window.pywebview.api.save_settings({ last_folder: "" });
+          }
+        } catch (_) {
+          await loadFolder(s.last_folder);
+        }
       }
       await refreshRecents();
       renderTabs();
