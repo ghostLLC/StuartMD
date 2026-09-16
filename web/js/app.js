@@ -106,6 +106,8 @@
   }
 
   function splitMarkdownBlocks(text) {
+    const core = CoreDoc();
+    if (core) return core.splitMarkdownBlocks(text);
     const src = text || "";
     if (!src.trim()) return [];
     const lines = src.split("\n");
@@ -147,6 +149,8 @@
   }
 
   function joinBlocks(blocks) {
+    const core = CoreDoc();
+    if (core) return core.joinBlocks(blocks);
     return blocks.join("\n\n");
   }
 
@@ -735,9 +739,10 @@
 
   // ---------- Stats ----------
   function updateStats() {
+    const core = CoreDoc();
     const text = el.source.value || "";
-    const chars = text.replace(/\s/g, "").length;
-    const lines = text ? text.split("\n").length : 0;
+    const chars = core ? core.countChars(text) : text.replace(/\s/g, "").length;
+    const lines = core ? core.countLines(text) : text ? text.split("\n").length : 0;
     el.statusWords.textContent = `${chars} 字`;
     el.statusLines.textContent = `${lines} 行`;
   }
@@ -1195,8 +1200,14 @@
     }
   }
 
+  const CorePaths = () => (window.StuartCore && window.StuartCore.paths) || null;
+  const CoreDoc = () => (window.StuartCore && window.StuartCore.docStats) || null;
+  const CoreSettings = () => (window.StuartCore && window.StuartCore.settings) || null;
+
   function isWelcomeOrSamplePath(path, name) {
-    // Pure path/name check — must NOT call hasRealDocument() (infinite recursion)
+    const core = CorePaths();
+    if (core) return core.isWelcomeOrSamplePath(path, name);
+    // Fallback (kept for browser without core script)
     const p = String(path || "").toLowerCase().replace(/\//g, "\\");
     const n = String(name || "");
     if (n === "欢迎使用 StuartMD.md" || n === "示例文档.md") return true;
@@ -1210,12 +1221,16 @@
   }
 
   function hasRealDocument() {
-    const isSample = (t) => t.path && !isWelcomeOrSamplePath(t.path, t.name);
-    return state.tabs.some(isSample) ||
-      (!!state.path && !isWelcomeOrSamplePath(state.path, state.name));
+    const core = CorePaths();
+    if (core) return core.hasRealDocument(state.tabs, state.path, state.name);
+    return state.tabs.some(
+      (t) => t.path && !isWelcomeOrSamplePath(t.path, t.name)
+    ) || (!!state.path && !isWelcomeOrSamplePath(state.path, state.name));
   }
 
   function parentDir(p) {
+    const core = CorePaths();
+    if (core) return core.parentDir(p);
     if (!p) return "";
     const parts = String(p).split(/[\\/]/);
     parts.pop();
@@ -1223,6 +1238,8 @@
   }
 
   function pathEqualsOrUnder(child, root) {
+    const core = CorePaths();
+    if (core) return core.pathEqualsOrUnder(child, root);
     if (!child || !root) return false;
     const c = String(child).replace(/\//g, "\\").toLowerCase();
     const r = String(root).replace(/\//g, "\\").toLowerCase().replace(/\\+$/, "");
@@ -1230,6 +1247,8 @@
   }
 
   function workspaceRoot() {
+    const core = CorePaths();
+    if (core) return core.workspaceRootFrom(state);
     if (state.workspaceRoot) return state.workspaceRoot;
     if (state.folder) return state.folder;
     const real = state.tabs.find((t) => t.path && !isWelcomeOrSamplePath(t.path, t.name));
@@ -2739,6 +2758,9 @@ flowchart LR
       if (s?.language && window.StuartI18n) window.StuartI18n.setLang(s.language);
       if (s?.open_mode === "current_window" || s?.open_mode === "new_window" || s?.open_mode === "smart") {
         state.openMode = s.open_mode;
+      }
+      if (CoreSettings()?.isValidOpenMode && s?.open_mode) {
+        if (CoreSettings().isValidOpenMode(s.open_mode)) state.openMode = s.open_mode;
       }
       if (s?.new_doc_mode === "tab" || s?.new_doc_mode === "new_window") {
         state.newDocMode = s.new_doc_mode;
