@@ -3,8 +3,8 @@
   "use strict";
 
   const PRESETS = [
-    { id: "rain", name: "细雨", url: "audio/rain.wav" },
-    { id: "fire", name: "壁炉", url: "audio/fire.wav" },
+    { id: "rain", name: "细雨", url: "audio/rain.mp3", fallback: "audio/rain.wav" },
+    { id: "fire", name: "壁炉", url: "audio/fire.mp3", fallback: "audio/fire.wav" },
     { id: "library", name: "静室", url: "audio/library.wav" },
   ];
 
@@ -29,6 +29,18 @@
     if (state.currentId === "custom" && state.customUrl) return state.customUrl;
     const p = PRESETS.find((x) => x.id === state.currentId) || PRESETS[0];
     return p.url;
+  }
+
+  function bindFallback(p) {
+    if (!p || !p.fallback) return;
+    audio.onerror = () => {
+      if (audio.dataset.fallbackTried === p.id) return;
+      audio.dataset.fallbackTried = p.id;
+      audio.onerror = null;
+      audio.src = p.fallback;
+      audio.load();
+      if (state.playing) audio.play().catch(() => {});
+    };
   }
 
   function renderList() {
@@ -107,7 +119,9 @@
     state.currentId = id;
     const src = currentSrc();
     const was = state.playing;
+    audio.dataset.fallbackTried = "";
     audio.src = src;
+    bindFallback(PRESETS.find((x) => x.id === id));
     audio.load();
     if (was) {
       audio.play().catch(() => {});
