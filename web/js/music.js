@@ -44,12 +44,25 @@
       box.appendChild(b);
     });
     if (state.customName) {
+      const row = document.createElement("div");
+      row.className = "music-item-row";
       const b = document.createElement("button");
       b.type = "button";
       b.className = "music-item" + (state.currentId === "custom" ? " active" : "");
       b.textContent = state.customName;
       b.addEventListener("click", () => selectTrack("custom"));
-      box.appendChild(b);
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "music-item-del";
+      del.title = "移除本地音乐";
+      del.textContent = "×";
+      del.addEventListener("click", (e) => {
+        e.stopPropagation();
+        removeCustom();
+      });
+      row.appendChild(b);
+      row.appendChild(del);
+      box.appendChild(row);
     }
   }
 
@@ -71,6 +84,23 @@
       musicBtn.classList.toggle("active", state.playing);
       musicBtn.title = state.playing ? "暂停音乐" : "白噪音 / 音乐";
     }
+  }
+
+  function removeCustom() {
+    if (state.currentId === "custom") {
+      state.playing = false;
+      audio.pause();
+      state.currentId = PRESETS[0].id;
+      audio.src = currentSrc();
+      updateToggle();
+    }
+    if (state.customUrl) {
+      URL.revokeObjectURL(state.customUrl);
+      state.customUrl = null;
+    }
+    state.customName = "";
+    renderList();
+    persist();
   }
 
   function selectTrack(id) {

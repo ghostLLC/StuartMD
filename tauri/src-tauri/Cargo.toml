@@ -1,6 +1,6 @@
-﻿[package]
+[package]
 name = "stuartmd"
-version = "1.8.0"
+version = "1.12.0"
 description = "StuartMD desktop shell (P2 scaffold)"
 authors = ["StuartMD"]
 edition = "2021"

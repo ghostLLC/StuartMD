@@ -205,6 +205,9 @@ body {
   color: var(--text);
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-synthesis: none;
 }
 
 #app {
@@ -1105,6 +1108,42 @@ kbd {
   color: var(--text);
   word-wrap: break-word;
   caret-color: #6b7280;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-kerning: normal;
+}
+
+.sel-toolbar {
+  position: fixed;
+  z-index: 120;
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.sel-toolbar[hidden] {
+  display: none !important;
+}
+
+.sel-toolbar button {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  min-width: 30px;
+  height: 28px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: var(--font-ui);
+}
+
+.sel-toolbar button:hover {
+  background: var(--bg-hover);
 }
 
 .markdown-body [contenteditable="true"] {
@@ -1731,6 +1770,35 @@ kbd {
 .music-item.active {
   background: var(--accent-soft);
   font-weight: 600;
+}
+
+.music-item-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.music-item-row .music-item {
+  flex: 1;
+  min-width: 0;
+}
+
+.music-item-del {
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.music-item-del:hover {
+  background: var(--bg-hover);
+  color: var(--danger, #c0392b);
 }
 
 .markdown-body a {

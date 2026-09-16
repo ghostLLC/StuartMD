@@ -284,6 +284,88 @@
     updateStats();
   }
 
+  function hideSelToolbar() {
+    const bar = document.getElementById("sel-toolbar");
+    if (bar) bar.hidden = true;
+  }
+
+  function showSelToolbarNear(rect) {
+    const bar = document.getElementById("sel-toolbar");
+    if (!bar || !rect) return;
+    bar.hidden = false;
+    const top = Math.max(8, rect.top - 44);
+    const left = Math.min(window.innerWidth - 260, Math.max(8, rect.left + rect.width / 2 - 100));
+    bar.style.top = top + "px";
+    bar.style.left = left + "px";
+  }
+
+  function applySelFormat(kind) {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) return;
+    const text = sel.toString();
+    if (!text) return;
+    // Prefer wrapping in source model when possible
+    if (state.mode !== "source") {
+      // Apply on DOM then commit block
+      try {
+        if (kind === "bold") document.execCommand("bold");
+        else if (kind === "italic") document.execCommand("italic");
+        else if (kind === "strike") document.execCommand("strikeThrough");
+        else if (kind === "code") document.execCommand("insertHTML", false, "<code>" + escapeHtml(text) + "</code>");
+        else if (kind === "ul") document.execCommand("insertUnorderedList");
+        else if (kind === "ol") document.execCommand("insertOrderedList");
+        else if (kind === "h2") document.execCommand("formatBlock", false, "h2");
+        const block = sel.anchorNode?.parentElement?.closest?.(".md-block");
+        if (block && !block.classList.contains("editing")) {
+          const idx = Number(block.dataset.index || 0);
+          const mdText = htmlToMarkdown(block).trim();
+          const all = splitMarkdownBlocks(el.source.value || "");
+          all[idx] = mdText || all[idx] || "";
+          setContent(joinBlocks(all), true);
+        }
+      } catch (_) {}
+      return;
+    }
+    // source mode wrap
+    if (kind === "bold") wrapSelection("**", "**");
+    else if (kind === "italic") wrapSelection("*", "*");
+    else if (kind === "strike") wrapSelection("~~", "~~");
+    else if (kind === "code") wrapSelection("`", "`");
+    else if (kind === "h2") setLineHeading(2);
+    else if (kind === "ul") toggleLineList(false);
+    else if (kind === "ol") toggleLineList(true);
+  }
+
+  function bindSelToolbar() {
+    const bar = document.getElementById("sel-toolbar");
+    if (!bar || bar.dataset.bound === "1") return;
+    bar.dataset.bound = "1";
+    bar.addEventListener("mousedown", (e) => e.preventDefault());
+    bar.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-sel]");
+      if (!btn) return;
+      applySelFormat(btn.dataset.sel);
+    });
+    document.addEventListener("mouseup", (e) => {
+      if (e.target.closest("#sel-toolbar")) return;
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !sel.toString().trim()) {
+        hideSelToolbar();
+        return;
+      }
+      const inPreview = el.preview.contains(e.target) || el.preview.contains(sel.anchorNode);
+      const inSource = el.source === document.activeElement;
+      if (!inPreview && !inSource) {
+        hideSelToolbar();
+        return;
+      }
+      showSelToolbarNear(sel.getRangeAt(0).getBoundingClientRect());
+    });
+    document.addEventListener("mousedown", (e) => {
+      if (!e.target.closest("#sel-toolbar")) hideSelToolbar();
+    });
+  }
+
   function bindPreviewDelegates() {
     if (el.preview.dataset.delegated === "1") return;
     el.preview.dataset.delegated = "1";
@@ -2278,13 +2360,13 @@ ${previewHtml}
       } else if (k === "e") {
         e.preventDefault();
         exportHtml();
-      } else if (k === "1") {
+      } else if (k === "1" && !e.shiftKey && !e.altKey) {
         e.preventDefault();
         setMode("preview");
-      } else if (k === "2") {
+      } else if (k === "2" && !e.shiftKey && !e.altKey) {
         e.preventDefault();
         setMode("split");
-      } else if (k === "3") {
+      } else if (k === "3" && !e.shiftKey && !e.altKey) {
         e.preventDefault();
         setMode("source");
       } else if (k === "t") {
@@ -2345,6 +2427,7 @@ ${previewHtml}
       }
     });
     bindPreviewDelegates();
+    bindSelToolbar();
   }
 
   function wrapSelection(pre, post) {
