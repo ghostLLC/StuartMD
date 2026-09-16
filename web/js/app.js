@@ -96,6 +96,8 @@
   let lastOutlineSig = "";
   let lastTreePath = null;
   let mermaidIdleId = null;
+  /** P3: last rendered markdown blocks for dirty update */
+  let lastPreviewBlocks = [];
 
   function scheduleIdle(fn) {
     if (typeof requestIdleCallback === "function") {
@@ -154,32 +156,25 @@
     return blocks.join("\n\n");
   }
 
-  function applyBlockEditing() {
-    if (state.mode === "source") return;
-    const raw = el.source.value || "";
-    const blocks = splitMarkdownBlocks(raw);
-    if (!blocks.length) return;
+  function createBlockNode(block, index) {
+    const wrap = document.createElement("div");
+    wrap.className = "md-block";
+    wrap.dataset.index = String(index);
+    let html = "";
+    try {
+      html = md.render(block);
+    } catch (e) {
+      html = `<pre>${escapeHtml(String(e))}</pre>`;
+    }
+    wrap.innerHTML = html;
+    return wrap;
+  }
 
-    // Rebuild preview as per-block rendered units
-    el.preview.innerHTML = "";
-    blocks.forEach((block, index) => {
-      const wrap = document.createElement("div");
-      wrap.className = "md-block";
-      wrap.dataset.index = String(index);
-      let html = "";
-      try {
-        html = md.render(block);
-      } catch (e) {
-        html = `<pre>${escapeHtml(String(e))}</pre>`;
-      }
-      wrap.innerHTML = html;
-      el.preview.appendChild(wrap);
-    });
-
-    // Post-process (katex/mermaid/images/links) on whole preview
+  function postProcessBlock(node) {
+    if (!node) return;
     if (window.renderMathInElement) {
       try {
-        renderMathInElement(el.preview, {
+        renderMathInElement(node, {
           delimiters: [
             { left: "$$", right: "$$", display: true },
             { left: "\\[", right: "\\]", display: true },
@@ -191,8 +186,7 @@
         });
       } catch (_) {}
     }
-    renderMermaid();
-    $$("img", el.preview).forEach((img) => {
+    $$("img", node).forEach((img) => {
       const src = img.getAttribute("src") || "";
       if (!src || src.startsWith("http") || src.startsWith("data:") || src.startsWith("file:")) return;
       if (state.apiReady && state.path && window.pywebview?.api?.resolve_asset) {
@@ -204,10 +198,89 @@
           .catch(() => {});
       }
     });
-    // Links handled by delegated listener on #preview (bound once)
+  }
 
-    // Block edit handled by delegated listeners (bound once)
+  function applyBlockEditing() {
+    if (state.mode === "source") return;
+    const raw = el.source.value || "";
+    const blocks = splitMarkdownBlocks(raw);
+    if (!blocks.length) {
+      el.preview.innerHTML = "";
+      lastPreviewBlocks = [];
+      return;
+    }
 
+    const prev = lastPreviewBlocks;
+    const childNodes = () => [...el.preview.children].filter((n) => n.classList?.contains("md-block"));
+
+    // Full rebuild when first paint or structure changed too much
+    let prefix = 0;
+    const minLen = Math.min(prev.length, blocks.length);
+    while (prefix < minLen && prev[prefix] === blocks[prefix]) prefix++;
+    let suffix = 0;
+    while (
+      suffix < minLen - prefix &&
+      prev[prev.length - 1 - suffix] === blocks[blocks.length - 1 - suffix]
+    ) {
+      suffix++;
+    }
+    const changedMid = blocks.length - prefix - suffix + (prev.length - prefix - suffix);
+    const heavy = !prev.length || changedMid > Math.max(12, blocks.length * 0.7);
+
+    if (heavy) {
+      el.preview.innerHTML = "";
+      const frag = document.createDocumentFragment();
+      blocks.forEach((block, index) => {
+        const wrap = createBlockNode(block, index);
+        postProcessBlock(wrap);
+        frag.appendChild(wrap);
+      });
+      el.preview.appendChild(frag);
+    } else {
+      // Reuse prefix nodes; rebuild middle; reuse suffix nodes
+      let kids = childNodes();
+      // Ensure we have at least prefix nodes
+      while (kids.length < prefix) {
+        const wrap = createBlockNode(blocks[kids.length], kids.length);
+        el.preview.appendChild(wrap);
+        kids = childNodes();
+      }
+      // Remove extra nodes after common suffix from the end of "change region"
+      // Strategy: rebuild from prefix to (len - suffix)
+      const keepTailCount = suffix;
+      const total = blocks.length;
+      // Drop all nodes from prefix onward, keep first prefix
+      while (el.preview.children.length > prefix) {
+        el.preview.removeChild(el.preview.lastElementChild);
+      }
+      const frag = document.createDocumentFragment();
+      for (let i = prefix; i < total - keepTailCount; i++) {
+        const wrap = createBlockNode(blocks[i], i);
+        postProcessBlock(wrap);
+        frag.appendChild(wrap);
+      }
+      // re-create suffix (safer than moving, content may be same but indices shift)
+      for (let i = total - keepTailCount; i < total; i++) {
+        const wrap = createBlockNode(blocks[i], i);
+        // suffix rarely needs katex re-run but cheap enough for correctness
+        postProcessBlock(wrap);
+        frag.appendChild(wrap);
+      }
+      el.preview.appendChild(frag);
+      // fix prefix indices
+      const all = childNodes();
+      for (let i = 0; i < all.length; i++) {
+        all[i].dataset.index = String(i);
+      }
+    }
+
+    // Mermaid only when mermaid sources exist in changed set or full rebuild
+    const needMermaid =
+      heavy ||
+      blocks.slice(prefix, blocks.length - suffix).some((b) => /```\s*mermaid/i.test(b));
+    if (needMermaid) renderMermaid();
+
+    lastPreviewBlocks = blocks;
     updateOutline();
     updateStats();
   }
@@ -869,6 +942,7 @@
     updateWindowTitle();
     renderMarkdown(state.content);
     lastPreviewSource = state.content;
+    lastPreviewBlocks = splitMarkdownBlocks(state.content);
     markActiveTreeItem();
     updatePinUi();
   }
