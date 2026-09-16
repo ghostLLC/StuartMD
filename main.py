@@ -15,7 +15,7 @@ import webview
 
 APP_NAME = "StuartMD"
 APP_ID = "StuartMD"
-VERSION = "1.5.9"
+VERSION = "1.6.3"
 PUBLISHER = "StuartMD"
 PROG_ID = "StuartMD.Markdown"
 GITHUB_REPO = "ghostLLC/StuartMD"
@@ -1069,7 +1069,7 @@ def main() -> None:
             background_color="#ffffff",
             transparent=False,
             text_select=True,
-            easy_drag=True,
+            easy_drag=False,
             confirm_close=True,
         )
         api.bind_window(window)

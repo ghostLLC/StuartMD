@@ -767,7 +767,6 @@
     el.splitResizer.hidden = mode !== "split";
     el.statusMode.textContent = { preview: "阅读", split: "分栏", source: "源码" }[mode];
     if (mode !== "source") {
-      // persist markdown-it instance for plugins
       window.__stuartMd = md;
       scheduleRender();
     }
@@ -1988,10 +1987,14 @@ ${previewHtml}
 
   function bindEvents() {
     $("#btn-sidebar").addEventListener("click", () => toggleSidebar());
-    $("#btn-file-menu").addEventListener("click", (e) => {
-      e.stopPropagation();
-      toggleMenu("#btn-file-menu", "#file-menu");
-    });
+    const fileMenuBtn = $("#btn-file-menu");
+    if (fileMenuBtn) {
+      fileMenuBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleMenu("#btn-file-menu", "#file-menu");
+      });
+    }
     const moreBtn = $("#btn-more-menu");
     if (moreBtn) {
       moreBtn.addEventListener("click", (e) => {

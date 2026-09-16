@@ -127,8 +127,9 @@
 }
 
 [data-theme="minion"] .mode-btn.active {
-  background: #2f6fed;
-  color: #fff;
+  background: transparent;
+  color: var(--text);
+  font-weight: 600;
 }
 
 [data-theme="minion"] #titlebar {
@@ -340,12 +341,34 @@ body {
   border-bottom: 1px solid var(--border);
   background: var(--bg-soft);
   user-select: none;
+  overflow: visible;
+  z-index: 40;
+  position: relative;
   -webkit-app-region: drag;
 }
 
 #titlebar button,
-#titlebar .mode-switch {
+#titlebar .mode-switch,
+#titlebar .menu-wrap,
+#titlebar .menu-trigger,
+#titlebar .icon-btn,
+#titlebar .file-menu,
+#titlebar .file-title-wrap,
+#titlebar .tb-left,
+#titlebar .tb-center,
+#titlebar .tb-right {
   -webkit-app-region: no-drag;
+}
+
+/* Keep only empty titlebar strips draggable */
+#titlebar {
+  -webkit-app-region: drag;
+}
+
+.menu-trigger {
+  pointer-events: auto;
+  position: relative;
+  z-index: 5;
 }
 
 .tb-left,
@@ -360,7 +383,8 @@ body {
 .tb-left {
   flex: 1 1 auto;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
+  z-index: 30;
 }
 
 .tb-right {
@@ -397,7 +421,7 @@ body {
 
 .file-menu {
   position: absolute;
-  top: calc(100% + 4px);
+  top: calc(100% + 6px);
   left: 0;
   min-width: 220px;
   padding: 6px;
@@ -405,7 +429,7 @@ body {
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: var(--shadow);
-  z-index: 50;
+  z-index: 100;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -545,8 +569,10 @@ body {
   background: var(--accent-soft);
 }
 
+/* Mode switch — always show all three (collapse shelved) */
 .mode-switch {
   display: flex;
+  align-items: center;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -563,7 +589,8 @@ body {
   border-radius: 6px;
   cursor: pointer;
   font-family: inherit;
-  transition: background var(--transition), color var(--transition);
+  white-space: nowrap;
+  transition: color var(--transition), background var(--transition);
 }
 
 .mode-btn:hover {
@@ -571,8 +598,8 @@ body {
 }
 
 .mode-btn.active {
-  background: var(--text);
-  color: var(--bg);
+  background: transparent;
+  color: var(--text);
   font-weight: 600;
 }
 
