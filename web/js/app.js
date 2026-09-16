@@ -19,6 +19,7 @@
     lastAutosaveAt: 0,
     wallpaper: null,
     openMode: "smart", // smart | new_window | current_window
+    newDocMode: "tab", // tab | new_window
     tabs: [],
     activeTabId: null,
     tabSeq: 1,
@@ -825,6 +826,7 @@
     updateWindowTitle();
     renderMarkdown(state.content);
     markActiveTreeItem();
+    updatePinUi();
   }
 
   function markDirty() {
@@ -933,11 +935,10 @@
     const bar = $("#tabbar");
     const list = $("#tab-list");
     if (!bar || !list) return;
-    // Show tabs in smart/current mode once anything is open; always if multiple
-    const show =
-      state.tabs.length > 0 &&
-      (state.tabs.length > 1 || state.openMode === "current_window" || state.openMode === "smart");
+    // Always show bar when any tab exists (avoid stuck empty UI)
+    const show = state.tabs.length > 0;
     bar.hidden = !show;
+    bar.style.display = show ? "flex" : "none";
     if (bar.hidden) return;
     list.innerHTML = "";
     state.tabs.forEach((tab) => {
@@ -997,7 +998,11 @@
   }
 
   function activateTab(id) {
-    if (state.activeTabId === id) return;
+    if (state.activeTabId === id) {
+      renderTabs();
+      updatePinUi();
+      return;
+    }
     saveActiveTabFromEditor();
     const tab = state.tabs.find((t) => t.id === id);
     if (!tab) return;
@@ -1013,6 +1018,7 @@
     state.dirty = !!tab.dirty;
     el.dirtyDot.hidden = !tab.dirty;
     renderTabs();
+    updatePinUi();
   }
 
   async function addOrFocusTab(payload) {
@@ -1035,11 +1041,13 @@
       kind: payload.kind || "markdown",
       b64: payload.b64,
       annotations: payload.annotations || [],
+      pinned: !!payload.pinned,
     };
     state.tabs.push(tab);
     state.activeTabId = id;
     setDocument(payload);
     renderTabs();
+    updatePinUi();
     return id;
   }
 
@@ -1206,20 +1214,16 @@
 
     // Always honor tree clicks in current window
     if (fromTree || forceTab) {
-      if (typeof pathOrPayload === "string") {
+      let payload = pathOrPayload;
+      if (typeof payload === "string") {
         if (!state.apiReady) return;
-        const res = await window.pywebview.api.read_file(pathOrPayload);
-        if (res?.error) {
-          toast(res.error);
+        payload = await window.pywebview.api.read_file(payload);
+        if (payload?.error) {
+          toast(payload.error);
           return;
         }
-        await addOrFocusTab(res);
-        if (res.path) setWorkspaceFromPath(res.path);
-        await refreshRecents();
-        return;
       }
-      await addOrFocusTab(pathOrPayload);
-      if (pathOrPayload.path) setWorkspaceFromPath(pathOrPayload.path);
+      await openFromSidebar(payload);
       await refreshRecents();
       return;
     }
@@ -1260,6 +1264,103 @@
     // Outside workspace with real docs open → new window
     await openInNewWindow(path);
     await refreshRecents();
+  }
+
+  /** Sidebar open: replace unpinned current tab; add tab if current is pinned. */
+  async function openFromSidebar(payload) {
+    if (!payload || payload.error) {
+      if (payload?.error) toast(payload.error);
+      return;
+    }
+    const path = payload.path || null;
+    // Focus existing tab for same path
+    if (path) {
+      const exist = state.tabs.find((t) => t.path === path);
+      if (exist) {
+        activateTab(exist.id);
+        renderTabs();
+        updatePinUi();
+        return exist.id;
+      }
+    }
+    const active = state.tabs.find((t) => t.id === state.activeTabId);
+
+    // Unpinned current document → replace in place (no extra tab)
+    const shouldReplace = state.tabs.length > 0 && active && !active.pinned;
+
+    if (shouldReplace) {
+      saveActiveTabFromEditor();
+      if (active.dirty) {
+        const ok = confirm(`「${tabTitleFor(active)}」有未保存修改，用新文件替换？`);
+        if (!ok) return;
+      }
+      active.path = path;
+      active.name = payload.name || "未命名.md";
+      active.content = payload.content || "";
+      active.kind = payload.kind || "markdown";
+      active.b64 = payload.b64;
+      active.annotations = payload.annotations || [];
+      active.dirty = false;
+      active.pinned = false;
+      state.activeTabId = active.id;
+      setDocument(payload);
+      renderTabs();
+      updatePinUi();
+      return active.id;
+    }
+
+    const id = await addOrFocusTab(payload);
+    updatePinUi();
+    return id;
+  }
+
+  function togglePinActive() {
+    let tab = state.tabs.find((t) => t.id === state.activeTabId);
+    if (!tab && (state.path || state.content)) {
+      tab = {
+        id: state.tabSeq++,
+        path: state.path,
+        name: state.name,
+        content: state.content,
+        dirty: state.dirty,
+        kind: "markdown",
+        pinned: false,
+      };
+      state.tabs.push(tab);
+      state.activeTabId = tab.id;
+      renderTabs();
+    }
+    if (!tab) {
+      toast("请先打开文档");
+      return;
+    }
+    if (!tab.path && !tab.pinned) {
+      toast("未保存文档请先另存为再固定");
+      return;
+    }
+    tab.pinned = !tab.pinned;
+    // keep state in sync if this is the active view
+    if (state.activeTabId === tab.id) {
+      state.pinned = tab.pinned;
+    }
+    renderTabs();
+    updatePinUi();
+    toast(tab.pinned ? "已固定到标签页" : "已取消固定");
+  }
+
+  function updatePinUi() {
+    const btn = document.getElementById("btn-pin");
+    if (!btn) return;
+    const editorVisible = !el.editorArea.hidden || !el.welcome.hidden;
+    btn.style.display = editorVisible ? "" : "none";
+    let tab = state.tabs.find((t) => t.id === state.activeTabId);
+    if (!tab && state.path) {
+      tab = { path: state.path, pinned: false };
+    }
+    const pinned = !!(tab && tab.pinned);
+    btn.classList.toggle("pinned", pinned);
+    btn.setAttribute("aria-pressed", pinned ? "true" : "false");
+    btn.title = pinned ? "已固定（点击取消）" : "未固定（点击固定到标签页）";
   }
 
   async function openFile(path, opts = {}) {
@@ -1341,17 +1442,22 @@
     if (state.folder) await loadFolder(state.folder);
   }
 
-  function newDocument() {
-    if (state.dirty) {
-      const ok = confirm("当前文档有未保存修改，确定丢弃并新建？");
-      if (!ok) return;
+  async function newDocument() {
+    // Always a new tab (or setting: new window)
+    if (state.newDocMode === "new_window" && state.apiReady && window.pywebview?.api?.open_new_window) {
+      const res = await window.pywebview.api.open_new_window();
+      if (res?.error) toast(res.error);
+      return;
     }
-    setDocument({
+    const id = await addOrFocusTab({
       path: null,
       name: "未命名.md",
       content: "# 未命名文档\n\n开始书写…\n",
     });
     setMode("preview");
+    renderTabs();
+    updatePinUi();
+    return id;
   }
 
   async function openSample() {
@@ -1805,12 +1911,14 @@ ${previewHtml}
     const fm = $("#file-menu");
     const mm = $("#more-menu");
     const tm = $("#theme-menu");
+    const mp = $("#music-panel");
     const ft = $("#btn-file-menu");
     const mt = $("#btn-more-menu");
     const tt = $("#btn-theme");
     if (fm) fm.hidden = true;
     if (mm) mm.hidden = true;
     if (tm) tm.hidden = true;
+    if (mp) mp.hidden = true;
     if (ft) ft.setAttribute("aria-expanded", "false");
     if (mt) mt.setAttribute("aria-expanded", "false");
     if (tt) tt.setAttribute("aria-expanded", "false");
@@ -1901,6 +2009,7 @@ ${previewHtml}
       if (e.key === "Escape") closeAllMenus();
     });
     $("#btn-find").addEventListener("click", openFind);
+    $("#btn-pin")?.addEventListener("click", togglePinActive);
     $("#btn-outline").addEventListener("click", () => {
       toggleSidebar(true);
       showSidebarPanel("outline");
@@ -2354,6 +2463,9 @@ flowchart LR
       $$(".open-mode-pick").forEach((b) => {
         b.classList.toggle("active", b.dataset.openMode === state.openMode);
       });
+      $$(".new-doc-mode-pick").forEach((b) => {
+        b.classList.toggle("active", b.dataset.newDocMode === state.newDocMode);
+      });
     } catch (_) {}
   }
 
@@ -2440,14 +2552,18 @@ flowchart LR
         if (state.apiReady) {
           window.pywebview.api.save_settings({ open_mode: state.openMode }).catch(() => {});
         }
-        if (state.openMode === "new_window") {
-          toast("已切换为始终新窗口打开");
-        } else if (state.openMode === "current_window") {
-          toast("已切换为当前窗口标签页");
-        } else {
-          toast("已切换为智能打开");
-        }
+        toast(state.openMode === "smart" ? "已切换为智能打开" : state.openMode === "new_window" ? "始终新窗口" : "始终当前窗口标签页");
         renderTabs();
+        refreshSettingsModal();
+      });
+    });
+    $$(".new-doc-mode-pick").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        state.newDocMode = btn.dataset.newDocMode === "new_window" ? "new_window" : "tab";
+        if (state.apiReady) {
+          window.pywebview.api.save_settings({ new_doc_mode: state.newDocMode }).catch(() => {});
+        }
+        toast(state.newDocMode === "new_window" ? "新建文档将用新窗口" : "新建文档将用新标签");
         refreshSettingsModal();
       });
     });
@@ -2540,12 +2656,32 @@ flowchart LR
 
     setMode("preview", false);
     setupResizers();
-    bindEvents();
-    bindSettingsEvents();
-    bindTabBar();
-    bindTreeDelegates();
+    // Bind tree first — must never be skipped by later errors
+    try {
+      bindTreeDelegates();
+    } catch (err) {
+      console.error(err);
+    }
+    try {
+      bindTabBar();
+    } catch (err) {
+      console.error(err);
+    }
+    try {
+      bindEvents();
+    } catch (err) {
+      console.error(err);
+    }
+    try {
+      bindSettingsEvents();
+    } catch (err) {
+      console.error(err);
+    }
     updateAutosaveStatus();
     renderTabs();
+    updatePinUi();
+    setTimeout(updatePinUi, 100);
+    setTimeout(updatePinUi, 500);
 
     async function applySettings(s) {
       if (s?.theme) setTheme(s.theme);
@@ -2556,6 +2692,10 @@ flowchart LR
       if (s?.open_mode === "current_window" || s?.open_mode === "new_window" || s?.open_mode === "smart") {
         state.openMode = s.open_mode;
       }
+      if (s?.new_doc_mode === "tab" || s?.new_doc_mode === "new_window") {
+        state.newDocMode = s.new_doc_mode;
+      }
+      if (s?.music && window.StuartMusic) window.StuartMusic.restore(s.music);
       if (s?.last_folder) {
         // Restore folder tree across versions if the path still exists
         try {

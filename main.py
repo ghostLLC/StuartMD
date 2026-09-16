@@ -15,7 +15,7 @@ import webview
 
 APP_NAME = "StuartMD"
 APP_ID = "StuartMD"
-VERSION = "1.4.3"
+VERSION = "1.5.9"
 PUBLISHER = "StuartMD"
 PROG_ID = "StuartMD.Markdown"
 GITHUB_REPO = "ghostLLC/StuartMD"
@@ -204,6 +204,8 @@ DEFAULT_SETTINGS = {
     "wallpaper": {},
     "app_version": VERSION,
     "open_mode": "smart",
+    "new_doc_mode": "tab",
+    "music": {"volume": 0.4, "currentId": "rain", "customName": "", "playing": False},
 }
 
 
