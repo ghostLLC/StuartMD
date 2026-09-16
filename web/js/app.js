@@ -1147,20 +1147,23 @@
   }
 
   function isWelcomeOrSamplePath(path, name) {
-    const p = String(path || "").toLowerCase();
+    // Pure path/name check — must NOT call hasRealDocument() (infinite recursion)
+    const p = String(path || "").toLowerCase().replace(/\//g, "\\");
     const n = String(name || "");
-    if (!path && n && n.includes("欢迎")) return true;
-    if (p.includes("samples") && (n.includes("示例") || n.includes("欢迎") || n.includes("sample"))) {
-      return true;
-    }
     if (n === "欢迎使用 StuartMD.md" || n === "示例文档.md") return true;
-    return !!state.isSampleDoc && !hasRealDocument();
+    if (!path && n && n.includes("欢迎")) return true;
+    if (p.includes("\\samples\\") || p.endsWith("\\samples")) {
+      if (n.includes("示例") || n.includes("欢迎") || n.includes("sample")) {
+        return true;
+      }
+    }
+    return false;
   }
 
   function hasRealDocument() {
-    return state.tabs.some(
-      (t) => t.path && !isWelcomeOrSamplePath(t.path, t.name)
-    ) || (!!state.path && !isWelcomeOrSamplePath(state.path, state.name));
+    const isSample = (t) => t.path && !isWelcomeOrSamplePath(t.path, t.name);
+    return state.tabs.some(isSample) ||
+      (!!state.path && !isWelcomeOrSamplePath(state.path, state.name));
   }
 
   function parentDir(p) {

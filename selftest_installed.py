@@ -66,7 +66,7 @@ def main() -> int:
             text=True,
         )
         ver = (r.stdout or "").strip()
-        ok(ver.startswith("1.4.2"), f"EXE 版本 {ver!r}")
+        ok(ver.startswith("1.4.3"), f"EXE 版本 {ver!r}")
 
     print("========== 2. 注册表 / 关联 ==========", flush=True)
     ps = r"""
@@ -176,7 +176,7 @@ def main() -> int:
     api = m.API()
     ok(not m.is_frozen(), "源码模式 is_frozen=False")
     info = api.get_app_info()
-    ok(info.get("version") == "1.4.2", f"version={info.get('version')}")
+    ok(info.get("version") == "1.4.3", f"version={info.get('version')}")
     ok((m.WEB_DIR / "index.html").exists(), "WEB_DIR index.html")
     tmp = m.data_dir() / "_selftest.md"
     r1 = api.write_file(str(tmp), "# selftest\n")
@@ -210,7 +210,7 @@ def main() -> int:
     ok("unexpected" not in main_src, "main.py 无 unexpected 残留")
 
     print("========== 9. 安装包可分发文件 ==========", flush=True)
-    setup = SRC / "dist-installer" / "StuartMD-Setup-1.4.2.exe"
+    setup = SRC / "dist-installer" / "StuartMD-Setup-1.4.3.exe"
     ok(setup.exists(), f"安装包存在 {setup}")
     if setup.exists():
         ok(setup.stat().st_size > 5_000_000, f"安装包体积 {setup.stat().st_size}")
