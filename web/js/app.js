@@ -783,6 +783,14 @@
     return { block: best, line };
   }
 
+  /** Mermaid / display math — no block handle (Feishu-like). */
+  function suppressHandleFor(node) {
+    if (!node) return false;
+    if (node.closest?.(".mermaid-diagram")) return true;
+    if (node.closest?.(".katex-display")) return true;
+    return false;
+  }
+
   function positionBlockHandle(block, lineEl) {
     const handle = document.getElementById("block-handle");
     if (!handle || !block || !block.isConnected) return;
@@ -790,8 +798,18 @@
       hideBlockHandle();
       return;
     }
+    // No handle on charts / display LaTeX
+    if (suppressHandleFor(lineEl)) {
+      hideBlockHandle();
+      return;
+    }
+    const media = block.querySelector(".mermaid-diagram, .katex-display");
+    if (media && !block.querySelector("p, li, h1, h2, h3, h4, h5, h6, td, th")) {
+      hideBlockHandle();
+      return;
+    }
     keepBlockHandle();
-    const target = (lineEl && lineEl.isConnected && lineEl !== block ? lineEl : block);
+    const target = lineEl && lineEl.isConnected && lineEl !== block ? lineEl : block;
     const br = target.getBoundingClientRect();
     handle.hidden = false;
     handle.classList.add("visible");
@@ -859,17 +877,12 @@
         return;
       }
       if (found && found.block) {
-        // Hide only while pointer is on the block being typed in
-        if (editingEl && found.block === editingEl) {
+        // Keep handle while editing — only skip mermaid / display math
+        if (suppressHandleFor(found.line)) {
           hideBlockHandle();
           return;
         }
         positionBlockHandle(found.block, found.line);
-        return;
-      }
-      // Not over a block: don't keep handle if still typing elsewhere
-      if (editingEl) {
-        hideBlockHandle();
         return;
       }
       if (handle.dataset.hover === "1" || pointerNearHandle(px, py)) {
@@ -951,12 +964,17 @@
       const node = e.target.closest(".md-block");
       if (!node || node.classList.contains("editing")) return;
       if (e.detail > 1) return;
-      // Single-click WYSIWYG only for simple text blocks
-      if (blockNeedsSourceEdit(node)) return;
       clearTimeout(bindPreviewDelegates._clickTimer);
       bindPreviewDelegates._clickTimer = setTimeout(() => {
         if (!document.contains(node)) return;
         if (node.classList.contains("editing")) return;
+        // Code blocks: single-click → source edit
+        if (node.querySelector("pre")) {
+          enterBlockSourceEdit(node);
+          return;
+        }
+        // Mermaid / display math: no in-place edit on click (use double-click / menu)
+        if (node.querySelector(".mermaid-diagram, .katex-display")) return;
         enterBlockEdit(node);
       }, 200);
     });
