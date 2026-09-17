@@ -673,6 +673,7 @@
     if (h) {
       h.hidden = true;
       h.classList.remove("visible");
+      h.dataset.hover = "";
     }
   }
 
@@ -681,11 +682,28 @@
     return bar && !bar.hidden;
   }
 
+  let _handleHideTimer = 0;
+  function keepBlockHandle() {
+    clearTimeout(_handleHideTimer);
+  }
+  function scheduleHideBlockHandle(ms) {
+    clearTimeout(_handleHideTimer);
+    _handleHideTimer = setTimeout(() => {
+      const handle = document.getElementById("block-handle");
+      if (!handle || handle.hidden) return;
+      if (handle.dataset.hover === "1") return;
+      const menu = document.getElementById("block-menu");
+      if (menu && !menu.hidden) return;
+      if (isSelToolbarVisible()) return;
+      hideBlockHandle();
+    }, ms == null ? 220 : ms);
+  }
+
   function pointerNearHandle(x, y) {
     const handle = document.getElementById("block-handle");
     if (!handle || handle.hidden) return false;
     const r = handle.getBoundingClientRect();
-    const pad = 10;
+    const pad = 28;
     return x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad;
   }
 
@@ -693,11 +711,11 @@
     const handle = document.getElementById("block-handle");
     const pane = $("#preview-pane");
     if (!handle || !block || !pane) return;
-    // Selection toolbar owns the UI — don't stack handles
     if (isSelToolbarVisible()) {
       hideBlockHandle();
       return;
     }
+    keepBlockHandle();
     const pr = pane.getBoundingClientRect();
     const br = block.getBoundingClientRect();
     handle.hidden = false;
@@ -707,12 +725,11 @@
     if (paneStyle.position === "relative" || paneStyle.position === "absolute") {
       handle.style.position = "absolute";
       handle.style.top = Math.max(0, br.top - pr.top + pane.scrollTop) + "px";
-      // Sit fully outside content column so it never covers text
-      handle.style.left = Math.max(0, br.left - pr.left - hw - 8) + "px";
+      handle.style.left = Math.max(0, br.left - pr.left - hw - 10) + "px";
     } else {
       handle.style.position = "fixed";
       handle.style.top = br.top + "px";
-      handle.style.left = Math.max(0, br.left - hw - 8) + "px";
+      handle.style.left = Math.max(0, br.left - hw - 10) + "px";
     }
     state._activeBlockIndex = Number(block.dataset.index || 0);
   }
@@ -722,19 +739,13 @@
     if (!handle || handle.dataset.bound === "1") return;
     handle.dataset.bound = "1";
     handle.addEventListener("mousedown", (e) => e.preventDefault());
-    // Keep alive while pointer is on the handle itself
     handle.addEventListener("mouseenter", () => {
       handle.dataset.hover = "1";
+      keepBlockHandle();
     });
     handle.addEventListener("mouseleave", () => {
       handle.dataset.hover = "";
-      setTimeout(() => {
-        if (handle.dataset.hover === "1") return;
-        const menu = document.getElementById("block-menu");
-        if (menu && !menu.hidden) return;
-        if (isSelToolbarVisible()) return;
-        hideBlockHandle();
-      }, 150);
+      scheduleHideBlockHandle(240);
     });
     $("#bh-type")?.addEventListener("click", (e) => {
       const r = e.currentTarget.getBoundingClientRect();
@@ -745,51 +756,42 @@
       showBlockMenuAt(r.right + 4, r.top, activeBlockIndex());
     });
 
-    el.preview.addEventListener(
-      "mousemove",
-      (e) => {
-        if (state.mode === "source") {
-          hideBlockHandle();
-          return;
-        }
-        if (e.target.closest?.("#block-handle") || e.target.closest?.("#block-menu")) return;
-        // Crossing the gap toward the handle must not dismiss it
-        if (handle.dataset.hover === "1" || pointerNearHandle(e.clientX, e.clientY)) return;
-        // Selection toolbar takes over
-        if (isSelToolbarVisible()) {
-          hideBlockHandle();
-          return;
-        }
-        const block = e.target.closest?.(".md-block");
-        if (!block || !el.preview.contains(block)) {
-          hideBlockHandle();
-          return;
-        }
+    const onMove = (e) => {
+      if (state.mode === "source") {
+        hideBlockHandle();
+        return;
+      }
+      if (e.target.closest?.("#block-handle") || e.target.closest?.("#block-menu")) {
+        keepBlockHandle();
+        return;
+      }
+      if (handle.dataset.hover === "1" || pointerNearHandle(e.clientX, e.clientY)) {
+        keepBlockHandle();
+        return;
+      }
+      if (isSelToolbarVisible()) {
+        hideBlockHandle();
+        return;
+      }
+      if (el.preview.querySelector(".md-block.editing")) {
+        hideBlockHandle();
+        return;
+      }
+      const block = e.target.closest?.(".md-block");
+      if (block && el.preview.contains(block)) {
         positionBlockHandle(block);
-      },
-      { passive: true }
-    );
-    // Also track on the pane so gap between blocks doesn't flicker off
-    $("#preview-pane")?.addEventListener(
-      "mousemove",
-      (e) => {
-        if (state.mode === "source" || isSelToolbarVisible()) {
-          hideBlockHandle();
-          return;
-        }
-        if (e.target.closest?.("#block-handle") || e.target.closest?.("#block-menu")) return;
-        if (handle.dataset.hover === "1" || pointerNearHandle(e.clientX, e.clientY)) return;
-        const block = e.target.closest?.(".md-block");
-        if (block && el.preview.contains(block)) positionBlockHandle(block);
-      },
-      { passive: true }
-    );
+        return;
+      }
+      // Leaving a block: grace period so the gap toward the handle doesn't kill it
+      if (!handle.hidden) scheduleHideBlockHandle(200);
+    };
+    el.preview.addEventListener("mousemove", onMove, { passive: true });
+    $("#preview-pane")?.addEventListener("mousemove", onMove, { passive: true });
     $("#preview-pane")?.addEventListener(
       "mouseleave",
       () => {
         if (handle.dataset.hover === "1") return;
-        if (document.getElementById("block-menu") && !document.getElementById("block-menu").hidden) return;
-        hideBlockHandle();
+        scheduleHideBlockHandle(120);
       },
       { passive: true }
     );
@@ -1016,26 +1018,50 @@
       if (done) return;
       done = true;
       const next = ta.value;
-      node.classList.remove("editing", "source-edit");
       const all = splitMarkdownBlocks(el.source.value || "");
       all[idx] = next;
-      setContent(joinBlocks(all), true);
+      const joined = joinBlocks(all);
+      // Force a real re-render — identical content must still exit source-edit DOM
+      lastPreviewSource = "";
+      node.classList.remove("editing", "source-edit");
+      node.innerHTML = "";
+      el.source.value = joined;
+      state.content = joined;
+      markDirty();
+      scheduleAutoSave();
+      renderMarkdown(joined);
+      lastPreviewSource = joined;
+      lastPreviewBlocks = splitMarkdownBlocks(joined);
     };
     const cancel = () => {
       if (done) return;
       done = true;
+      lastPreviewSource = "";
       node.classList.remove("editing", "source-edit");
+      node.innerHTML = "";
       renderMarkdown(el.source.value);
+      lastPreviewSource = el.source.value;
+      lastPreviewBlocks = splitMarkdownBlocks(el.source.value || "");
     };
     ta.addEventListener("blur", commit);
+    // Outside click should also commit (blur alone is not enough in WebView2)
+    const onDocDown = (e) => {
+      if (done) return;
+      if (node.contains(e.target) || e.target.closest?.("#sel-toolbar")) return;
+      commit();
+      document.removeEventListener("mousedown", onDocDown, true);
+    };
+    document.addEventListener("mousedown", onDocDown, true);
     ta.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
         cancel();
+        document.removeEventListener("mousedown", onDocDown, true);
       } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         commit();
+        document.removeEventListener("mousedown", onDocDown, true);
       }
       e.stopPropagation();
     });
@@ -1059,20 +1085,33 @@
     placeCaretOnClick(hosts[0]);
 
     let done = false;
+    const clearDoc = () => document.removeEventListener("mousedown", onDocDown, true);
+    const finishRestore = (text) => {
+      lastPreviewSource = "";
+      exitBlockEditVisual(node);
+      renderMarkdown(text);
+      lastPreviewSource = text;
+      lastPreviewBlocks = splitMarkdownBlocks(text || "");
+    };
     const commit = () => {
       if (done) return;
       done = true;
+      clearDoc();
       const mdText = htmlToMarkdown(node).trim();
-      exitBlockEditVisual(node);
       const all = splitMarkdownBlocks(el.source.value || "");
       all[idx] = mdText || all[idx] || "";
-      setContent(joinBlocks(all), true);
+      const joined = joinBlocks(all);
+      el.source.value = joined;
+      state.content = joined;
+      markDirty();
+      scheduleAutoSave();
+      finishRestore(joined);
     };
     const cancel = () => {
       if (done) return;
       done = true;
-      exitBlockEditVisual(node);
-      renderMarkdown(el.source.value);
+      clearDoc();
+      finishRestore(el.source.value);
     };
 
     node.addEventListener(
@@ -1082,6 +1121,12 @@
       },
       true
     );
+    const onDocDown = (e) => {
+      if (done) return;
+      if (node.contains(e.target) || e.target.closest?.("#sel-toolbar") || e.target.closest?.("#block-handle")) return;
+      commit();
+    };
+    document.addEventListener("mousedown", onDocDown, true);
     node.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
         e.preventDefault();
