@@ -862,13 +862,53 @@
   }
 
   // ---------- Outline ----------
+  function liveHeadings() {
+    return $$("h1,h2,h3,h4,h5,h6", el.preview);
+  }
+
+  function scrollToHeading(h) {
+    if (!h || !h.isConnected) return;
+    const scroller = $("#preview-pane") || el.preview.closest(".preview-pane") || el.preview.parentElement;
+    try {
+      h.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (_) {
+      h.scrollIntoView(true);
+    }
+    if (scroller && scroller.scrollHeight > scroller.clientHeight + 4) {
+      const top =
+        h.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop - 16;
+      try {
+        scroller.scrollTo({ top, behavior: "smooth" });
+      } catch (_) {
+        scroller.scrollTop = top;
+      }
+    }
+    h.classList.add("outline-flash");
+    setTimeout(() => h.classList.remove("outline-flash"), 900);
+  }
+
+  function jumpToHeadingIndex(index) {
+    const go = () => {
+      const heads = liveHeadings();
+      const h = heads[index];
+      if (h) scrollToHeading(h);
+    };
+    if (state.mode === "source") {
+      setMode("split");
+      requestAnimationFrame(() => requestAnimationFrame(go));
+    } else {
+      requestAnimationFrame(go);
+    }
+  }
+
   function updateOutline() {
-    const heads = $$("h1,h2,h3,h4,h5,h6", el.preview);
-    let sig = "";
+    const heads = liveHeadings();
+    let sig = state.mode + "\n";
     for (let i = 0; i < heads.length; i++) {
       sig += heads[i].tagName + "|" + (heads[i].textContent || "") + "\n";
     }
-    if (sig === lastOutlineSig) return;
+    // Always rebind after preview DOM rebuild (nodes are new even if text is same)
+    if (sig === lastOutlineSig && el.outlineList.childElementCount === heads.length) return;
     lastOutlineSig = sig;
     if (!heads.length) {
       el.outlineList.innerHTML = `<div class="empty-hint">暂无大纲</div>`;
@@ -882,11 +922,7 @@
       btn.className = `outline-item l${level}`;
       btn.textContent = h.textContent || "(空标题)";
       btn.title = h.textContent || "";
-      btn.addEventListener("click", () => {
-        // switch to a mode that shows preview if needed
-        if (state.mode === "source") setMode("split");
-        h.scrollIntoView({ behavior: "smooth", block: "start" });
-      });
+      btn.addEventListener("click", () => jumpToHeadingIndex(i));
       el.outlineList.appendChild(btn);
     });
   }

@@ -795,6 +795,15 @@ body {
 .outline-item.l5,
 .outline-item.l6 { padding-left: 36px; font-size: 12px; }
 
+.outline-flash {
+  animation: outline-flash 0.9s ease;
+  border-radius: 4px;
+}
+@keyframes outline-flash {
+  0% { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+  100% { background: transparent; }
+}
+
 .empty-hint {
   color: var(--text-3);
   font-size: 12px;
