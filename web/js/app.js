@@ -848,21 +848,28 @@
         hideBlockHandle();
         return;
       }
-      if (el.preview.querySelector(".md-block.editing")) {
-        hideBlockHandle();
-        return;
-      }
       if (isSelToolbarVisible()) {
         hideBlockHandle();
         return;
       }
+      const editingEl = getActiveEditingBlock();
       const found = blockFromPoint(px, py);
       if (found && found.special) {
         keepBlockHandle();
         return;
       }
       if (found && found.block) {
+        // Hide only while pointer is on the block being typed in
+        if (editingEl && found.block === editingEl) {
+          hideBlockHandle();
+          return;
+        }
         positionBlockHandle(found.block, found.line);
+        return;
+      }
+      // Not over a block: don't keep handle if still typing elsewhere
+      if (editingEl) {
+        hideBlockHandle();
         return;
       }
       if (handle.dataset.hover === "1" || pointerNearHandle(px, py)) {
@@ -1092,11 +1099,62 @@
   }
 
   function exitBlockEditVisual(node) {
+    if (!node) return;
     node.classList.remove("editing", "source-edit");
+    try {
+      const ae = document.activeElement;
+      if (ae && (ae === node || node.contains(ae))) ae.blur?.();
+    } catch (_) {}
     [...node.querySelectorAll("[contenteditable]")].forEach((el) => {
       el.removeAttribute("contenteditable");
+      el.removeAttribute("spellcheck");
     });
     if (node.getAttribute("contenteditable")) node.removeAttribute("contenteditable");
+  }
+
+  /** Block currently receiving typing focus, if any. Stale .editing is cleaned up. */
+  function getActiveEditingBlock() {
+    const eds = $$(".md-block.editing", el.preview);
+    if (!eds.length) return null;
+    const ae = document.activeElement;
+    for (const ed of eds) {
+      if (ae && (ae === ed || ed.contains(ae))) return ed;
+      const ta = ed.querySelector("textarea.md-block-source");
+      if (ta && ae === ta) return ed;
+    }
+    // .editing without focus → leftover caret; force commit so handle can return
+    cleanupStaleBlockEditing();
+    return null;
+  }
+
+  function isActiveBlockEditing() {
+    return !!getActiveEditingBlock();
+  }
+
+  function cleanupStaleBlockEditing() {
+    $$(".md-block.editing", el.preview).forEach((n) => {
+      if (typeof n._stuartCommit === "function") {
+        try {
+          n._stuartCommit();
+          return;
+        } catch (_) {}
+      }
+      const ta = n.querySelector("textarea.md-block-source");
+      if (ta && typeof ta._stuartCommit === "function") {
+        try {
+          ta._stuartCommit();
+          return;
+        } catch (_) {}
+      }
+      exitBlockEditVisual(n);
+      // Force a re-render so contenteditable DOM is replaced
+      lastPreviewSource = "";
+      try {
+        renderMarkdown(el.source.value);
+        lastPreviewSource = el.source.value;
+        lastPreviewBlocks = splitMarkdownBlocks(el.source.value || "");
+      } catch (_) {}
+    });
   }
 
   function blockNeedsSourceEdit(node) {
@@ -1138,7 +1196,6 @@
       const all = splitMarkdownBlocks(el.source.value || "");
       all[idx] = next;
       const joined = joinBlocks(all);
-      // Force a real re-render — identical content must still exit source-edit DOM
       lastPreviewSource = "";
       node.classList.remove("editing", "source-edit");
       node.innerHTML = "";
@@ -1150,6 +1207,9 @@
       lastPreviewSource = joined;
       lastPreviewBlocks = splitMarkdownBlocks(joined);
       pushHistory(joined);
+      try {
+        document.getSelection()?.removeAllRanges();
+      } catch (_) {}
     };
     const cancel = () => {
       if (done) return;
@@ -1162,11 +1222,12 @@
       lastPreviewBlocks = splitMarkdownBlocks(el.source.value || "");
       pushHistory(el.source.value || "");
     };
+    ta._stuartCommit = commit;
+    node._stuartCommit = commit;
     ta.addEventListener("blur", commit);
-    // Outside click should also commit (blur alone is not enough in WebView2)
     const onDocDown = (e) => {
       if (done) return;
-      if (node.contains(e.target) || e.target.closest?.("#sel-toolbar")) return;
+      if (node.contains(e.target)) return;
       commit();
       document.removeEventListener("mousedown", onDocDown, true);
     };
@@ -1225,14 +1286,24 @@
       markDirty();
       scheduleAutoSave();
       finishRestore(joined);
+      try {
+        if (document.activeElement && node.contains(document.activeElement)) {
+          document.activeElement.blur?.();
+        }
+        document.getSelection()?.removeAllRanges();
+      } catch (_) {}
     };
     const cancel = () => {
       if (done) return;
       done = true;
       clearDoc();
       finishRestore(el.source.value);
+      try {
+        document.getSelection()?.removeAllRanges();
+      } catch (_) {}
     };
 
+    node._stuartCommit = commit;
     node.addEventListener(
       "blur",
       (e) => {
@@ -1242,7 +1313,8 @@
     );
     const onDocDown = (e) => {
       if (done) return;
-      if (node.contains(e.target) || e.target.closest?.("#sel-toolbar") || e.target.closest?.("#block-handle")) return;
+      if (node.contains(e.target)) return;
+      // Clicking handle / toolbar / elsewhere ends the edit so the handle can return
       commit();
     };
     document.addEventListener("mousedown", onDocDown, true);
