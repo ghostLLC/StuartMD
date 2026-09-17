@@ -28,10 +28,22 @@
     check_update: () => invoke("stuart_check_update"),
     list_plugins: () => invoke("stuart_list_plugins"),
     read_plugin_source: (path) => invoke("stuart_read_plugin_source", { path }),
-    import_wallpaper: (b64, name) => invoke("stuart_import_wallpaper", { b64, name }),
+    import_wallpaper: (b64, name) => invoke("stuart_import_wallpaper_ex", { b64, name }),
     get_wallpaper: () => invoke("stuart_get_wallpaper"),
     open_welcome: () => invoke("stuart_open_welcome"),
+    open_sample: () => invoke("stuart_open_sample"),
     file_exists: (path) => invoke("stuart_file_exists", { path }),
+    resolve_asset: (base, rel) => invoke("stuart_resolve_asset", { baseFile: base, rel }),
+    open_data_dir: () => invoke("stuart_open_data_dir"),
+    open_plugins_dir: () => invoke("stuart_open_plugins_dir"),
+    open_default_apps_settings: () => invoke("stuart_open_default_apps_settings"),
+    get_file_association_status: () => invoke("stuart_get_file_association_status"),
+    register_file_association: () => invoke("stuart_register_file_association"),
+    load_annotations: (path) => invoke("stuart_load_annotations", { pdfPath: path }),
+    save_annotations: (path, items) => invoke("stuart_save_annotations", { pdfPath: path, items }),
+    add_annotation: (path, ann) => invoke("stuart_add_annotation", { pdfPath: path, ann }),
+    delete_annotation: (path, id) => invoke("stuart_delete_annotation", { pdfPath: path, annId: id }),
+    clear_annotations: (path) => invoke("stuart_clear_annotations", { pdfPath: path }),
     // Dialogs: use tauri-plugin-dialog if present; otherwise stub
     open_file_dialog: async () => {
       if (window.__TAURI__?.dialog?.open) {

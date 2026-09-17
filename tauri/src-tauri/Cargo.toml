@@ -1,6 +1,6 @@
 [package]
 name = "stuartmd"
-version = "1.12.0"
+version = "1.13.0"
 description = "StuartMD desktop shell (P2 scaffold)"
 authors = ["StuartMD"]
 edition = "2021"
@@ -16,6 +16,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
 dirs = "5"
+sha1 = "0.10"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"
 
 [features]
 default = ["custom-protocol"]

@@ -5,29 +5,30 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const APP_ID: &str = "StuartMD";
-const VERSION: &str = "1.8.0";
+pub const VERSION: &str = "1.12.1";
+pub const PROG_ID: &str = "StuartMD.Markdown";
 const PDF_MAX: u64 = 40 * 1024 * 1024;
 const MD_EXTS: [&str; 5] = [".md", ".markdown", ".mdown", ".mkd", ".txt"];
 
-fn data_dir() -> PathBuf {
+pub fn data_dir() -> PathBuf {
     let base = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
     let d = base.join(APP_ID);
     let _ = fs::create_dir_all(&d);
     d
 }
 
-fn settings_path() -> PathBuf {
+pub fn settings_path() -> PathBuf {
     data_dir().join("settings.json")
 }
 
-fn load_json(path: &Path) -> Value {
+pub fn load_json(path: &Path) -> Value {
     fs::read_to_string(path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_else(|| json!({}))
 }
 
-fn save_json(path: &Path, v: &Value) -> Result<(), String> {
+pub fn save_json(path: &Path, v: &Value) -> Result<(), String> {
     if let Some(p) = path.parent() {
         fs::create_dir_all(p).map_err(|e| e.to_string())?;
     }
@@ -231,17 +232,6 @@ pub fn stuart_open_url(url: String) -> bool {
         .args(["/C", "start", "", &url])
         .spawn()
         .is_ok()
-}
-
-#[tauri::command]
-pub fn stuart_check_update() -> Value {
-    json!({
-        "ok": true,
-        "update": false,
-        "current": VERSION,
-        "latest": VERSION,
-        "error": "Tauri scaffold: update check not wired yet"
-    })
 }
 
 #[tauri::command]
