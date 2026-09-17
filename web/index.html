@@ -195,6 +195,10 @@
           <div id="preview-pane" class="pane">
             <div class="preview-hint">点击段落即可直接编辑</div>
             <article id="preview" class="markdown-body"></article>
+            <!-- Feishu-like block hover handle (must live in pane for correct positioning) -->
+            <div id="block-handle" class="block-handle" hidden>
+              <button type="button" id="bh-type" title="块操作" class="bh-single">T&nbsp;&nbsp;⠿</button>
+            </div>
           </div>
         </div>
 
@@ -221,10 +225,6 @@
         </div>
         <div id="sel-dropdown" class="sel-dropdown" hidden></div>
 
-        <!-- Feishu-like block hover handle -->
-        <div id="block-handle" class="block-handle" hidden>
-          <button type="button" id="bh-type" title="块操作" class="bh-single">T&nbsp;&nbsp;⠿</button>
-        </div>
         <div id="block-menu" class="block-menu" hidden></div>
 
         <!-- PDF viewer area -->

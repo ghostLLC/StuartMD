@@ -708,31 +708,46 @@
   }
 
   /** Resolve the .md-block under (or nearest to) the pointer — high hit rate. */
+  function closestMdBlock(node) {
+    let n = node;
+    while (n && n !== document.body) {
+      if (n.classList?.contains("md-block")) return n;
+      n = n.parentElement || n.parentNode;
+      if (n && n.nodeType !== 1) n = n.parentElement;
+    }
+    return null;
+  }
+
   function blockFromPoint(x, y) {
     const pane = $("#preview-pane");
-    if (!pane) return null;
+    if (!pane || !el.preview) return null;
     const pr = pane.getBoundingClientRect();
-    // Outside pane → none
-    if (x < pr.left - 4 || x > pr.right + 4 || y < pr.top || y > pr.bottom) return null;
+    if (x < pr.left - 8 || x > pr.right + 8 || y < pr.top - 4 || y > pr.bottom + 4) return null;
+
+    // Primary: elementFromPoint (works for text, li, code, svg)
     const hit = document.elementFromPoint(x, y);
     if (hit) {
       if (hit.closest?.("#block-handle") || hit.closest?.("#block-menu") || hit.closest?.("#sel-toolbar")) {
-        return { special: hit.closest("#block-handle") ? "handle" : hit.closest("#block-menu") ? "menu" : "toolbar" };
+        const kind = hit.closest("#block-handle")
+          ? "handle"
+          : hit.closest("#block-menu")
+            ? "menu"
+            : "toolbar";
+        return { special: kind };
       }
-      if (hit.closest?.("#block-handle")) return { special: "handle" };
-      const b = hit.closest?.(".md-block");
+      const b = closestMdBlock(hit);
       if (b && el.preview.contains(b)) return b;
-      // Hit preview padding / empty gap: fall through to band search
     }
-    // Vertical band: pick block whose box contains Y (and X is near content column)
+
+    // Fallback: any .md-block whose vertical band contains Y (lists / code / padding)
     const blocks = $$(".md-block", el.preview);
     let best = null;
     let bestDist = Infinity;
     for (const b of blocks) {
       const r = b.getBoundingClientRect();
-      if (r.height < 1) continue;
-      const inY = y >= r.top - 2 && y <= r.bottom + 2;
-      const nearX = x >= r.left - 120 && x <= r.right + 40;
+      if (r.height < 2 || r.width < 2) continue;
+      const inY = y >= r.top - 1 && y <= r.bottom + 1;
+      const nearX = x >= r.left - 160 && x <= r.right + 48;
       if (inY && nearX) {
         const dist = Math.abs(y - (r.top + r.bottom) / 2);
         if (dist < bestDist) {
@@ -746,29 +761,22 @@
 
   function positionBlockHandle(block) {
     const handle = document.getElementById("block-handle");
-    const pane = $("#preview-pane");
-    if (!handle || !block || !pane) return;
+    if (!handle || !block || !block.isConnected) return;
     if (isSelToolbarVisible()) {
       hideBlockHandle();
       return;
     }
     keepBlockHandle();
-    const pr = pane.getBoundingClientRect();
     const br = block.getBoundingClientRect();
     handle.hidden = false;
     handle.classList.add("visible");
+    // Always fixed to viewport — works for lists, code, tables, mermaid
     const hw = handle.offsetWidth || 52;
-    const paneStyle = getComputedStyle(pane);
-    // Align with first line of the block (top), fully left of content
-    if (paneStyle.position === "relative" || paneStyle.position === "absolute") {
-      handle.style.position = "absolute";
-      handle.style.top = Math.max(0, br.top - pr.top + pane.scrollTop) + "px";
-      handle.style.left = Math.max(0, br.left - pr.left - hw - 8) + "px";
-    } else {
-      handle.style.position = "fixed";
-      handle.style.top = br.top + "px";
-      handle.style.left = Math.max(0, br.left - hw - 8) + "px";
-    }
+    const left = Math.max(6, br.left - hw - 8);
+    const top = Math.max(6, br.top);
+    handle.style.position = "fixed";
+    handle.style.top = top + "px";
+    handle.style.left = left + "px";
     state._activeBlockIndex = Number(block.dataset.index || 0);
   }
 
