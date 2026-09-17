@@ -921,6 +921,61 @@
     } catch (_) {}
   }
 
+  function loadImageFromUrl(url) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = url;
+    });
+  }
+
+  /** Sample image → CSS color tokens (bg, surface, accent, text, text2) */
+  function extractWallpaperColors(img) {
+    try {
+      const w = 64;
+      const h = 64;
+      const c = document.createElement("canvas");
+      c.width = w;
+      c.height = h;
+      const ctx = c.getContext("2d", { willReadFrequently: true });
+      ctx.drawImage(img, 0, 0, w, h);
+      const data = ctx.getImageData(0, 0, w, h).data;
+      let r = 0, g = 0, b = 0, n = 0;
+      const vivid = [];
+      for (let i = 0; i < data.length; i += 4) {
+        const R = data[i], G = data[i + 1], B = data[i + 2];
+        r += R; g += G; b += B; n++;
+        const mx = Math.max(R, G, B), mn = Math.min(R, G, B);
+        if (mx - mn > 40) vivid.push([R, G, B]);
+      }
+      if (!n) return null;
+      const ar = Math.round(r / n), ag = Math.round(g / n), ab = Math.round(b / n);
+      let vr = ar, vg = ag, vb = ab;
+      if (vivid.length) {
+        vr = vg = vb = 0;
+        vivid.forEach((p) => { vr += p[0]; vg += p[1]; vb += p[2]; });
+        vr = Math.round(vr / vivid.length);
+        vg = Math.round(vg / vivid.length);
+        vb = Math.round(vb / vivid.length);
+      }
+      const lum = 0.2126 * ar + 0.7152 * ag + 0.0722 * ab;
+      const dark = lum < 128;
+      const hex = (R, G, B) =>
+        "#" + [R, G, B].map((x) => Math.max(0, Math.min(255, Math.round(x))).toString(16).padStart(2, "0")).join("");
+      const bg = hex(ar, ag, ab);
+      const surface = dark
+        ? hex(ar * 0.82, ag * 0.82, ab * 0.82)
+        : hex(Math.min(255, ar * 1.04 + 6), Math.min(255, ag * 1.04 + 6), Math.min(255, ab * 1.04 + 6));
+      const accent = hex(vr, vg, vb);
+      const text = dark ? "#f2f2f2" : "#1a1a1a";
+      const text2 = dark ? "#c8c8c8" : "#555555";
+      return [bg, surface, accent, text, text2];
+    } catch (_) {
+      return null;
+    }
+  }
+
   function applyWallpaperVars(wp) {
     if (!wp || !wp.uri) return;
     state.wallpaper = wp;
@@ -2746,7 +2801,21 @@ flowchart LR
           toast(res.error);
           return;
         }
-        applyWallpaperVars({ uri: res.uri, colors: res.colors, path: res.path });
+        // Prefer frontend canvas extraction (works on both Stable & Beta)
+        let colors = res.colors;
+        try {
+          const img = await loadImageFromUrl(res.uri || reader.result);
+          if (img) colors = extractWallpaperColors(img);
+        } catch (_) {}
+        if (colors && colors.length) {
+          try {
+            await window.pywebview.api.save_settings({
+              wallpaper: { path: res.path, uri: res.uri, colors },
+              theme: "wallpaper",
+            });
+          } catch (_) {}
+        }
+        applyWallpaperVars({ uri: res.uri, colors: colors || res.colors, path: res.path });
         setTheme("wallpaper");
         toast("壁纸已应用，主色已提取");
         refreshSettingsModal();

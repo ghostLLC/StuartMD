@@ -47,15 +47,29 @@
     // Dialogs: use tauri-plugin-dialog if present; otherwise stub
     open_file_dialog: async () => {
       if (window.__TAURI__?.dialog?.open) {
-        const path = await window.__TAURI__.dialog.open({ multiple: false });
+        const path = await window.__TAURI__.dialog.open({
+          multiple: false,
+          filters: [
+            { name: "文档", extensions: ["md", "markdown", "mdown", "mkd", "pdf", "txt"] },
+            { name: "Markdown", extensions: ["md", "markdown"] },
+            { name: "PDF", extensions: ["pdf"] },
+            { name: "全部", extensions: ["*"] },
+          ],
+        });
         if (!path) return null;
         return api.read_file(path);
       }
-      return { error: "请使用文件菜单或系统对话框（Tauri scaffold）" };
+      return { error: "请使用文件菜单或系统对话框" };
     },
     save_file_dialog: async (content, suggested) => {
       if (window.__TAURI__?.dialog?.save) {
-        const path = await window.__TAURI__.dialog.save({ defaultPath: suggested || "untitled.md" });
+        const path = await window.__TAURI__.dialog.save({
+          defaultPath: suggested || "untitled.md",
+          filters: [
+            { name: "Markdown", extensions: ["md", "markdown"] },
+            { name: "文本", extensions: ["txt"] },
+          ],
+        });
         if (!path) return null;
         return api.write_file(path, content || "");
       }
@@ -63,11 +77,12 @@
     },
     open_folder_dialog: async () => {
       if (window.__TAURI__?.dialog?.open) {
-        const path = await window.__TAURI__.dialog.open({ directory: true });
+        const path = await window.__TAURI__.dialog.open({ directory: true, multiple: false });
         return path || null;
       }
       return null;
     },
+    clear_wallpaper: () => invoke("stuart_save_settings", { data: { wallpaper: {}, theme: "light" } }).then(() => ({ ok: true })),
   };
 
   window.pywebview = window.pywebview || {};
