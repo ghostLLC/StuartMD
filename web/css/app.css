@@ -1405,22 +1405,22 @@ kbd {
   background: var(--bg-hover);
 }
 
-/* Soft text selection — Feishu-like, readable (never white-on-blue) */
+/* Soft gray selection — readable on light theme; per-theme adapted */
 #preview ::selection,
 #preview *::selection,
 #preview .md-block ::selection,
 .markdown-body ::selection,
 .markdown-body *::selection {
-  background: #b6d4fe !important;
-  color: #1f2328 !important;
+  background: #d4d4d8 !important;
+  color: #18181b !important;
   text-shadow: none !important;
 }
 
 #source::selection,
 #source *::selection,
 textarea::selection {
-  background: #b6d4fe !important;
-  color: #1f2328 !important;
+  background: #d4d4d8 !important;
+  color: #18181b !important;
   text-shadow: none !important;
 }
 
@@ -1428,14 +1428,26 @@ body[data-theme="dark"] #preview ::selection,
 body[data-theme="dark"] #preview *::selection,
 body[data-theme="dark"] #source::selection,
 body[data-theme="dark"] textarea::selection {
-  background: #1d4ed8 !important;
-  color: #f8fafc !important;
+  background: #52525b !important;
+  color: #fafafa !important;
 }
 
 body[data-theme="sepia"] #preview ::selection,
 body[data-theme="sepia"] #preview *::selection {
-  background: #d4b896 !important;
-  color: #3c2f1e !important;
+  background: #c4b5a0 !important;
+  color: #2c2416 !important;
+}
+
+body[data-theme="minion"] #preview ::selection,
+body[data-theme="minion"] #preview *::selection {
+  background: #e8d48b !important;
+  color: #3b2f0b !important;
+}
+
+body[data-theme="wallpaper"] #preview ::selection,
+body[data-theme="wallpaper"] #preview *::selection {
+  background: rgba(120, 120, 120, 0.45) !important;
+  color: inherit !important;
 }
 
 #preview-pane {

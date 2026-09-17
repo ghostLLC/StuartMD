@@ -298,12 +298,16 @@
   function showSelToolbarNear(rect) {
     const bar = document.getElementById("sel-toolbar");
     if (!bar || !rect) return;
-    // Feishu: selection toolbar replaces the block handle
     hideBlockHandle();
     hideBlockMenu();
     bar.hidden = false;
     const w = bar.offsetWidth || 320;
-    const top = Math.max(8, rect.top - 48);
+    const h = bar.offsetHeight || 40;
+    // Below the selection (Feishu-style); flip up if clipped
+    let top = rect.bottom + 8;
+    if (top + h > window.innerHeight - 8) {
+      top = Math.max(8, rect.top - h - 8);
+    }
     const left = Math.min(window.innerWidth - w - 12, Math.max(12, rect.left + rect.width / 2 - w / 2));
     bar.style.top = top + "px";
     bar.style.left = left + "px";
@@ -718,13 +722,20 @@
     return null;
   }
 
+  /** Prefer list-item / table-row / heading as the "line" unit for the handle. */
+  function lineUnitFromNode(node) {
+    if (!node) return null;
+    return (
+      node.closest?.("li, tr, h1, h2, h3, h4, h5, h6, pre, blockquote") || node
+    );
+  }
+
   function blockFromPoint(x, y) {
     const pane = $("#preview-pane");
     if (!pane || !el.preview) return null;
     const pr = pane.getBoundingClientRect();
     if (x < pr.left - 8 || x > pr.right + 8 || y < pr.top - 4 || y > pr.bottom + 4) return null;
 
-    // Primary: elementFromPoint (works for text, li, code, svg)
     const hit = document.elementFromPoint(x, y);
     if (hit) {
       if (hit.closest?.("#block-handle") || hit.closest?.("#block-menu") || hit.closest?.("#sel-toolbar")) {
@@ -736,10 +747,12 @@
         return { special: kind };
       }
       const b = closestMdBlock(hit);
-      if (b && el.preview.contains(b)) return b;
+      if (b && el.preview.contains(b)) {
+        return { block: b, line: lineUnitFromNode(hit) || b };
+      }
     }
 
-    // Fallback: any .md-block whose vertical band contains Y (lists / code / padding)
+    // Band fallback: pick closest block, then line inside it if possible
     const blocks = $$(".md-block", el.preview);
     let best = null;
     let bestDist = Infinity;
@@ -756,10 +769,21 @@
         }
       }
     }
-    return best;
+    if (!best) return null;
+    // Refine to li/tr row under Y
+    let line = best;
+    const rows = $$("li, tr", best);
+    for (const row of rows) {
+      const r = row.getBoundingClientRect();
+      if (y >= r.top - 1 && y <= r.bottom + 1) {
+        line = row;
+        break;
+      }
+    }
+    return { block: best, line };
   }
 
-  function positionBlockHandle(block) {
+  function positionBlockHandle(block, lineEl) {
     const handle = document.getElementById("block-handle");
     if (!handle || !block || !block.isConnected) return;
     if (isSelToolbarVisible()) {
@@ -767,10 +791,10 @@
       return;
     }
     keepBlockHandle();
-    const br = block.getBoundingClientRect();
+    const target = (lineEl && lineEl.isConnected && lineEl !== block ? lineEl : block);
+    const br = target.getBoundingClientRect();
     handle.hidden = false;
     handle.classList.add("visible");
-    // Always fixed to viewport — works for lists, code, tables, mermaid
     const hw = handle.offsetWidth || 52;
     const left = Math.max(6, br.left - hw - 8);
     const top = Math.max(6, br.top);
@@ -837,8 +861,8 @@
         keepBlockHandle();
         return;
       }
-      if (found) {
-        positionBlockHandle(found);
+      if (found && found.block) {
+        positionBlockHandle(found.block, found.line);
         return;
       }
       if (handle.dataset.hover === "1" || pointerNearHandle(px, py)) {
