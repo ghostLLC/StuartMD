@@ -736,25 +736,38 @@
 
   function bindBlockHandle() {
     const handle = document.getElementById("block-handle");
+    const menu = document.getElementById("block-menu");
     if (!handle || handle.dataset.bound === "1") return;
     handle.dataset.bound = "1";
     handle.addEventListener("mousedown", (e) => e.preventDefault());
     handle.addEventListener("mouseenter", () => {
       handle.dataset.hover = "1";
       keepBlockHandle();
+      clearTimeout(bindBlockHandle._menuLeave);
     });
     handle.addEventListener("mouseleave", () => {
       handle.dataset.hover = "";
-      scheduleHideBlockHandle(240);
+      // If block menu is open, wait until menu is also left
+      if (menu && !menu.hidden) scheduleHideBlockMenu();
+      else scheduleHideBlockHandle(240);
     });
     $("#bh-type")?.addEventListener("click", (e) => {
       const r = e.currentTarget.getBoundingClientRect();
       showBlockMenuAt(r.right + 4, r.top, activeBlockIndex());
     });
-    $("#bh-more")?.addEventListener("click", (e) => {
-      const r = e.currentTarget.getBoundingClientRect();
-      showBlockMenuAt(r.right + 4, r.top, activeBlockIndex());
-    });
+
+    if (menu && menu.dataset.bound !== "1") {
+      menu.dataset.bound = "1";
+      menu.addEventListener("mouseenter", () => {
+        menu.dataset.hover = "1";
+        clearTimeout(bindBlockHandle._menuLeave);
+        keepBlockHandle();
+      });
+      menu.addEventListener("mouseleave", () => {
+        menu.dataset.hover = "";
+        scheduleHideBlockMenu();
+      });
+    }
 
     const onMove = (e) => {
       if (state.mode === "source") {
@@ -766,6 +779,11 @@
         return;
       }
       if (handle.dataset.hover === "1" || pointerNearHandle(e.clientX, e.clientY)) {
+        keepBlockHandle();
+        return;
+      }
+      // Menu open: don't yank handle under it
+      if (menu && !menu.hidden) {
         keepBlockHandle();
         return;
       }
@@ -782,7 +800,6 @@
         positionBlockHandle(block);
         return;
       }
-      // Leaving a block: grace period so the gap toward the handle doesn't kill it
       if (!handle.hidden) scheduleHideBlockHandle(200);
     };
     el.preview.addEventListener("mousemove", onMove, { passive: true });
@@ -791,10 +808,25 @@
       "mouseleave",
       () => {
         if (handle.dataset.hover === "1") return;
+        if (menu && !menu.hidden && menu.dataset.hover === "1") return;
         scheduleHideBlockHandle(120);
       },
       { passive: true }
     );
+  }
+
+  /** Close block menu only after pointer leaves BOTH handle and menu. */
+  function scheduleHideBlockMenu() {
+    clearTimeout(bindBlockHandle._menuLeave);
+    bindBlockHandle._menuLeave = setTimeout(() => {
+      const handle = document.getElementById("block-handle");
+      const menu = document.getElementById("block-menu");
+      if (!menu || menu.hidden) return;
+      if (handle?.dataset.hover === "1") return;
+      if (menu.dataset.hover === "1") return;
+      hideBlockMenu();
+      scheduleHideBlockHandle(160);
+    }, 220);
   }
 
   function bindPreviewDelegates() {
@@ -1032,6 +1064,7 @@
       renderMarkdown(joined);
       lastPreviewSource = joined;
       lastPreviewBlocks = splitMarkdownBlocks(joined);
+      pushHistory(joined);
     };
     const cancel = () => {
       if (done) return;
@@ -1042,6 +1075,7 @@
       renderMarkdown(el.source.value);
       lastPreviewSource = el.source.value;
       lastPreviewBlocks = splitMarkdownBlocks(el.source.value || "");
+      pushHistory(el.source.value || "");
     };
     ta.addEventListener("blur", commit);
     // Outside click should also commit (blur alone is not enough in WebView2)
@@ -1578,6 +1612,7 @@
     state.content = content || "";
     state.dirty = false;
     el.source.value = state.content;
+    resetHistory(state.content);
     el.fileTitle.textContent = state.name;
     el.dirtyDot.hidden = true;
     el.welcome.hidden = true;
@@ -1605,15 +1640,77 @@
   }
 
   function setContent(text, fromUser) {
-    if (el.source.value !== text) el.source.value = text;
+    const changed = el.source.value !== text;
+    if (changed) el.source.value = text;
     if (state.content !== text) state.content = text;
     if (fromUser) {
+      schedulePushHistory(text);
       markDirty();
       scheduleAutoSave();
     }
-    // Always refresh word count; preview render is debounced & skipped if unchanged
     updateStats();
-    scheduleRender();
+    if (changed || fromUser) scheduleRender();
+  }
+
+  // ---------- Undo / Redo (Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z) ----------
+  const _hist = { stack: [], i: -1, max: 100 };
+  let _histDebounce = 0;
+
+  function pushHistory(text) {
+    if (_hist.stack[_hist.i] === text) return;
+    _hist.stack = _hist.stack.slice(0, _hist.i + 1);
+    _hist.stack.push(text);
+    if (_hist.stack.length > _hist.max) _hist.stack.shift();
+    _hist.i = _hist.stack.length - 1;
+  }
+
+  function schedulePushHistory(text) {
+    clearTimeout(_histDebounce);
+    _histDebounce = setTimeout(() => pushHistory(text), 350);
+  }
+
+  function flushHistory() {
+    clearTimeout(_histDebounce);
+    pushHistory(el.source.value || "");
+  }
+
+  function resetHistory(text) {
+    clearTimeout(_histDebounce);
+    _hist.stack = [text || ""];
+    _hist.i = 0;
+  }
+
+  function applyHistoryText(text) {
+    el.source.value = text;
+    state.content = text;
+    lastPreviewSource = "";
+    if (state.mode !== "source") {
+      renderMarkdown(text);
+      lastPreviewSource = text;
+      lastPreviewBlocks = splitMarkdownBlocks(text || "");
+    }
+    updateStats();
+    markDirty();
+    scheduleAutoSave();
+    const tab = state.tabs.find((t) => t.id === state.activeTabId);
+    if (tab) {
+      tab.content = text;
+      tab.dirty = true;
+    }
+  }
+
+  function undoEdit() {
+    if (_hist.i <= 0) return false;
+    _hist.i--;
+    applyHistoryText(_hist.stack[_hist.i]);
+    return true;
+  }
+
+  function redoEdit() {
+    if (_hist.i >= _hist.stack.length - 1) return false;
+    _hist.i++;
+    applyHistoryText(_hist.stack[_hist.i]);
+    return true;
   }
 
   // ---------- Auto-save ----------
@@ -2898,6 +2995,18 @@ ${previewHtml}
         return;
       }
       const k = e.key.toLowerCase();
+      // Undo / Redo — always our stack so preview/block edits restore correctly
+      if (k === "z" && !e.shiftKey) {
+        e.preventDefault();
+        flushHistory();
+        undoEdit();
+        return;
+      }
+      if (k === "y" || (k === "z" && e.shiftKey)) {
+        e.preventDefault();
+        redoEdit();
+        return;
+      }
       if (k === "o") {
         e.preventDefault();
         openFileDialog();

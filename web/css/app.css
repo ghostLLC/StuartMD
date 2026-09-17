@@ -1267,8 +1267,9 @@ kbd {
 }
 
 .block-handle button {
-  width: 28px;
   height: 26px;
+  min-width: 44px;
+  padding: 0 8px;
   border: none;
   border-radius: 0;
   background: transparent;
@@ -1280,14 +1281,8 @@ kbd {
   display: flex;
   align-items: center;
   justify-content: center;
-}
-
-.block-handle button.bh-drag {
-  color: var(--text-3);
-  cursor: grab;
-  font-size: 14px;
-  letter-spacing: -1px;
-  border-left: 1px solid var(--border);
+  gap: 6px;
+  letter-spacing: 0;
 }
 
 .block-handle button:hover {
