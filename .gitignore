@@ -1,0 +1,25 @@
+# Build / OS
+target/
+dist/
+dist-installer/
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
+*.log
+
+# Local artifacts
+assets/_*.png
+assets/_icon_preview*.png
+scripts/__pycache__/
+
+# Tauri
+tauri/src-tauri/target/
+tauri/src-tauri/gen/schemas/*.json
+
+# Python
+.venv/
+venv/
+*.egg-info/
+build/
+*.spec.bak

@@ -1,0 +1,64 @@
+# 更新日志 / Changelog
+
+本文件记录 StuartMD 的版本变更，便于开发与发布对照。
+
+## [2.0.0] - 2026-09-17
+
+### 变更
+- **大版本**：Tauri 为唯一维护线，版本推进至 2.0.0
+- **图标**：靛蓝底 + 白字 S + 蓝色强调条；小尺寸 BMP ICO；安装包指定 `installerIcon`
+- 安装目录：`%LOCALAPPDATA%\StuartMD`（NSIS currentUser）
+
+## [1.14.0] - 2026-09-15
+
+> 维护策略：**后续只更新维护 Tauri 轨道**；pywebview Stable 停留在 1.13.1。
+
+### 新增（Tauri）
+- 最近打开列表：读写文件、打开文件夹自动记录
+- 导出 HTML：系统保存对话框 + 写盘
+- 新建空窗口、在资源管理器中显示
+- 插件启用/禁用持久化（`plugins_disabled`）
+- CLI / 文件关联启动：`startup_file` 注入 `get_app_info`
+- 打包内置示例与欢迎文档（`resources/samples`）
+- NSIS 安装：简体中文/英文、可选语言、当前用户安装
+
+### 修复（Tauri）
+- 设置 `schema_version` 迁移与默认值补全（与 Stable 对齐）
+- `resolve_asset` 返回 `file://` URI，预览相对路径图片可用
+- PDF 打开时附带 sidecar 批注
+- 桥接补齐：`get_recents` / `open_path` / `open_new_window` / `export_html` / `set_plugin_enabled` / `clear_wallpaper` / `reveal_in_explorer`
+- `withGlobalTauri`：系统打开/保存/文件夹对话框真正可用
+- 版本号统一为 1.14.0（此前 Rust 内嵌仍为 1.12.1）
+
+## [1.13.1] - 2026-09-15
+
+### 新增
+- 内置欢迎文档：冷启动无指定文件时自动打开功能介绍（含 GitHub 仓库地址）
+- 设置 → **检查更新**：查询 GitHub Releases，发现新版本可打开下载页
+- 配置 `schema_version` 与自动迁移：升级时完整保留主题、语言、插件、壁纸、最近文件等
+
+### 变更
+- 安装向导明确支持**自定义安装路径**（未禁用目录页；静默安装可用 `/DIR=`）
+- 版本号策略：功能变更递增，不再长期停留在 1.0.0
+
+### 文档
+- 欢迎 Markdown 写入仓库地址与安装说明
+- `docs/PLUGINS.md` 插件开发指南
+
+## [1.1.0] - 2026-09-15
+
+### 新增
+- 横版 PDF 适配：自动识别、适应宽/高、旋转
+- 插件系统（`%APPDATA%\StuartMD\plugins`）与 `docs/PLUGINS.md`
+- 壁纸主题：上传图片自动提取主色
+- 三语：简体中文 / 繁體中文 / English
+
+## [1.0.0] - 2026-09-15
+
+### 新增
+- 首个正式版 StuartMD（原 MiniTypora / Stuart 演进）
+- Markdown 阅读 / 分栏 / 源码；公式、Mermaid、代码高亮
+- PDF 阅读与标黄批注（竖版）
+- 自动保存、多窗口、文件关联、Inno 安装包
+- 主题：浅色 / 深色 / 羊皮纸 / 小黄人 / 毛玻璃
+- 设置持久化至 `%APPDATA%\StuartMD`
