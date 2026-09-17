@@ -703,8 +703,45 @@
     const handle = document.getElementById("block-handle");
     if (!handle || handle.hidden) return false;
     const r = handle.getBoundingClientRect();
-    const pad = 28;
+    const pad = 36;
     return x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad;
+  }
+
+  /** Resolve the .md-block under (or nearest to) the pointer — high hit rate. */
+  function blockFromPoint(x, y) {
+    const pane = $("#preview-pane");
+    if (!pane) return null;
+    const pr = pane.getBoundingClientRect();
+    // Outside pane → none
+    if (x < pr.left - 4 || x > pr.right + 4 || y < pr.top || y > pr.bottom) return null;
+    const hit = document.elementFromPoint(x, y);
+    if (hit) {
+      if (hit.closest?.("#block-handle") || hit.closest?.("#block-menu") || hit.closest?.("#sel-toolbar")) {
+        return { special: hit.closest("#block-handle") ? "handle" : hit.closest("#block-menu") ? "menu" : "toolbar" };
+      }
+      if (hit.closest?.("#block-handle")) return { special: "handle" };
+      const b = hit.closest?.(".md-block");
+      if (b && el.preview.contains(b)) return b;
+      // Hit preview padding / empty gap: fall through to band search
+    }
+    // Vertical band: pick block whose box contains Y (and X is near content column)
+    const blocks = $$(".md-block", el.preview);
+    let best = null;
+    let bestDist = Infinity;
+    for (const b of blocks) {
+      const r = b.getBoundingClientRect();
+      if (r.height < 1) continue;
+      const inY = y >= r.top - 2 && y <= r.bottom + 2;
+      const nearX = x >= r.left - 120 && x <= r.right + 40;
+      if (inY && nearX) {
+        const dist = Math.abs(y - (r.top + r.bottom) / 2);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = b;
+        }
+      }
+    }
+    return best;
   }
 
   function positionBlockHandle(block) {
@@ -720,16 +757,17 @@
     const br = block.getBoundingClientRect();
     handle.hidden = false;
     handle.classList.add("visible");
-    const hw = handle.offsetWidth || 56;
+    const hw = handle.offsetWidth || 52;
     const paneStyle = getComputedStyle(pane);
+    // Align with first line of the block (top), fully left of content
     if (paneStyle.position === "relative" || paneStyle.position === "absolute") {
       handle.style.position = "absolute";
       handle.style.top = Math.max(0, br.top - pr.top + pane.scrollTop) + "px";
-      handle.style.left = Math.max(0, br.left - pr.left - hw - 10) + "px";
+      handle.style.left = Math.max(0, br.left - pr.left - hw - 8) + "px";
     } else {
       handle.style.position = "fixed";
       handle.style.top = br.top + "px";
-      handle.style.left = Math.max(0, br.left - hw - 10) + "px";
+      handle.style.left = Math.max(0, br.left - hw - 8) + "px";
     }
     state._activeBlockIndex = Number(block.dataset.index || 0);
   }
@@ -747,7 +785,6 @@
     });
     handle.addEventListener("mouseleave", () => {
       handle.dataset.hover = "";
-      // If block menu is open, wait until menu is also left
       if (menu && !menu.hidden) scheduleHideBlockMenu();
       else scheduleHideBlockHandle(240);
     });
@@ -769,25 +806,13 @@
       });
     }
 
-    const onMove = (e) => {
+    // One document-level tracker — elementFromPoint + band fallback
+    let rafId = 0;
+    let px = 0;
+    let py = 0;
+    const tick = () => {
+      rafId = 0;
       if (state.mode === "source") {
-        hideBlockHandle();
-        return;
-      }
-      if (e.target.closest?.("#block-handle") || e.target.closest?.("#block-menu")) {
-        keepBlockHandle();
-        return;
-      }
-      if (handle.dataset.hover === "1" || pointerNearHandle(e.clientX, e.clientY)) {
-        keepBlockHandle();
-        return;
-      }
-      // Menu open: don't yank handle under it
-      if (menu && !menu.hidden) {
-        keepBlockHandle();
-        return;
-      }
-      if (isSelToolbarVisible()) {
         hideBlockHandle();
         return;
       }
@@ -795,21 +820,45 @@
         hideBlockHandle();
         return;
       }
-      const block = e.target.closest?.(".md-block");
-      if (block && el.preview.contains(block)) {
-        positionBlockHandle(block);
+      if (isSelToolbarVisible()) {
+        hideBlockHandle();
         return;
       }
-      if (!handle.hidden) scheduleHideBlockHandle(200);
+      const found = blockFromPoint(px, py);
+      if (found && found.special) {
+        keepBlockHandle();
+        return;
+      }
+      if (found) {
+        positionBlockHandle(found);
+        return;
+      }
+      if (handle.dataset.hover === "1" || pointerNearHandle(px, py)) {
+        keepBlockHandle();
+        return;
+      }
+      if (menu && !menu.hidden) {
+        keepBlockHandle();
+        return;
+      }
+      if (!handle.hidden) scheduleHideBlockHandle(180);
     };
-    el.preview.addEventListener("mousemove", onMove, { passive: true });
-    $("#preview-pane")?.addEventListener("mousemove", onMove, { passive: true });
+    document.addEventListener(
+      "mousemove",
+      (e) => {
+        px = e.clientX;
+        py = e.clientY;
+        if (rafId) return;
+        rafId = requestAnimationFrame(tick);
+      },
+      { passive: true }
+    );
     $("#preview-pane")?.addEventListener(
       "mouseleave",
       () => {
         if (handle.dataset.hover === "1") return;
         if (menu && !menu.hidden && menu.dataset.hover === "1") return;
-        scheduleHideBlockHandle(120);
+        scheduleHideBlockHandle(100);
       },
       { passive: true }
     );
@@ -856,23 +905,26 @@
         return;
       }
 
-      if (e.target.closest("a, button, input, textarea, .md-block-source, pre code, .mermaid-diagram")) {
+      if (e.target.closest("button, input, textarea, .md-block-source")) {
         return;
       }
       if (state.mode === "source") return;
       const node = e.target.closest(".md-block");
       if (!node || node.classList.contains("editing")) return;
       if (e.detail > 1) return;
+      // Single-click WYSIWYG only for simple text blocks
+      if (blockNeedsSourceEdit(node)) return;
       clearTimeout(bindPreviewDelegates._clickTimer);
       bindPreviewDelegates._clickTimer = setTimeout(() => {
         if (!document.contains(node)) return;
-        if (blockNeedsSourceEdit(node)) enterBlockSourceEdit(node);
-        else enterBlockEdit(node);
+        if (node.classList.contains("editing")) return;
+        enterBlockEdit(node);
       }, 200);
     });
 
     el.preview.addEventListener("dblclick", (e) => {
-      if (e.target.closest("a, button, input, textarea, pre code, .mermaid-diagram")) {
+      // Allow code / KaTeX / mermaid / tables — enter source edit
+      if (e.target.closest("a, button, input, textarea, .md-block-source")) {
         return;
       }
       if (state.mode === "source") return;
@@ -880,6 +932,7 @@
       if (!node) return;
       e.preventDefault();
       clearTimeout(bindPreviewDelegates._clickTimer);
+      if (node.classList.contains("editing")) return;
       enterBlockSourceEdit(node);
     });
   }
