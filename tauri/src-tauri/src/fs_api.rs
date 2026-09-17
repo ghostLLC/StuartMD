@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 const APP_ID: &str = "StuartMD";
-pub const VERSION: &str = "2.0.2";
+pub const VERSION: &str = "2.0.3";
 pub const PROG_ID: &str = "StuartMD.Markdown";
 pub const SETTINGS_SCHEMA: i64 = 2;
 const PDF_MAX: u64 = 40 * 1024 * 1024;

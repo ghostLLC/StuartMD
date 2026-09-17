@@ -298,6 +298,9 @@
   function showSelToolbarNear(rect) {
     const bar = document.getElementById("sel-toolbar");
     if (!bar || !rect) return;
+    // Feishu: selection toolbar replaces the block handle
+    hideBlockHandle();
+    hideBlockMenu();
     bar.hidden = false;
     const w = bar.offsetWidth || 320;
     const top = Math.max(8, rect.top - 48);
@@ -673,24 +676,43 @@
     }
   }
 
+  function isSelToolbarVisible() {
+    const bar = document.getElementById("sel-toolbar");
+    return bar && !bar.hidden;
+  }
+
+  function pointerNearHandle(x, y) {
+    const handle = document.getElementById("block-handle");
+    if (!handle || handle.hidden) return false;
+    const r = handle.getBoundingClientRect();
+    const pad = 10;
+    return x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad;
+  }
+
   function positionBlockHandle(block) {
     const handle = document.getElementById("block-handle");
     const pane = $("#preview-pane");
     if (!handle || !block || !pane) return;
+    // Selection toolbar owns the UI — don't stack handles
+    if (isSelToolbarVisible()) {
+      hideBlockHandle();
+      return;
+    }
     const pr = pane.getBoundingClientRect();
     const br = block.getBoundingClientRect();
     handle.hidden = false;
     handle.classList.add("visible");
-    // Fixed coords relative to viewport (handle is position absolute in pane if pane is relative)
+    const hw = handle.offsetWidth || 56;
     const paneStyle = getComputedStyle(pane);
     if (paneStyle.position === "relative" || paneStyle.position === "absolute") {
       handle.style.position = "absolute";
-      handle.style.top = br.top - pr.top + pane.scrollTop + "px";
-      handle.style.left = Math.max(4, br.left - pr.left - 34) + "px";
+      handle.style.top = Math.max(0, br.top - pr.top + pane.scrollTop) + "px";
+      // Sit fully outside content column so it never covers text
+      handle.style.left = Math.max(0, br.left - pr.left - hw - 8) + "px";
     } else {
       handle.style.position = "fixed";
       handle.style.top = br.top + "px";
-      handle.style.left = Math.max(4, br.left - 34) + "px";
+      handle.style.left = Math.max(0, br.left - hw - 8) + "px";
     }
     state._activeBlockIndex = Number(block.dataset.index || 0);
   }
@@ -700,6 +722,20 @@
     if (!handle || handle.dataset.bound === "1") return;
     handle.dataset.bound = "1";
     handle.addEventListener("mousedown", (e) => e.preventDefault());
+    // Keep alive while pointer is on the handle itself
+    handle.addEventListener("mouseenter", () => {
+      handle.dataset.hover = "1";
+    });
+    handle.addEventListener("mouseleave", () => {
+      handle.dataset.hover = "";
+      setTimeout(() => {
+        if (handle.dataset.hover === "1") return;
+        const menu = document.getElementById("block-menu");
+        if (menu && !menu.hidden) return;
+        if (isSelToolbarVisible()) return;
+        hideBlockHandle();
+      }, 150);
+    });
     $("#bh-type")?.addEventListener("click", (e) => {
       const r = e.currentTarget.getBoundingClientRect();
       showBlockMenuAt(r.right + 4, r.top, activeBlockIndex());
@@ -717,6 +753,13 @@
           return;
         }
         if (e.target.closest?.("#block-handle") || e.target.closest?.("#block-menu")) return;
+        // Crossing the gap toward the handle must not dismiss it
+        if (handle.dataset.hover === "1" || pointerNearHandle(e.clientX, e.clientY)) return;
+        // Selection toolbar takes over
+        if (isSelToolbarVisible()) {
+          hideBlockHandle();
+          return;
+        }
         const block = e.target.closest?.(".md-block");
         if (!block || !el.preview.contains(block)) {
           hideBlockHandle();
@@ -726,10 +769,27 @@
       },
       { passive: true }
     );
+    // Also track on the pane so gap between blocks doesn't flicker off
+    $("#preview-pane")?.addEventListener(
+      "mousemove",
+      (e) => {
+        if (state.mode === "source" || isSelToolbarVisible()) {
+          hideBlockHandle();
+          return;
+        }
+        if (e.target.closest?.("#block-handle") || e.target.closest?.("#block-menu")) return;
+        if (handle.dataset.hover === "1" || pointerNearHandle(e.clientX, e.clientY)) return;
+        const block = e.target.closest?.(".md-block");
+        if (block && el.preview.contains(block)) positionBlockHandle(block);
+      },
+      { passive: true }
+    );
     $("#preview-pane")?.addEventListener(
       "mouseleave",
       () => {
-        if (document.getElementById("block-menu")?.hidden !== false) hideBlockHandle();
+        if (handle.dataset.hover === "1") return;
+        if (document.getElementById("block-menu") && !document.getElementById("block-menu").hidden) return;
+        hideBlockHandle();
       },
       { passive: true }
     );
