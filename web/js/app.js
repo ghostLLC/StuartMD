@@ -287,67 +287,297 @@
   function hideSelToolbar() {
     const bar = document.getElementById("sel-toolbar");
     if (bar) bar.hidden = true;
+    hideSelDropdown();
+  }
+
+  function hideSelDropdown() {
+    const dd = document.getElementById("sel-dropdown");
+    if (dd) dd.hidden = true;
   }
 
   function showSelToolbarNear(rect) {
     const bar = document.getElementById("sel-toolbar");
     if (!bar || !rect) return;
     bar.hidden = false;
-    const top = Math.max(8, rect.top - 44);
-    const left = Math.min(window.innerWidth - 260, Math.max(8, rect.left + rect.width / 2 - 100));
+    const w = bar.offsetWidth || 320;
+    const top = Math.max(8, rect.top - 48);
+    const left = Math.min(window.innerWidth - w - 12, Math.max(12, rect.left + rect.width / 2 - w / 2));
     bar.style.top = top + "px";
     bar.style.left = left + "px";
+    hideSelDropdown();
+  }
+
+  function openSelDropdown(kind, anchorBtn) {
+    const dd = document.getElementById("sel-dropdown");
+    if (!dd) return;
+    const items = [];
+    if (kind === "style") {
+      items.push(
+        { label: "正文", action: "p", hint: "" },
+        { label: "标题 1", action: "h1", hint: "" },
+        { label: "标题 2", action: "h2", hint: "" },
+        { label: "标题 3", action: "h3", hint: "" },
+        { label: "无序列表", action: "ul", hint: "" },
+        { label: "有序列表", action: "ol", hint: "" },
+        { label: "任务列表", action: "task", hint: "" },
+        { label: "引用", action: "quote", hint: "" }
+      );
+    } else if (kind === "align") {
+      items.push(
+        { label: "左对齐", action: "align-left" },
+        { label: "居中", action: "align-center" },
+        { label: "右对齐", action: "align-right" },
+        { label: "增加缩进", action: "indent+" },
+        { label: "减少缩进", action: "indent-" }
+      );
+    } else if (kind === "color") {
+      const colors = [
+        "#f5c542",
+        "#f28b82",
+        "#f6aea9",
+        "#aecbfa",
+        "#a8dab5",
+        "#d7aefb",
+        "#202124",
+        "#5f6368",
+        "#1a73e8",
+        "#188038",
+        "#c5221f",
+        "#ea8600",
+      ];
+      dd.innerHTML = `<div class="swatches">${colors
+        .map((c) => `<button type="button" class="swatch" data-color="${c}" style="background:${c}" title="${c}"></button>`)
+        .join("")}</div>`;
+      positionDropdown(dd, anchorBtn);
+      return;
+    }
+    dd.innerHTML = items
+      .map((it) => `<button type="button" data-action="${it.action}">${it.label}</button>`)
+      .join("");
+    positionDropdown(dd, anchorBtn);
+  }
+
+  function positionDropdown(dd, anchorBtn) {
+    dd.hidden = false;
+    const r = anchorBtn.getBoundingClientRect();
+    const w = dd.offsetWidth || 160;
+    dd.style.top = r.bottom + 6 + "px";
+    dd.style.left = Math.min(window.innerWidth - w - 12, Math.max(8, r.left)) + "px";
+  }
+
+  function wrapInlineMarkdown(pre, post, placeholder) {
+    const text = placeholder || "文本";
+    // Preview / contenteditable path
+    if (state.mode !== "source") {
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed && sel.toString()) {
+        const chosen = sel.toString();
+        const block = sel.anchorNode?.parentElement?.closest?.(".md-block");
+        if (block) {
+          // Operate via source model for reliability
+          const idx = Number(block.dataset.index || 0);
+          const all = splitMarkdownBlocks(el.source.value || "");
+          const src = all[idx] || "";
+          // Simple first-occurrence wrap of selected plain text in this block
+          if (src.includes(chosen)) {
+            all[idx] = src.replace(chosen, pre + chosen + post);
+          } else {
+            all[idx] = src + pre + chosen + post;
+          }
+          setContent(joinBlocks(all), true);
+          return;
+        }
+      }
+      // fallback source caret
+      el.source.focus();
+      wrapSelection(pre, post);
+      return;
+    }
+    wrapSelection(pre, post);
+  }
+
+  function applyBlockLineAction(action) {
+    // Convert current line/block in source model
+    const focusSource = () => {
+      if (state.mode === "source") el.source.focus();
+    };
+    if (action === "p") {
+      sourceLineTransform((block) =>
+        block
+          .split("\n")
+          .map((line) =>
+            line
+              .replace(/^\s{0,3}#{1,6}\s+/, "")
+              .replace(/^\s*(?:[-*+]|\d+[.)])\s+/, "")
+              .replace(/^\s*>\s?/, "")
+              .replace(/^\s*- \[[ xX]\]\s+/, "")
+          )
+          .join("\n")
+      );
+    } else if (action === "h1" || action === "h2" || action === "h3") {
+      setLineHeading(Number(action[1]));
+    } else if (action === "ul") {
+      toggleLineList(false);
+    } else if (action === "ol") {
+      toggleLineList(true);
+    } else if (action === "task") {
+      sourceLineTransform((block) =>
+        block
+          .split("\n")
+          .map((line) => {
+            if (/^\s*- \[[ xX]\]\s+/.test(line)) {
+              return line.replace(/^\s*- \[[ xX]\]\s+/, "");
+            }
+            const text = stripHeadingPrefix(line).replace(/^\s*(?:[-*+]|\d+[.)])\s+/, "");
+            return "- [ ] " + text;
+          })
+          .join("\n")
+      );
+    } else if (action === "quote") {
+      sourceLineTransform((block) =>
+        block
+          .split("\n")
+          .map((line) => {
+            if (/^\s*>\s?/.test(line)) return line.replace(/^\s*>\s?/, "");
+            return "> " + line;
+          })
+          .join("\n")
+      );
+    } else if (action === "hr") {
+      sourceLineTransform((block) => block + "\n\n---\n");
+    } else if (action === "code") {
+      sourceLineTransform((block) => {
+        if (/^```/.test(block.trim())) return block.replace(/^```\w*\n?/, "").replace(/\n?```\s*$/, "");
+        return "```\n" + block + "\n```";
+      });
+    } else if (action === "divider") {
+      sourceLineTransform((block) => block + "\n\n---\n");
+    } else if (action === "align-left" || action === "align-center" || action === "align-right") {
+      const align = action.split("-")[1];
+      sourceLineTransform((block) => {
+        const cleaned = block.replace(/\n?<div align="(left|center|right)">\n?/g, "\n").replace(/\n?<\/div>/g, "");
+        if (align === "left") return cleaned.trim();
+        return `<div align="${align}">\n\n${cleaned.trim()}\n\n</div>`;
+      });
+    } else if (action === "indent+" || action === "indent-") {
+      sourceLineTransform((block) =>
+        block
+          .split("\n")
+          .map((line) => {
+            if (action === "indent+") return "  " + line;
+            return line.replace(/^ {1,2}/, "");
+          })
+          .join("\n")
+      );
+    } else if (action === "copy-block" || action === "cut-block") {
+      const idx = activeBlockIndex();
+      const all = splitMarkdownBlocks(el.source.value || "");
+      const text = all[idx] || "";
+      try {
+        navigator.clipboard?.writeText(text);
+      } catch (_) {}
+      if (action === "cut-block" || action === "delete-block") {
+        all.splice(idx, 1);
+        setContent(joinBlocks(all), true);
+      }
+    } else if (action === "delete-block") {
+      const idx = activeBlockIndex();
+      const all = splitMarkdownBlocks(el.source.value || "");
+      all.splice(idx, 1);
+      setContent(joinBlocks(all), true);
+    } else if (action === "duplicate-block") {
+      const idx = activeBlockIndex();
+      const all = splitMarkdownBlocks(el.source.value || "");
+      if (all[idx] != null) all.splice(idx + 1, 0, all[idx]);
+      setContent(joinBlocks(all), true);
+    }
+    focusSource();
+  }
+
+  function activeBlockIndex() {
+    if (typeof state._activeBlockIndex === "number") return state._activeBlockIndex;
+    const sel = window.getSelection();
+    const block = sel?.anchorNode?.parentElement?.closest?.(".md-block");
+    if (block && block.dataset.index != null) return Number(block.dataset.index);
+    return 0;
   }
 
   function applySelFormat(kind) {
-    const sel = window.getSelection();
-    if (!sel || sel.isCollapsed) return;
-    const text = sel.toString();
-    if (!text) return;
-    // Prefer wrapping in source model when possible
-    if (state.mode !== "source") {
-      // Apply on DOM then commit block
-      try {
-        if (kind === "bold") document.execCommand("bold");
-        else if (kind === "italic") document.execCommand("italic");
-        else if (kind === "strike") document.execCommand("strikeThrough");
-        else if (kind === "code") document.execCommand("insertHTML", false, "<code>" + escapeHtml(text) + "</code>");
-        else if (kind === "ul") document.execCommand("insertUnorderedList");
-        else if (kind === "ol") document.execCommand("insertOrderedList");
-        else if (kind === "h2") document.execCommand("formatBlock", false, "h2");
-        const block = sel.anchorNode?.parentElement?.closest?.(".md-block");
-        if (block && !block.classList.contains("editing")) {
+    if (kind === "bold") wrapInlineMarkdown("**", "**");
+    else if (kind === "italic") wrapInlineMarkdown("*", "*");
+    else if (kind === "strike") wrapInlineMarkdown("~~", "~~");
+    else if (kind === "underline") wrapInlineMarkdown("<u>", "</u>");
+    else if (kind === "code") wrapInlineMarkdown("`", "`");
+    else if (kind === "link") {
+      const sel = window.getSelection();
+      const text = sel?.toString()?.trim() || "链接文字";
+      const url = prompt("链接地址", "https://");
+      if (url) wrapInlineMarkdown("[", `](${url})`.replace(text, ""), text);
+      // simpler: rebuild
+      if (url) {
+        const chosen = sel?.toString() || "链接文字";
+        // redo cleanly
+        const block = sel?.anchorNode?.parentElement?.closest?.(".md-block");
+        if (block && state.mode !== "source") {
           const idx = Number(block.dataset.index || 0);
-          const mdText = htmlToMarkdown(block).trim();
           const all = splitMarkdownBlocks(el.source.value || "");
-          all[idx] = mdText || all[idx] || "";
+          const src = all[idx] || "";
+          const mdLink = `[${chosen}](${url})`;
+          all[idx] = src.includes(chosen) ? src.replace(chosen, mdLink) : src + mdLink;
           setContent(joinBlocks(all), true);
         }
-      } catch (_) {}
-      return;
+      }
+    } else if (kind === "h1" || kind === "h2" || kind === "h3" || kind === "p" || kind === "ul" || kind === "ol" || kind === "task" || kind === "quote") {
+      applyBlockLineAction(kind);
+    } else if (kind.startsWith("align-") || kind === "indent+" || kind === "indent-") {
+      applyBlockLineAction(kind);
+    } else if (kind.startsWith("color:")) {
+      const c = kind.slice(6);
+      wrapInlineMarkdown(`<span style="color:${c}">`, "</span>");
+    } else if (kind.startsWith("bg:")) {
+      const c = kind.slice(3);
+      wrapInlineMarkdown(`<mark style="background:${c}">`, "</mark>");
     }
-    // source mode wrap
-    if (kind === "bold") wrapSelection("**", "**");
-    else if (kind === "italic") wrapSelection("*", "*");
-    else if (kind === "strike") wrapSelection("~~", "~~");
-    else if (kind === "code") wrapSelection("`", "`");
-    else if (kind === "h2") setLineHeading(2);
-    else if (kind === "ul") toggleLineList(false);
-    else if (kind === "ol") toggleLineList(true);
   }
 
   function bindSelToolbar() {
     const bar = document.getElementById("sel-toolbar");
+    const dd = document.getElementById("sel-dropdown");
     if (!bar || bar.dataset.bound === "1") return;
     bar.dataset.bound = "1";
     bar.addEventListener("mousedown", (e) => e.preventDefault());
     bar.addEventListener("click", (e) => {
+      const menuBtn = e.target.closest("[data-sel-menu]");
+      if (menuBtn) {
+        e.stopPropagation();
+        openSelDropdown(menuBtn.dataset.selMenu, menuBtn);
+        return;
+      }
       const btn = e.target.closest("[data-sel]");
       if (!btn) return;
       applySelFormat(btn.dataset.sel);
+      hideSelDropdown();
     });
+    if (dd) {
+      dd.addEventListener("mousedown", (e) => e.preventDefault());
+      dd.addEventListener("click", (e) => {
+        const sw = e.target.closest("[data-color]");
+        if (sw) {
+          const c = sw.dataset.color;
+          // Feishu-like: first row is text color, hold alt for highlight — use as text color by default
+          applySelFormat("color:" + c);
+          hideSelDropdown();
+          return;
+        }
+        const act = e.target.closest("[data-action]");
+        if (act) {
+          applySelFormat(act.dataset.action);
+          hideSelDropdown();
+        }
+      });
+    }
     document.addEventListener("mouseup", (e) => {
-      if (e.target.closest("#sel-toolbar")) return;
+      if (e.target.closest("#sel-toolbar") || e.target.closest("#sel-dropdown")) return;
       const sel = window.getSelection();
       if (!sel || sel.isCollapsed || !sel.toString().trim()) {
         hideSelToolbar();
@@ -362,8 +592,147 @@
       showSelToolbarNear(sel.getRangeAt(0).getBoundingClientRect());
     });
     document.addEventListener("mousedown", (e) => {
-      if (!e.target.closest("#sel-toolbar")) hideSelToolbar();
+      if (!e.target.closest("#sel-toolbar") && !e.target.closest("#sel-dropdown")) {
+        hideSelToolbar();
+      }
+      if (!e.target.closest("#block-handle") && !e.target.closest("#block-menu")) {
+        hideBlockMenu();
+      }
     });
+  }
+
+  function hideBlockMenu() {
+    const m = document.getElementById("block-menu");
+    if (m) m.hidden = true;
+  }
+
+  function showBlockMenuAt(x, y, blockIndex) {
+    state._activeBlockIndex = blockIndex;
+    const menu = document.getElementById("block-menu");
+    if (!menu) return;
+    menu.innerHTML = `
+      <div class="menu-grid" title="块类型">
+        <button type="button" data-bm="p" title="正文">T</button>
+        <button type="button" data-bm="h1" title="标题 1">H1</button>
+        <button type="button" data-bm="h2" title="标题 2">H2</button>
+        <button type="button" data-bm="h3" title="标题 3">H3</button>
+        <button type="button" data-bm="ol" title="有序列表">1.</button>
+        <button type="button" data-bm="ul" title="无序列表">•</button>
+      </div>
+      <div class="menu-grid">
+        <button type="button" data-bm="task" title="任务列表">☑</button>
+        <button type="button" data-bm="code" title="代码块">{ }</button>
+        <button type="button" data-bm="quote" title="引用">❝</button>
+        <button type="button" data-bm="indent-" title="减少缩进">⇤</button>
+        <button type="button" data-bm="indent+" title="增加缩进">⇥</button>
+        <button type="button" data-bm="copy-block" title="复制">⧉</button>
+      </div>
+      <div class="menu-sep"></div>
+      <button type="button" class="menu-row" data-bm-sub="indent">
+        <span class="mr-ico">☰</span><span class="mr-label">缩进和对齐</span><span class="mr-caret">›</span>
+      </button>
+      <div class="menu-sub" data-sub="indent" hidden>
+        <button type="button" data-bm="indent+">增加缩进</button>
+        <button type="button" data-bm="indent-">减少缩进</button>
+        <button type="button" data-bm="align-left">左对齐</button>
+        <button type="button" data-bm="align-center">居中</button>
+        <button type="button" data-bm="align-right">右对齐</button>
+      </div>
+      <div class="menu-sep"></div>
+      <button type="button" class="menu-row" data-bm="cut-block"><span class="mr-ico">✂</span><span>剪切</span></button>
+      <button type="button" class="menu-row" data-bm="copy-block"><span class="mr-ico">⧉</span><span>复制</span></button>
+      <button type="button" class="menu-row" data-bm="duplicate-block"><span class="mr-ico">⧉</span><span>创建副本</span></button>
+      <button type="button" class="menu-row danger" data-bm="delete-block"><span class="mr-ico">🗑</span><span>删除</span></button>
+    `;
+    menu.hidden = false;
+    const w = menu.offsetWidth || 220;
+    const h = menu.offsetHeight || 360;
+    menu.style.left = Math.min(window.innerWidth - w - 8, Math.max(8, x)) + "px";
+    menu.style.top = Math.min(window.innerHeight - h - 8, Math.max(8, y)) + "px";
+    menu.onclick = (e) => {
+      const sub = e.target.closest("[data-bm-sub]");
+      if (sub) {
+        const name = sub.dataset.bmSub;
+        const panel = menu.querySelector(`[data-sub="${name}"]`);
+        if (panel) panel.hidden = !panel.hidden;
+        return;
+      }
+      const btn = e.target.closest("[data-bm]");
+      if (!btn) return;
+      applyBlockLineAction(btn.dataset.bm);
+      hideBlockMenu();
+      hideBlockHandle();
+    };
+  }
+
+  function hideBlockHandle() {
+    const h = document.getElementById("block-handle");
+    if (h) {
+      h.hidden = true;
+      h.classList.remove("visible");
+    }
+  }
+
+  function positionBlockHandle(block) {
+    const handle = document.getElementById("block-handle");
+    const pane = $("#preview-pane");
+    if (!handle || !block || !pane) return;
+    const pr = pane.getBoundingClientRect();
+    const br = block.getBoundingClientRect();
+    handle.hidden = false;
+    handle.classList.add("visible");
+    // Fixed coords relative to viewport (handle is position absolute in pane if pane is relative)
+    const paneStyle = getComputedStyle(pane);
+    if (paneStyle.position === "relative" || paneStyle.position === "absolute") {
+      handle.style.position = "absolute";
+      handle.style.top = br.top - pr.top + pane.scrollTop + "px";
+      handle.style.left = Math.max(4, br.left - pr.left - 34) + "px";
+    } else {
+      handle.style.position = "fixed";
+      handle.style.top = br.top + "px";
+      handle.style.left = Math.max(4, br.left - 34) + "px";
+    }
+    state._activeBlockIndex = Number(block.dataset.index || 0);
+  }
+
+  function bindBlockHandle() {
+    const handle = document.getElementById("block-handle");
+    if (!handle || handle.dataset.bound === "1") return;
+    handle.dataset.bound = "1";
+    handle.addEventListener("mousedown", (e) => e.preventDefault());
+    $("#bh-type")?.addEventListener("click", (e) => {
+      const r = e.currentTarget.getBoundingClientRect();
+      showBlockMenuAt(r.right + 4, r.top, activeBlockIndex());
+    });
+    $("#bh-more")?.addEventListener("click", (e) => {
+      const r = e.currentTarget.getBoundingClientRect();
+      showBlockMenuAt(r.right + 4, r.top, activeBlockIndex());
+    });
+
+    el.preview.addEventListener(
+      "mousemove",
+      (e) => {
+        if (state.mode === "source") {
+          hideBlockHandle();
+          return;
+        }
+        if (e.target.closest?.("#block-handle") || e.target.closest?.("#block-menu")) return;
+        const block = e.target.closest?.(".md-block");
+        if (!block || !el.preview.contains(block)) {
+          hideBlockHandle();
+          return;
+        }
+        positionBlockHandle(block);
+      },
+      { passive: true }
+    );
+    $("#preview-pane")?.addEventListener(
+      "mouseleave",
+      () => {
+        if (document.getElementById("block-menu")?.hidden !== false) hideBlockHandle();
+      },
+      { passive: true }
+    );
   }
 
   function bindPreviewDelegates() {
@@ -2519,6 +2888,7 @@ ${previewHtml}
     });
     bindPreviewDelegates();
     bindSelToolbar();
+    bindBlockHandle();
   }
 
   function wrapSelection(pre, post) {

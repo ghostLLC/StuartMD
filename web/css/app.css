@@ -1127,12 +1127,14 @@ kbd {
   position: fixed;
   z-index: 120;
   display: flex;
-  gap: 2px;
-  padding: 4px;
+  align-items: center;
+  gap: 1px;
+  padding: 4px 6px;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: var(--shadow);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.12), 0 1px 2px rgba(15, 23, 42, 0.06);
+  font-family: var(--font-ui);
 }
 
 .sel-toolbar[hidden] {
@@ -1144,15 +1146,305 @@ kbd {
   background: transparent;
   color: var(--text);
   min-width: 30px;
-  height: 28px;
-  border-radius: 5px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: var(--font-ui);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  line-height: 1;
+}
+
+.sel-toolbar button:hover {
+  background: var(--bg-hover);
+}
+
+.sel-toolbar button.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.sel-toolbar .sel-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--border);
+}
+
+.sel-toolbar .caret {
+  font-size: 10px;
+  opacity: 0.55;
+  margin-left: 1px;
+}
+
+.sel-toolbar .color-a {
+  font-weight: 700;
+  border-bottom: 3px solid #f5c542;
+  padding-bottom: 1px;
+  line-height: 1;
+}
+
+.sel-dropdown {
+  position: fixed;
+  z-index: 130;
+  min-width: 148px;
+  padding: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 32px rgba(15, 23, 42, 0.14);
+  font-family: var(--font-ui);
+}
+
+.sel-dropdown[hidden],
+.block-menu[hidden],
+.block-handle[hidden] {
+  display: none !important;
+}
+
+.sel-dropdown button,
+.block-menu button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+  font-family: var(--font-ui);
+}
+
+.sel-dropdown button:hover,
+.block-menu button:hover {
+  background: var(--bg-hover);
+}
+
+.sel-dropdown .swatches {
+  display: grid;
+  grid-template-columns: repeat(6, 22px);
+  gap: 6px;
+  padding: 6px;
+}
+
+.sel-dropdown .swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  cursor: pointer;
+  padding: 0;
+  min-width: 0;
+}
+
+.block-handle {
+  position: absolute;
+  z-index: 40;
+  display: flex;
+  flex-direction: row;
+  gap: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+  overflow: hidden;
+}
+
+.block-handle.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.block-handle button {
+  width: 28px;
+  height: 26px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.block-handle button.bh-drag {
+  color: var(--text-3);
+  cursor: grab;
+  font-size: 14px;
+  letter-spacing: -1px;
+  border-left: 1px solid var(--border);
+}
+
+.block-handle button:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
+}
+
+.block-menu {
+  position: fixed;
+  z-index: 140;
+  width: 220px;
+  padding: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 36px rgba(15, 23, 42, 0.16);
+  font-family: var(--font-ui);
+  max-height: min(70vh, 520px);
+  overflow: auto;
+}
+
+.block-menu button {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-family: var(--font-ui);
+  border-radius: 6px;
+}
+
+.block-menu button:hover {
+  background: var(--bg-hover);
+}
+
+.block-menu .menu-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 2px;
+  padding: 2px 2px 6px;
+}
+
+.block-menu .menu-grid button {
+  justify-content: center;
+  padding: 6px 0;
+  min-height: 30px;
+  font-size: 12px;
+}
+
+.block-menu .menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+
+.block-menu .menu-label {
+  padding: 6px 10px 4px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.block-menu .menu-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: var(--font-ui);
+  text-align: left;
+}
+
+.block-menu .menu-row:hover {
+  background: var(--bg-hover);
+}
+
+.block-menu .menu-row.danger:hover {
+  color: #dc2626;
+}
+
+.block-menu .mr-ico {
+  width: 18px;
+  text-align: center;
+  opacity: 0.75;
+  font-size: 13px;
+}
+
+.block-menu .mr-label {
+  flex: 1;
+}
+
+.block-menu .mr-caret {
+  opacity: 0.45;
+  font-size: 14px;
+}
+
+.block-menu .menu-sub {
+  padding: 2px 6px 6px 22px;
+}
+
+.block-menu .menu-sub button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  padding: 7px 10px;
+  border-radius: 6px;
   cursor: pointer;
   font-size: 13px;
   font-family: var(--font-ui);
 }
 
-.sel-toolbar button:hover {
+.block-menu .menu-sub button:hover {
   background: var(--bg-hover);
+}
+
+/* Soft text selection — Feishu-like, readable (never white-on-blue) */
+#preview ::selection,
+#preview *::selection,
+#preview .md-block ::selection,
+.markdown-body ::selection,
+.markdown-body *::selection {
+  background: #b6d4fe !important;
+  color: #1f2328 !important;
+  text-shadow: none !important;
+}
+
+#source::selection,
+#source *::selection,
+textarea::selection {
+  background: #b6d4fe !important;
+  color: #1f2328 !important;
+  text-shadow: none !important;
+}
+
+body[data-theme="dark"] #preview ::selection,
+body[data-theme="dark"] #preview *::selection,
+body[data-theme="dark"] #source::selection,
+body[data-theme="dark"] textarea::selection {
+  background: #1d4ed8 !important;
+  color: #f8fafc !important;
+}
+
+body[data-theme="sepia"] #preview ::selection,
+body[data-theme="sepia"] #preview *::selection {
+  background: #d4b896 !important;
+  color: #3c2f1e !important;
+}
+
+#preview-pane {
+  position: relative;
 }
 
 .markdown-body [contenteditable="true"] {

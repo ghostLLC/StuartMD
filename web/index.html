@@ -198,16 +198,35 @@
           </div>
         </div>
 
-        <!-- Floating selection toolbar -->
+        <!-- Floating selection toolbar (Feishu-like) -->
         <div id="sel-toolbar" class="sel-toolbar" hidden>
-          <button type="button" data-sel="h2" title="标题">H</button>
+          <button type="button" class="sel-caret" data-sel-menu="style" title="文本样式">
+            <span class="ico">T</span><span class="caret">▾</span>
+          </button>
+          <button type="button" class="sel-caret" data-sel-menu="align" title="缩进和对齐">
+            <span class="ico">☰</span><span class="caret">▾</span>
+          </button>
+          <span class="sel-sep"></span>
           <button type="button" data-sel="bold" title="加粗 Ctrl+B"><b>B</b></button>
+          <button type="button" data-sel="strike" title="删除线"><s>S</s></button>
           <button type="button" data-sel="italic" title="斜体 Ctrl+I"><i>I</i></button>
-          <button type="button" data-sel="strike" title="删除线">S</button>
+          <button type="button" data-sel="underline" title="下划线 Ctrl+U"><u>U</u></button>
+          <button type="button" data-sel="link" title="链接" aria-label="链接">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          </button>
           <button type="button" data-sel="code" title="行内代码">&lt;/&gt;</button>
-          <button type="button" data-sel="ul" title="无序列表">•</button>
-          <button type="button" data-sel="ol" title="有序列表">1.</button>
+          <button type="button" class="sel-caret" data-sel-menu="color" title="文字颜色">
+            <span class="color-a">A</span><span class="caret">▾</span>
+          </button>
         </div>
+        <div id="sel-dropdown" class="sel-dropdown" hidden></div>
+
+        <!-- Feishu-like block hover handle -->
+        <div id="block-handle" class="block-handle" hidden>
+          <button type="button" id="bh-type" title="块类型 / 插入">T</button>
+          <button type="button" id="bh-more" title="拖动排序 / 更多" class="bh-drag">⠿</button>
+        </div>
+        <div id="block-menu" class="block-menu" hidden></div>
 
         <!-- PDF viewer area -->
         <div id="pdf-area" hidden>
