@@ -148,16 +148,23 @@
         <!-- Find bar -->
         <div id="find-bar" hidden>
           <div class="find-row">
-            <input type="text" id="find-input" placeholder="查找…" />
+            <select id="find-scope" class="find-scope" title="查找范围">
+              <option value="file">本文件</option>
+              <option value="folder">同级文件夹</option>
+            </select>
+            <input type="text" id="find-input" placeholder="输入要查找的内容…" />
+            <button class="btn sm primary" id="btn-find-go" title="开始搜索 Enter">搜索</button>
+            <button class="btn sm" id="btn-find-next" title="下一个">下一个</button>
+            <button class="btn sm" id="btn-find-prev" title="上一个">上一个</button>
             <input type="text" id="replace-input" placeholder="替换为…" />
-            <button class="btn sm" id="btn-find-next">下一个</button>
-            <button class="btn sm" id="btn-find-prev">上一个</button>
             <button class="btn sm" id="btn-replace">替换</button>
             <button class="btn sm" id="btn-replace-all">全部</button>
+            <span id="find-count" class="find-count"></span>
             <button class="icon-btn sm" id="btn-find-close" title="关闭">
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
             </button>
           </div>
+          <div id="find-folder-results" class="find-folder-results" hidden></div>
         </div>
 
         <!-- Welcome -->
@@ -226,6 +233,8 @@
         <div id="sel-dropdown" class="sel-dropdown" hidden></div>
 
         <div id="block-menu" class="block-menu" hidden></div>
+        <!-- Preview context insert menu (Typora-like) -->
+        <div id="insert-menu" class="block-menu insert-menu" hidden></div>
 
         <!-- PDF viewer area -->
         <div id="pdf-area" hidden>

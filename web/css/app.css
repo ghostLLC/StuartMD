@@ -1405,6 +1405,65 @@ kbd {
   background: var(--bg-hover);
 }
 
+.find-count {
+  font-size: 12px;
+  color: var(--text-3);
+  min-width: 48px;
+  white-space: nowrap;
+}
+
+.find-scope {
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  padding: 0 6px;
+  font-family: var(--font-ui);
+}
+
+.find-folder-results {
+  max-height: 220px;
+  overflow: auto;
+  border-top: 1px solid var(--border);
+  padding: 4px;
+}
+
+.find-folder-results .fr-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: var(--font-ui);
+}
+
+.find-folder-results .fr-item:hover {
+  background: var(--bg-hover);
+}
+
+.find-folder-results .fr-file {
+  color: var(--text-3);
+  font-size: 11px;
+  margin-right: 6px;
+}
+
+.find-folder-results .fr-empty {
+  padding: 8px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.insert-menu {
+  min-width: 200px;
+}
+
 /* Soft gray selection — readable on light theme; per-theme adapted */
 #preview ::selection,
 #preview *::selection,
