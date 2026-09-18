@@ -613,10 +613,11 @@
     if (m) m.hidden = true;
   }
 
-  function showBlockMenuAt(x, y, blockIndex) {
+  function showBlockMenuAt(x, y, blockIndex, anchorRect) {
     state._activeBlockIndex = blockIndex;
     const menu = document.getElementById("block-menu");
     if (!menu) return;
+    // Compact 4-col / 3-row icon grid — narrower panel, less occlusion
     menu.innerHTML = `
       <div class="menu-grid" title="块类型">
         <button type="button" data-bm="p" title="正文">T</button>
@@ -625,8 +626,6 @@
         <button type="button" data-bm="h3" title="标题 3">H3</button>
         <button type="button" data-bm="ol" title="有序列表">1.</button>
         <button type="button" data-bm="ul" title="无序列表">•</button>
-      </div>
-      <div class="menu-grid">
         <button type="button" data-bm="task" title="任务列表">☑</button>
         <button type="button" data-bm="code" title="代码块">{ }</button>
         <button type="button" data-bm="quote" title="引用">❝</button>
@@ -652,18 +651,56 @@
       <button type="button" class="menu-row danger" data-bm="delete-block"><span class="mr-ico">🗑</span><span>删除</span></button>
     `;
     menu.hidden = false;
-    const w = menu.offsetWidth || 220;
+    const w = menu.offsetWidth || 168;
     const h = menu.offsetHeight || 360;
-    // Feishu-like: place menu to the LEFT of the handle, avoid covering sidebar
     const sidebar = document.getElementById("sidebar");
     const sidebarRight =
       sidebar && sidebar.classList.contains("open") ? sidebar.getBoundingClientRect().right : 0;
-    let left = Math.max(8, x - w - 8);
-    // x passed as handle.right; prefer left of handle
-    left = Math.max(sidebarRight + 8, x - w - 8);
-    if (left + w > window.innerWidth - 8) left = Math.max(8, x + 4);
+    const widthMode = document.body.dataset.width || "default";
+    const handle = document.getElementById("block-handle");
+    const hr = handle && !handle.hidden ? handle.getBoundingClientRect() : null;
+
+    // Anchor = selected content (line / paragraph / live selection), not the handle chrome
+    let anchor = anchorRect;
+    if (!anchor) {
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed && sel.rangeCount) {
+        const r = sel.getRangeAt(0).getBoundingClientRect();
+        if (r && (r.width || r.height)) anchor = r;
+      }
+    }
+    if (!anchor && state._handleAnchor && document.contains(state._handleAnchor)) {
+      anchor = state._handleAnchor.getBoundingClientRect();
+    }
+
+    let left;
+    let top;
+    // Wide / full: Feishu — always drop the menu under the selected content.
+    // Default: try left of handle when the gutter is wide enough; otherwise below.
+    const preferBelow = widthMode !== "default" || !hr;
+    if (preferBelow && anchor) {
+      left = hr ? hr.left : anchor.left;
+      top = anchor.bottom + 6;
+      if (top + h > window.innerHeight - 8) top = Math.max(8, anchor.top - h - 6);
+    } else if (hr) {
+      left = hr.right - w - 8;
+      top = hr.top;
+      if (left < sidebarRight + 12) {
+        left = hr.left;
+        top = (anchor ? anchor.bottom : hr.bottom) + 6;
+        if (top + h > window.innerHeight - 8) {
+          top = Math.max(8, (anchor ? anchor.top : hr.top) - h - 6);
+        }
+      }
+    } else {
+      left = x;
+      top = y;
+    }
+
+    left = Math.min(window.innerWidth - w - 8, Math.max(sidebarRight + 8, left));
+    top = Math.min(window.innerHeight - h - 8, Math.max(8, top));
     menu.style.left = left + "px";
-    menu.style.top = Math.min(window.innerHeight - h - 8, Math.max(8, y)) + "px";
+    menu.style.top = top + "px";
     menu.onclick = (e) => {
       const sub = e.target.closest("[data-bm-sub]");
       if (sub) {
@@ -828,6 +865,7 @@
     handle.style.top = top + "px";
     handle.style.left = left + "px";
     state._activeBlockIndex = Number(block.dataset.index || 0);
+    state._handleAnchor = target;
   }
 
   function bindBlockHandle() {
@@ -848,7 +886,18 @@
     });
     $("#bh-type")?.addEventListener("click", (e) => {
       const r = e.currentTarget.getBoundingClientRect();
-      showBlockMenuAt(r.right + 4, r.top, activeBlockIndex());
+      const idx = activeBlockIndex();
+      let anchorEl = state._handleAnchor;
+      if (!anchorEl || !document.contains(anchorEl) || (el.preview && !el.preview.contains(anchorEl))) {
+        anchorEl = el.preview?.querySelector(`.md-block[data-index="${idx}"]`) || null;
+      }
+      let anchorRect = anchorEl ? anchorEl.getBoundingClientRect() : null;
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed && sel.rangeCount && el.preview?.contains(sel.anchorNode)) {
+        const sr = sel.getRangeAt(0).getBoundingClientRect();
+        if (sr && (sr.width || sr.height)) anchorRect = sr;
+      }
+      showBlockMenuAt(r.right + 4, r.top, idx, anchorRect);
     });
 
     if (menu && menu.dataset.bound !== "1") {

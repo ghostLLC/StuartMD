@@ -1293,7 +1293,7 @@ kbd {
 .block-menu {
   position: fixed;
   z-index: 140;
-  width: 220px;
+  width: 168px;
   padding: 6px;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -1319,7 +1319,7 @@ kbd {
 
 .block-menu .menu-grid {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 2px;
   padding: 2px 2px 6px;
 }
@@ -1467,9 +1467,15 @@ kbd {
 /* Page width (Feishu-like) */
 body[data-width="default"] #preview,
 body[data-width="default"] #preview .markdown-body {
-  max-width: 820px;
+  max-width: 780px;
   margin-left: auto;
   margin-right: auto;
+}
+
+/* More gutter between sidebar and content so block handle/menu do not cover text */
+body[data-width="default"] #preview {
+  padding-left: 80px;
+  padding-right: 56px;
 }
 
 body[data-width="wide"] #preview,
@@ -1479,11 +1485,19 @@ body[data-width="wide"] #preview .markdown-body {
   margin-right: auto;
 }
 
+body[data-width="wide"] #preview {
+  padding-left: 72px;
+}
+
 body[data-width="full"] #preview,
 body[data-width="full"] #preview .markdown-body {
   max-width: none;
   margin-left: 0;
   margin-right: 0;
+}
+
+body[data-width="full"] #preview {
+  padding-left: 72px;
 }
 
 .width-menu {
