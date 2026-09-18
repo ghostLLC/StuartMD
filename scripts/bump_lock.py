@@ -6,8 +6,8 @@ p = Path(
 )
 t = p.read_text(encoding="utf-8")
 t2, n = re.subn(
-    r'(name = "stuartmd"\nversion = ")2\.3\.[01](")',
-    r"\g<1>2.4.0\g<2>",
+    r'(name = "stuartmd"\nversion = ")2\.[0-9]+\.[0-9]+(")',
+    r"\g<1>2.5.0\g<2>",
     t,
 )
 print("replacements", n)

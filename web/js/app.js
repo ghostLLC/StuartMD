@@ -9,7 +9,7 @@
     content: "",
     dirty: false,
     mode: "preview", // preview | split | source
-    theme: "light", // light | dark | sepia | minion
+    theme: "light", // light | gray | dark | sepia | minion | wallpaper
     folder: "",
     sidebarOpen: true,
     findHits: [],
@@ -1533,7 +1533,12 @@
         window.mermaid.initialize({
           startOnLoad: false,
           securityLevel: "loose",
-          theme: state.theme === "dark" ? "dark" : state.theme === "minion" ? "neutral" : "default",
+          theme:
+            state.theme === "dark" || state.theme === "gray"
+              ? "dark"
+              : state.theme === "minion"
+                ? "neutral"
+                : "default",
           fontFamily: "Segoe UI, PingFang SC, Microsoft YaHei, sans-serif",
         });
         return true;
@@ -1713,12 +1718,13 @@
   }
 
   // ---------- Theme ----------
-  const THEMES = ["light", "dark", "sepia", "minion", "wallpaper"];
+  const THEMES = ["light", "gray", "dark", "sepia", "minion", "wallpaper"];
   function setTheme(theme) {
     state.theme = theme;
     el.body.dataset.theme = theme;
-    el.hlLight.disabled = theme === "dark";
-    el.hlDark.disabled = theme !== "dark";
+    const darkish = theme === "dark" || theme === "gray";
+    el.hlLight.disabled = darkish;
+    el.hlDark.disabled = !darkish;
     if (mermaidReady) {
       mermaidReady = null;
       if (state.mode !== "source") scheduleRender();
@@ -1815,6 +1821,7 @@
   function themeLabel(t) {
     return {
       light: "浅色",
+      gray: "灰色",
       dark: "深色",
       sepia: "羊皮纸",
       minion: "小黄人",
@@ -3413,9 +3420,10 @@ ${previewHtml}
     window.addEventListener("mousemove", (e) => {
       if (!dragging) return;
       if (el.splitResizer.dataset.side === "split") {
+        // Split: preview left, source right — size source from the right edge
         const rect = el.editorArea.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const pct = Math.min(75, Math.max(20, (x / rect.width) * 100));
+        const fromRight = rect.right - e.clientX;
+        const pct = Math.min(75, Math.max(20, (fromRight / rect.width) * 100));
         el.sourcePane.style.flex = `0 0 ${pct}%`;
       } else {
         const w = Math.min(420, Math.max(180, e.clientX - el.sidebar.getBoundingClientRect().left));

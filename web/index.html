@@ -65,6 +65,7 @@
           </button>
           <div class="file-menu align-right" id="theme-menu" hidden>
             <button class="menu-item" data-theme-choice="light">浅色</button>
+            <button class="menu-item" data-theme-choice="gray">灰色</button>
             <button class="menu-item" data-theme-choice="dark">深色</button>
             <button class="menu-item" data-theme-choice="sepia">羊皮纸</button>
             <button class="menu-item" data-theme-choice="minion">小黄人</button>
@@ -212,12 +213,8 @@
           </div>
         </div>
 
-        <!-- Editor area -->
+        <!-- Editor area: split = preview (left) + source (right) -->
         <div id="editor-area" hidden>
-          <div id="source-pane" class="pane">
-            <textarea id="source" spellcheck="false" placeholder="在此输入 Markdown…"></textarea>
-          </div>
-          <div id="split-resizer" hidden></div>
           <div id="preview-pane" class="pane">
             <div class="preview-hint">点击段落即可直接编辑</div>
             <article id="preview" class="markdown-body"></article>
@@ -225,6 +222,10 @@
             <div id="block-handle" class="block-handle" hidden>
               <button type="button" id="bh-type" title="块操作" class="bh-single">T&nbsp;&nbsp;⠿</button>
             </div>
+          </div>
+          <div id="split-resizer" hidden></div>
+          <div id="source-pane" class="pane">
+            <textarea id="source" spellcheck="false" placeholder="在此输入 Markdown…"></textarea>
           </div>
         </div>
 
@@ -351,6 +352,7 @@
           <h3 data-i18n="theme">外观</h3>
           <div class="row">
             <button class="btn theme-pick" data-theme="light" data-i18n="light">浅色</button>
+            <button class="btn theme-pick" data-theme="gray" data-i18n="gray">灰色</button>
             <button class="btn theme-pick" data-theme="dark" data-i18n="dark">深色</button>
             <button class="btn theme-pick" data-theme="sepia" data-i18n="sepia">羊皮纸</button>
             <button class="btn theme-pick" data-theme="minion" data-i18n="minion">小黄人</button>
