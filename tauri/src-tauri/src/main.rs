@@ -1,6 +1,7 @@
 // StuartMD Tauri shell
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod ai_api;
 mod fs_api;
 mod win_api;
 
@@ -63,6 +64,15 @@ fn main() {
             win_api::stuart_add_annotation,
             win_api::stuart_delete_annotation,
             win_api::stuart_clear_annotations,
+            // AI / memory / tool surface (medium-term)
+            ai_api::stuart_get_capabilities,
+            ai_api::stuart_ai_home,
+            ai_api::stuart_memory_list,
+            ai_api::stuart_memory_get,
+            ai_api::stuart_memory_set,
+            ai_api::stuart_memory_delete,
+            ai_api::stuart_search_md,
+            ai_api::stuart_workspace_files,
         ])
         .setup(|app| {
             if let Some(w) = app.get_webview_window("main") {

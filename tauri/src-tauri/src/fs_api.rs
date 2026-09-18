@@ -6,11 +6,15 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 const APP_ID: &str = "StuartMD";
-pub const VERSION: &str = "2.3.1";
+pub const VERSION: &str = "2.4.0";
 pub const PROG_ID: &str = "StuartMD.Markdown";
 pub const SETTINGS_SCHEMA: i64 = 2;
 const PDF_MAX: u64 = 40 * 1024 * 1024;
-const MD_EXTS: [&str; 5] = [".md", ".markdown", ".mdown", ".mkd", ".txt"];
+pub const MD_EXTS: [&str; 5] = [".md", ".markdown", ".mdown", ".mkd", ".txt"];
+
+pub fn walk_md_public(dir: &Path) -> Vec<Value> {
+    walk_md(dir, 1, 4)
+}
 
 static STARTUP_FILE: OnceLock<Option<String>> = OnceLock::new();
 
@@ -126,21 +130,67 @@ pub fn migrate_settings(raw: Option<Value>) -> Value {
     s
 }
 
-pub fn load_settings_migrated() -> Value {
-    let path = settings_path();
-    let raw = if path.exists() {
-        Some(load_json(&path))
+pub fn export_safe_name(name: &str) -> String {
+    let base = Path::new(name)
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "export.html".into());
+    let cleaned: String = base
+        .chars()
+        .map(|c| if c == '/' || c == '\\' || c == ':' { '_' } else { c })
+        .filter(|c| *c != '\0')
+        .collect();
+    let cleaned = cleaned.trim().trim_start_matches('.').to_string();
+    if cleaned.is_empty() {
+        "export.html".into()
+    } else if cleaned.len() > 120 {
+        cleaned.chars().take(120).collect()
     } else {
-        None
+        cleaned
+    }
+}
+
+pub fn is_under_plugin_dir(p: &Path) -> bool {
+    let canonical = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let roots = [plugins_dir(), exe_dir().join("plugins")];
+    for root in roots {
+        let root_c = root.canonicalize().unwrap_or(root);
+        if canonical.starts_with(&root_c) {
+            return true;
+        }
+    }
+    false
+}
+
+static SETTINGS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn settings_guard() -> std::sync::MutexGuard<'static, ()> {
+    SETTINGS_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn load_settings_migrated_unlocked() -> Value {
+    let path = settings_path();
+    let before = if path.exists() { Some(load_json(&path)) } else { None };
+    let s = migrate_settings(before.clone());
+    let changed = match &before {
+        None => true,
+        Some(b) => b != &s,
     };
-    let s = migrate_settings(raw);
-    let _ = save_json(&path, &s);
+    if changed {
+        let _ = save_json(&path, &s);
+    }
     s
 }
 
+pub fn load_settings_migrated() -> Value {
+    let _guard = settings_guard();
+    load_settings_migrated_unlocked()
+}
+
 pub fn push_recent(path: &str, kind: &str) {
+    let _guard = settings_guard();
     let path_ref = settings_path();
-    let mut s = load_settings_migrated();
+    let mut s = load_settings_migrated_unlocked();
     let name = Path::new(path)
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
@@ -218,8 +268,9 @@ pub fn stuart_get_settings() -> Value {
 
 #[tauri::command]
 pub fn stuart_save_settings(data: Value) -> Result<bool, String> {
+    let _guard = settings_guard();
     let path = settings_path();
-    let mut cur = load_settings_migrated();
+    let mut cur = load_settings_migrated_unlocked();
     if let (Some(obj), Some(patch)) = (cur.as_object_mut(), data.as_object()) {
         for (k, v) in patch {
             obj.insert(k.clone(), v.clone());
@@ -257,14 +308,26 @@ pub fn stuart_read_file(path: String) -> Value {
     if meta.len() > 8 * 1024 * 1024 {
         return json!({"error": "文件过大（>8MB）"});
     }
-    let content = fs::read_to_string(p).unwrap_or_default();
+    let bytes = match fs::read(p) {
+        Ok(b) => b,
+        Err(e) => return json!({"error": e.to_string()}),
+    };
+    // Never silently return empty content on encoding failures
+    let (content, encoding) = match String::from_utf8(bytes) {
+        Ok(s) => (s, "utf-8"),
+        Err(e) => (
+            String::from_utf8_lossy(e.as_bytes()).to_string(),
+            "lossy",
+        ),
+    };
     push_recent(&p.to_string_lossy(), "file");
     json!({
         "kind": "markdown",
         "path": p.to_string_lossy(),
         "name": p.file_name().unwrap_or_default().to_string_lossy(),
         "content": content,
-        "size": meta.len()
+        "size": meta.len(),
+        "encoding": encoding
     })
 }
 
@@ -312,7 +375,12 @@ pub fn stuart_read_pdf(path: String) -> Value {
 }
 
 fn walk_md(dir: &Path, depth: i32, max_depth: i32) -> Vec<Value> {
-    if depth > max_depth {
+    walk_md_capped(dir, depth, max_depth, &mut 0)
+}
+
+fn walk_md_capped(dir: &Path, depth: i32, max_depth: i32, count: &mut usize) -> Vec<Value> {
+    const MAX_NODES: usize = 2500;
+    if depth > max_depth || *count >= MAX_NODES {
         return vec![];
     }
     let mut items = vec![];
@@ -326,13 +394,16 @@ fn walk_md(dir: &Path, depth: i32, max_depth: i32) -> Vec<Value> {
         (!is_dir, name)
     });
     for e in entries {
+        if *count >= MAX_NODES {
+            break;
+        }
         let name = e.file_name().to_string_lossy().to_string();
         if name.starts_with('.') {
             continue;
         }
         let p = e.path();
         if p.is_dir() {
-            let children = walk_md(&p, depth + 1, max_depth);
+            let children = walk_md_capped(&p, depth + 1, max_depth, count);
             let has_md = fs::read_dir(&p)
                 .map(|rd| {
                     rd.flatten().any(|c| {
@@ -350,11 +421,13 @@ fn walk_md(dir: &Path, depth: i32, max_depth: i32) -> Vec<Value> {
                 })
                 .unwrap_or(false);
             if !children.is_empty() || has_md {
+                *count += 1;
                 items.push(json!({"name": name, "path": p.to_string_lossy(), "type": "dir", "children": children}));
             }
         } else if let Some(ext) = p.extension().and_then(|x| x.to_str()) {
             let e2 = format!(".{}", ext.to_lowercase());
             if MD_EXTS.contains(&e2.as_str()) {
+                *count += 1;
                 items.push(json!({"name": name, "path": p.to_string_lossy(), "type": "file"}));
             }
         }
@@ -437,19 +510,21 @@ pub fn stuart_open_new_window() -> Value {
 
 #[tauri::command]
 pub fn stuart_open_url(url: String) -> bool {
-    if !url.starts_with("http") {
+    // Strict scheme allowlist — reject httpfoo / javascript: / file: etc.
+    let u = url.trim();
+    if !(u.starts_with("http://") || u.starts_with("https://")) {
         return false;
     }
     #[cfg(target_os = "windows")]
     {
         std::process::Command::new("cmd")
-            .args(["/C", "start", "", &url])
+            .args(["/C", "start", "", u])
             .spawn()
             .is_ok()
     }
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = url;
+        let _ = u;
         false
     }
 }
@@ -518,7 +593,11 @@ pub fn stuart_list_plugins() -> Value {
 
 #[tauri::command]
 pub fn stuart_read_plugin_source(path: String) -> Value {
-    match fs::read_to_string(&path) {
+    let p = Path::new(&path);
+    if !is_under_plugin_dir(p) {
+        return json!({"error": "插件路径不在允许目录"});
+    }
+    match fs::read_to_string(p) {
         Ok(source) => json!({"path": path, "source": source}),
         Err(e) => json!({"error": e.to_string()}),
     }
@@ -555,9 +634,15 @@ pub fn stuart_set_plugin_enabled(plugin_id: String, enabled: bool) -> Value {
 
 #[tauri::command]
 pub fn stuart_import_wallpaper(b64: String, name: Option<String>) -> Value {
-    let raw = B64
-        .decode(b64.split(',').last().unwrap_or(""))
-        .unwrap_or_default();
+    const WALLPAPER_MAX: usize = 12 * 1024 * 1024;
+    let payload = b64.split(',').last().unwrap_or("");
+    if payload.len() > WALLPAPER_MAX {
+        return json!({"error": "壁纸过大（>12MB）"});
+    }
+    let raw = B64.decode(payload).unwrap_or_default();
+    if raw.len() > 10 * 1024 * 1024 {
+        return json!({"error": "壁纸过大（>10MB）"});
+    }
     let dir = wallpapers_dir();
     let safe = name.unwrap_or_else(|| "wallpaper.png".into());
     let safe: String = safe
@@ -605,7 +690,7 @@ pub fn stuart_clear_wallpaper() -> Value {
 #[tauri::command]
 pub fn stuart_export_html(html: String, suggested_name: Option<String>) -> Value {
     // Frontend prefers dialog plugin; this command is a write fallback when path is known.
-    let name = suggested_name.unwrap_or_else(|| "export.html".into());
+    let name = export_safe_name(&suggested_name.unwrap_or_else(|| "export.html".into()));
     let path = data_dir().join("exports").join(&name);
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
@@ -626,7 +711,7 @@ pub fn stuart_open_welcome() -> Value {
         "name": "欢迎使用 StuartMD.md",
         "kind": "markdown",
         "welcome": true,
-        "content": "# StuartMD\n\n轻量 Markdown 阅读与编辑器。\n\n**项目仓库：** https://github.com/ghostLLC/StuartMD\n\n**当前版本：** 2.3.1\n\n## 能做什么\n\n- 读文档：美化排版、公式、表格、代码高亮\n- 写笔记：阅读 / 分栏 / 源码，点击段落直接编辑\n- 飞书式交互：块手柄、选中浮动栏、块菜单；双击代码/公式/图表进源码编辑\n- 撤销重做：Ctrl+Z / Ctrl+Y\n- 看 PDF：标黄批注\n- 多窗口、主题、多语言\n",
+        "content": "# StuartMD\n\n轻量 Markdown 阅读与编辑器。\n\n**项目仓库：** https://github.com/ghostLLC/StuartMD\n\n**当前版本：** 2.4.0\n\n## 能做什么\n\n- 读文档：美化排版、公式、表格、代码高亮\n- 写笔记：阅读 / 分栏 / 源码，点击段落直接编辑\n- 飞书式交互：块手柄、选中浮动栏、块菜单；双击代码/公式/图表进源码编辑\n- 撤销重做：Ctrl+Z / Ctrl+Y\n- 看 PDF：标黄批注\n- 多窗口、主题、多语言\n",
         "size": 0
     })
 }

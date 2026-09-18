@@ -62,6 +62,21 @@
     e.scroll.classList.toggle("highlight-mode", state.mode === "highlight");
   }
 
+  async function disposeDoc() {
+    try {
+      if (state._io) {
+        state._io.disconnect();
+        state._io = null;
+      }
+    } catch (_) {}
+    try {
+      if (state.doc && typeof state.doc.destroy === "function") {
+        await state.doc.destroy();
+      }
+    } catch (_) {}
+    state.doc = null;
+  }
+
   async function openPdf(payload) {
     if (!window.pdfjsLib) {
       toast("PDF 引擎未加载");
@@ -71,6 +86,7 @@
     e.welcome.hidden = true;
     e.editor.hidden = true;
     e.area.hidden = false;
+    await disposeDoc();
     state.path = payload.path;
     state.name = payload.name;
     state.annotations = payload.annotations || [];
@@ -448,7 +464,8 @@
   function hidePdf() {
     const e = el();
     e.area.hidden = true;
-    state.doc = null;
+    // Fire-and-forget dispose; avoid leaking PDF.js workers/bitmaps
+    disposeDoc();
     state.path = null;
   }
 

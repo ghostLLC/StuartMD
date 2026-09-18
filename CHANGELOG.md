@@ -2,6 +2,30 @@
 
 本文件记录 StuartMD 的版本变更，便于开发与发布对照。
 
+## [2.4.0] - 2026-09-17
+
+### 中期目标准备（AI 接口）
+- 新增稳定宿主门面 `window.StuartAgent` / `window.Stuart`：文档读写、大纲、块、选区、撤销、工具注册
+- 插件 API 增加 `StuartPlugin.registerTool` / `agent()`
+- 后端新增：`stuart_get_capabilities`、`ai_home`、`memory_*`、`stuart_search_md`、`stuart_workspace_files`
+- AI 记忆目录：`%APPDATA%\StuartMD\ai\memory\`（键名白名单 + 大小限制）
+- Agent 写入文档默认清洗 `<script>` / `on*` / `javascript:`
+
+### 安全加固（不改交互）
+- `open_url` 仅允许 `http://` / `https://`
+- 插件源码读取限制在插件目录内
+- 导出 HTML 文件名消毒，阻断 `../` 路径穿越
+- 壁纸 base64 体积上限；相对图片路径阻断 `..` 逃逸
+- 设置读写加锁；无变更时不再反复写盘
+- 预览/ Mermaid SVG 渲染后剥离脚本类节点
+
+### 性能 / 稳定性
+- 自动保存竞态：切换文档后不再误标「已保存」
+- 打开文档加序号防竞态；文件夹搜索可中断 + 分批 + 优先走后端
+- 撤销栈增加约 4MB 字节上限；块编辑 document 监听不再泄漏
+- 重建预览后清理失效查找高亮；PDF 切换时销毁 worker
+- 目录树遍历节点上限；非 UTF-8 文件不再静默变成空文档
+
 ## [2.3.1] - 2026-09-17
 
 ### 修复 / 变更

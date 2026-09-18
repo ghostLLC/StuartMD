@@ -55,6 +55,16 @@
     delete_annotation: (path, id) =>
       invoke("stuart_delete_annotation", { pdfPath: path, annId: id }),
     clear_annotations: (path) => invoke("stuart_clear_annotations", { pdfPath: path }),
+    // AI / memory / tool surface (medium-term)
+    get_capabilities: () => invoke("stuart_get_capabilities"),
+    ai_home: () => invoke("stuart_ai_home"),
+    memory_list: () => invoke("stuart_memory_list"),
+    memory_get: (key) => invoke("stuart_memory_get", { key }),
+    memory_set: (key, content) => invoke("stuart_memory_set", { key, content }),
+    memory_delete: (key) => invoke("stuart_memory_delete", { key }),
+    search_md: (root, query, limit) =>
+      invoke("stuart_search_md", { root, query, limit: limit == null ? null : limit }),
+    workspace_files: (root) => invoke("stuart_workspace_files", { root }),
 
     open_file_dialog: async () => {
       const dlg = dialogApi();

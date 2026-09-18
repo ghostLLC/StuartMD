@@ -34,6 +34,16 @@
       clearTimeout(api.toast._t);
       api.toast._t = setTimeout(() => { t.hidden = true; }, 2000);
     },
+    /** Register an AI/plugin tool on StuartAgent. */
+    registerTool(def) {
+      const host = window.StuartAgent || window.Stuart;
+      if (!host || !host.registerTool) return { error: "agent api missing" };
+      return host.registerTool(def);
+    },
+    /** Access the stable agent facade (document / memory / tools). */
+    agent() {
+      return window.StuartAgent || window.Stuart || null;
+    },
   };
 
   async function loadAll() {

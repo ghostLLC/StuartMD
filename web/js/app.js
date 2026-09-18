@@ -176,7 +176,30 @@
       html = `<pre>${escapeHtml(String(e))}</pre>`;
     }
     wrap.innerHTML = html;
+    sanitizeRenderedHtml(wrap);
     return wrap;
+  }
+
+  /** Strip executable HTML while keeping layout tags (tables, lists, images). */
+  function sanitizeRenderedHtml(root) {
+    if (!root || root.nodeType !== 1) return;
+    try {
+      root.querySelectorAll("script,iframe,object,embed,link[rel=import]").forEach((n) => n.remove());
+      const all = root.querySelectorAll("*");
+      for (let i = 0; i < all.length; i++) {
+        const el = all[i];
+        const attrs = Array.from(el.attributes || []);
+        for (let j = 0; j < attrs.length; j++) {
+          const a = attrs[j];
+          const n = a.name || "";
+          const v = a.value || "";
+          if (/^on/i.test(n)) el.removeAttribute(n);
+          else if ((n === "href" || n === "src" || n === "xlink:href") && /^\s*javascript:/i.test(v)) {
+            el.removeAttribute(n);
+          }
+        }
+      }
+    } catch (_) {}
   }
 
   function postProcessBlock(node) {
@@ -280,6 +303,12 @@
     if (needMermaid) renderMermaid();
 
     lastPreviewBlocks = blocks;
+    // Preview DOM was rebuilt — previous find marks are detached
+    if (state.findHits && state.findHits.length) {
+      state.findHits = [];
+      state.findIndex = -1;
+      state._findQuery = "";
+    }
     updateOutline();
     updateStats();
   }
@@ -1264,9 +1293,13 @@
     el.previewPane.scrollTop = prevScroll;
 
     let done = false;
+    const cleanupDocDown = () => {
+      document.removeEventListener("mousedown", onDocDown, true);
+    };
     const commit = () => {
       if (done) return;
       done = true;
+      cleanupDocDown();
       const next = ta.value;
       const all = splitMarkdownBlocks(el.source.value || "");
       all[idx] = next;
@@ -1282,6 +1315,7 @@
       lastPreviewSource = joined;
       lastPreviewBlocks = splitMarkdownBlocks(joined);
       pushHistory(joined);
+      emitAgentEvent("document-changed", { source: "block-edit" });
       try {
         document.getSelection()?.removeAllRanges();
       } catch (_) {}
@@ -1289,6 +1323,7 @@
     const cancel = () => {
       if (done) return;
       done = true;
+      cleanupDocDown();
       lastPreviewSource = "";
       node.classList.remove("editing", "source-edit");
       node.innerHTML = "";
@@ -1304,7 +1339,6 @@
       if (done) return;
       if (node.contains(e.target)) return;
       commit();
-      document.removeEventListener("mousedown", onDocDown, true);
     };
     document.addEventListener("mousedown", onDocDown, true);
     ta.addEventListener("keydown", (e) => {
@@ -1547,6 +1581,7 @@
           const wrap = document.createElement("div");
           wrap.className = "mermaid-diagram";
           wrap.innerHTML = svg;
+          sanitizeRenderedHtml(wrap);
           const svgEl = wrap.querySelector("svg");
           if (svgEl) {
             svgEl.removeAttribute("style");
@@ -1889,17 +1924,28 @@
     }
     updateStats();
     if (changed || fromUser) scheduleRender();
+    if (changed) emitAgentEvent("document-changed", { fromUser: !!fromUser });
   }
 
-  // ---------- Undo / Redo (Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z) ----------
-  const _hist = { stack: [], i: -1, max: 100 };
+  // ---------- Undo / Redo (Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z / Ctrl+Shift+Y) ----------
+  // Product policy: Ctrl+Shift+Z = undo (same as Ctrl+Z); redo = Ctrl+Y / Ctrl+Shift+Y
+  const _hist = { stack: [], i: -1, max: 100, maxBytes: 4 * 1024 * 1024 };
   let _histDebounce = 0;
+
+  function histTotalBytes(stack) {
+    let n = 0;
+    for (let i = 0; i < stack.length; i++) n += (stack[i] && stack[i].length) || 0;
+    return n;
+  }
 
   function pushHistory(text) {
     if (_hist.i >= 0 && _hist.stack[_hist.i] === text) return;
     _hist.stack = _hist.stack.slice(0, _hist.i + 1);
     _hist.stack.push(text);
-    if (_hist.stack.length > _hist.max) _hist.stack.shift();
+    while (_hist.stack.length > 2) {
+      if (_hist.stack.length <= _hist.max && histTotalBytes(_hist.stack) <= _hist.maxBytes) break;
+      _hist.stack.shift();
+    }
     _hist.i = _hist.stack.length - 1;
   }
 
@@ -1990,16 +2036,26 @@
     if (String(state.path).toLowerCase().endsWith(".pdf")) return;
     if (!state.apiReady || !window.pywebview?.api?.write_file) return;
     try {
+      const path = state.path;
+      const tabId = state.activeTabId;
       const content = el.source.value;
-      const res = await window.pywebview.api.write_file(state.path, content);
+      const res = await window.pywebview.api.write_file(path, content);
       if (res?.error) {
         return;
       }
+      // Stale write: user switched document/tab while IO was in flight
+      if (state.path !== path) return;
       state.content = content;
-      state.dirty = false;
-      el.dirtyDot.hidden = true;
       state.lastAutosaveAt = Date.now();
+      if (el.source.value === content) {
+        state.dirty = false;
+        el.dirtyDot.hidden = true;
+        const tab = state.tabs.find((t) => t.id === tabId && t.path === path);
+        if (tab) tab.dirty = false;
+        updateWindowTitle();
+      }
       updateAutosaveStatus();
+      emitAgentEvent("document-saved", { path });
     } catch (_) {}
   }
 
@@ -2350,13 +2406,19 @@
   async function openDocumentSmart(pathOrPayload, opts = {}) {
     const fromTree = !!opts.fromTree;
     const forceTab = !!opts.forceTab;
+    const beginOpen = () => {
+      state._openSeq = (state._openSeq || 0) + 1;
+      return state._openSeq;
+    };
+    const isStale = (seq) => seq !== state._openSeq;
 
-    // Always honor tree clicks in current window
     if (fromTree || forceTab) {
       let payload = pathOrPayload;
       if (typeof payload === "string") {
         if (!state.apiReady) return;
+        const seq = beginOpen();
         payload = await window.pywebview.api.read_file(payload);
+        if (isStale(seq)) return;
         if (payload?.error) {
           toast(payload.error);
           return;
@@ -2367,7 +2429,6 @@
       return;
     }
 
-    // Explicit overrides
     if (state.openMode === "new_window") {
       const path = typeof pathOrPayload === "string" ? pathOrPayload : pathOrPayload?.path;
       if (path) {
@@ -2380,7 +2441,9 @@
     let payload = pathOrPayload;
     if (typeof payload === "string") {
       if (!state.apiReady) return;
+      const seq = beginOpen();
       payload = await window.pywebview.api.read_file(payload);
+      if (isStale(seq)) return;
     }
     if (payload?.error) {
       toast(payload.error);
@@ -3067,7 +3130,39 @@ ${previewHtml}
       box.innerHTML = `<div class="fr-empty">正在搜索…</div>`;
     }
     try {
+      const seq = (state._findSeq = (state._findSeq || 0) + 1);
+      // Prefer backend bounded search when available
+      if (window.pywebview.api.search_md) {
+        const res = await window.pywebview.api.search_md(root, q, 50);
+        if (seq !== state._findSeq) return;
+        if (res?.error) {
+          if (box) box.innerHTML = `<div class="fr-empty">${escapeHtml(res.error)}</div>`;
+          return;
+        }
+        const hits = (res.hits || []).map((h) => ({
+          path: h.path,
+          name: h.name,
+          line: h.line,
+          snippet: String(h.preview || "").slice(0, 80),
+        }));
+        state._folderHitCount = hits.length;
+        updateFindCount();
+        if (!box) return;
+        if (!hits.length) {
+          box.innerHTML = `<div class="fr-empty">同级文件夹中未找到（已扫 ${res.scanned_files || 0} 个文件）</div>`;
+          return;
+        }
+        box.innerHTML = hits
+          .map(
+            (h, i) =>
+              `<button type="button" class="fr-item" data-fr-idx="${i}"><span class="fr-file">${escapeHtml(h.name)}:${h.line}</span>${escapeHtml(h.snippet)}</button>`
+          )
+          .join("");
+        bindFolderHits(box, hits, q);
+        return;
+      }
       const tree = await window.pywebview.api.read_dir_tree(root);
+      if (seq !== state._findSeq) return;
       if (tree?.error) {
         if (box) box.innerHTML = `<div class="fr-empty">${tree.error}</div>`;
         return;
@@ -3088,24 +3183,31 @@ ${previewHtml}
       const MAX_FILES = 80;
       const MAX_HITS = 50;
       const batch = files.slice(0, MAX_FILES);
-      for (let i = 0; i < batch.length && hits.length < MAX_HITS; i++) {
-        const path = batch[i];
-        const res = await window.pywebview.api.read_file(path);
-        if (!res || res.error || res.content == null) continue;
-        const content = String(res.content);
-        const lines = content.split("\n");
-        for (let li = 0; li < lines.length; li++) {
-          if (hits.length >= MAX_HITS) break;
-          if (lines[li].toLowerCase().includes(lowerQ)) {
-            hits.push({
-              path,
-              name: res.name || path.split(/[\\/]/).pop(),
-              line: li + 1,
-              snippet: lines[li].trim().slice(0, 80),
-            });
+      const chunk = 8;
+      for (let i = 0; i < batch.length && hits.length < MAX_HITS; i += chunk) {
+        if (seq !== state._findSeq) return;
+        const slice = batch.slice(i, i + chunk);
+        const results = await Promise.all(
+          slice.map((path) => window.pywebview.api.read_file(path).catch(() => null))
+        );
+        for (const res of results) {
+          if (!res || res.error || res.content == null) continue;
+          const content = String(res.content);
+          const lines = content.split("\n");
+          for (let li = 0; li < lines.length; li++) {
+            if (hits.length >= MAX_HITS) break;
+            if (lines[li].toLowerCase().includes(lowerQ)) {
+              hits.push({
+                path: res.path,
+                name: res.name || String(res.path).split(/[\\/]/).pop(),
+                line: li + 1,
+                snippet: lines[li].trim().slice(0, 80),
+              });
+            }
           }
         }
       }
+      if (seq !== state._findSeq) return;
       state._folderHitCount = hits.length;
       updateFindCount();
       if (!box) return;
@@ -3119,27 +3221,31 @@ ${previewHtml}
             `<button type="button" class="fr-item" data-fr-idx="${i}"><span class="fr-file">${escapeHtml(h.name)}:${h.line}</span>${escapeHtml(h.snippet)}</button>`
         )
         .join("");
-      box.onclick = async (e) => {
-        const btn = e.target.closest("[data-fr-idx]");
-        if (!btn) return;
-        const hit = hits[Number(btn.dataset.frIdx)];
-        if (!hit) return;
-        if (state.dirty) {
-          const ok = confirm("当前文档有未保存修改，确定打开搜索结果文件？");
-          if (!ok) return;
-        }
-        const res = await window.pywebview.api.read_file(hit.path);
-        if (res && !res.error && res.content != null) {
-          setDocument(res);
-          await refreshRecents();
-          el.findInput.value = q;
-          $("#find-scope").value = "file";
-          doFind(1);
-        }
-      };
+      bindFolderHits(box, hits, q);
     } catch (err) {
       if (box) box.innerHTML = `<div class="fr-empty">搜索失败：${escapeHtml(String(err))}</div>`;
     }
+  }
+
+  function bindFolderHits(box, hits, q) {
+    box.onclick = async (e) => {
+      const btn = e.target.closest("[data-fr-idx]");
+      if (!btn) return;
+      const hit = hits[Number(btn.dataset.frIdx)];
+      if (!hit) return;
+      if (state.dirty) {
+        const ok = confirm("当前文档有未保存修改，确定打开搜索结果文件？");
+        if (!ok) return;
+      }
+      const res = await window.pywebview.api.read_file(hit.path);
+      if (res && !res.error && res.content != null) {
+        setDocument(res);
+        await refreshRecents();
+        el.findInput.value = q;
+        $("#find-scope").value = "file";
+        doFind(1);
+      }
+    };
   }
 
   function doReplace() {
@@ -4356,8 +4462,200 @@ flowchart LR
     el.editorArea.hidden = true;
   }
 
-  // expose for debugging
-  window.StuartMD = { state, setMode, setTheme, openFile };
+  // ---------- Agent host bridge (plugins / mid-term AI) ----------
+  const _agentBus = typeof EventTarget !== "undefined" ? new EventTarget() : null;
+
+  function emitAgentEvent(type, detail) {
+    if (!_agentBus) return;
+    try {
+      _agentBus.dispatchEvent(new CustomEvent(type, { detail: detail || {} }));
+    } catch (_) {}
+  }
+
+  function getDocumentHost() {
+    return {
+      kind: state.path && String(state.path).toLowerCase().endsWith(".pdf") ? "pdf" : "markdown",
+      path: state.path,
+      name: state.name,
+      mode: state.mode,
+      theme: state.theme,
+      dirty: !!state.dirty,
+      content:
+        state.path && String(state.path).toLowerCase().endsWith(".pdf")
+          ? ""
+          : el.source.value || "",
+      stats: getStatsHost(),
+    };
+  }
+
+  function getStatsHost() {
+    const core = CoreDoc();
+    const text = el.source.value || "";
+    return {
+      chars: core ? core.countChars(text) : text.replace(/\s/g, "").length,
+      lines: core ? core.countLines(text) : text ? text.split("\n").length : 0,
+    };
+  }
+
+  function setDocumentHost(text, opts) {
+    const o = opts || {};
+    if (state.path && String(state.path).toLowerCase().endsWith(".pdf")) {
+      return { error: "PDF 文档不可直接写 Markdown" };
+    }
+    commitActiveEditsForHistory();
+    const next = text == null ? "" : String(text);
+    setContent(next, o.fromUser !== false);
+    if (o.fromUser !== false) {
+      // ensure preview rebuild path sees latest
+      lastPreviewSource = "";
+      lastPreviewBlocks = [];
+      if (state.mode !== "source") renderMarkdown(next);
+      lastPreviewSource = next;
+      lastPreviewBlocks = splitMarkdownBlocks(next);
+    }
+    emitAgentEvent("document-set", { source: o.source || "agent" });
+    return { ok: true, length: next.length };
+  }
+
+  function getOutlineHost() {
+    const text = el.source.value || "";
+    const out = [];
+    const lines = text.split("\n");
+    let inFence = false;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const fence = line.match(/^\s{0,3}(```+|~~~+)/);
+      if (fence) {
+        inFence = !inFence;
+        continue;
+      }
+      if (inFence) continue;
+      const m = line.match(/^(#{1,6})\s+(.*)$/);
+      if (m) {
+        out.push({
+          level: m[1].length,
+          title: m[2].trim(),
+          line: i + 1,
+        });
+      }
+    }
+    return out;
+  }
+
+  function getBlocksHost() {
+    const blocks = splitMarkdownBlocks(el.source.value || "");
+    return blocks.map((text, index) => ({
+      index,
+      text,
+      preview: String(text).slice(0, 120),
+    }));
+  }
+
+  function getSelectionInfoHost() {
+    const ta = el.source;
+    const sel = window.getSelection();
+    let text = "";
+    let inPreview = false;
+    try {
+      if (sel && !sel.isCollapsed && el.preview.contains(sel.anchorNode)) {
+        text = sel.toString();
+        inPreview = true;
+      }
+    } catch (_) {}
+    if (!text && ta && typeof ta.selectionStart === "number") {
+      text = ta.value.slice(ta.selectionStart, ta.selectionEnd) || "";
+    }
+    return {
+      text,
+      inPreview,
+      start: ta ? ta.selectionStart : null,
+      end: ta ? ta.selectionEnd : null,
+      blockIndex: typeof state._activeBlockIndex === "number" ? state._activeBlockIndex : null,
+    };
+  }
+
+  function insertTextAtSelectionHost(text) {
+    const s = String(text == null ? "" : text);
+    if (state.mode === "source" || document.activeElement === el.source) {
+      const ta = el.source;
+      const start = ta.selectionStart || 0;
+      const end = ta.selectionEnd || 0;
+      const v = ta.value;
+      ta.value = v.slice(0, start) + s + v.slice(end);
+      ta.selectionStart = ta.selectionEnd = start + s.length;
+      setContent(ta.value, true);
+      ta.focus();
+      return { ok: true };
+    }
+    // Preview mode: append as paragraph via setContent
+    const cur = el.source.value || "";
+    const next = cur + (cur.endsWith("\n") || !cur ? "" : "\n\n") + s;
+    setContent(next, true);
+    return { ok: true, mode: "append" };
+  }
+
+  function applyBlockActionHost(index, action) {
+    const idx = Number(index);
+    if (!Number.isFinite(idx) || idx < 0) return { error: "invalid block index" };
+    state._activeBlockIndex = idx;
+    applyBlockLineAction(action);
+    return { ok: true, index: idx, action };
+  }
+
+  function findInDocumentHost(query) {
+    const q = String(query == null ? "" : query).trim();
+    if (!q) return { hits: 0 };
+    const text = el.source.value || "";
+    const needle = q.toLowerCase();
+    let hits = 0;
+    let from = 0;
+    while (from < text.length) {
+      const i = text.toLowerCase().indexOf(needle, from);
+      if (i < 0) break;
+      hits++;
+      from = i + needle.length;
+    }
+    return { hits, query: q };
+  }
+
+  function undoHost() {
+    commitActiveEditsForHistory();
+    return !!undoEdit();
+  }
+
+  function redoHost() {
+    commitActiveEditsForHistory();
+    return typeof redoEdit === "function" ? !!redoEdit() : false;
+  }
+
+  // expose for debugging + AI/plugins
+  window.StuartMD = {
+    state,
+    setMode,
+    setTheme,
+    openFile,
+    toast,
+    getDocument: getDocumentHost,
+    setDocumentText: setDocumentHost,
+    getStats: getStatsHost,
+    getOutline: getOutlineHost,
+    getBlocks: getBlocksHost,
+    getSelectionInfo: getSelectionInfoHost,
+    insertTextAtSelection: insertTextAtSelectionHost,
+    applyBlockActionAt: applyBlockActionHost,
+    findInDocument: findInDocumentHost,
+    undo: undoHost,
+    redo: redoHost,
+    onAgentEvent(type, fn) {
+      if (!_agentBus || typeof fn !== "function") return () => {};
+      _agentBus.addEventListener(type, fn);
+      return () => _agentBus.removeEventListener(type, fn);
+    },
+    offAgentEvent(type, fn) {
+      if (_agentBus && fn) _agentBus.removeEventListener(type, fn);
+    },
+    emitAgentEvent,
+  };
 
   document.addEventListener("DOMContentLoaded", boot);
 })();

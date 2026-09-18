@@ -63,10 +63,19 @@ pub fn stuart_resolve_asset(base_file: String, rel: String) -> Option<String> {
     if base_file.is_empty() || rel.is_empty() {
         return None;
     }
+    // Reject traversal / absolute escapes from markdown image paths
+    if rel.contains("..") || rel.starts_with('/') || rel.starts_with('\\') || rel.contains(':') {
+        return None;
+    }
     let base = Path::new(&base_file).parent()?;
     let target = base.join(&rel);
-    if target.is_file() {
-        Some(path_to_file_uri(&target))
+    let target_c = target.canonicalize().ok()?;
+    let base_c = base.canonicalize().ok()?;
+    if !target_c.starts_with(&base_c) {
+        return None;
+    }
+    if target_c.is_file() {
+        Some(path_to_file_uri(&target_c))
     } else {
         None
     }
@@ -280,9 +289,18 @@ pub fn extract_colors_from_image_bytes(bytes: &[u8]) -> Vec<String> {
 
 #[tauri::command]
 pub fn stuart_import_wallpaper_ex(b64: String, name: Option<String>) -> Value {
-    let raw = B64
-        .decode(b64.split(',').last().unwrap_or(""))
-        .unwrap_or_default();
+    const WALLPAPER_MAX: usize = 12 * 1024 * 1024;
+    let payload = b64.split(',').last().unwrap_or("");
+    if payload.len() > WALLPAPER_MAX {
+        return json!({"error": "壁纸过大（>12MB）"});
+    }
+    let raw = B64.decode(payload).unwrap_or_default();
+    if raw.is_empty() {
+        return json!({"error": "壁纸数据无效"});
+    }
+    if raw.len() > 10 * 1024 * 1024 {
+        return json!({"error": "壁纸过大（>10MB）"});
+    }
     let dir = wallpapers_dir();
     let safe: String = name
         .unwrap_or_else(|| "wallpaper.png".into())
