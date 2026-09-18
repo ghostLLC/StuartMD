@@ -21,6 +21,7 @@
     wallpaper: {},
     open_mode: "smart",
     new_doc_mode: "tab",
+    content_width: "default",
     music: { volume: 0.4, currentId: "rain", customName: "", playing: false },
   };
 

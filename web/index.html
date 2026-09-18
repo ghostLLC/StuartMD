@@ -72,6 +72,25 @@
           </div>
         </div>
         <div class="menu-wrap">
+          <button class="icon-btn" id="btn-width" title="页面宽度" aria-haspopup="true">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity=".35"/><path d="M4 4h8M3.5 8h9M5 12h6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          </button>
+          <div class="file-menu align-right width-menu" id="width-menu" hidden>
+            <div class="width-label">为当前窗口选择合适页宽</div>
+            <div class="width-picks">
+              <button type="button" class="width-pick" data-width="default" title="默认">
+                <span class="wp-lines l1"></span><span>默认</span>
+              </button>
+              <button type="button" class="width-pick" data-width="wide" title="较宽">
+                <span class="wp-lines l2"></span><span>较宽</span>
+              </button>
+              <button type="button" class="width-pick" data-width="full" title="全宽">
+                <span class="wp-lines l3"></span><span>全宽</span>
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="menu-wrap">
           <button class="icon-btn" id="btn-more-menu" title="更多：导出、打印、窗口" aria-haspopup="true">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="3.5" cy="8" r="1.2" fill="currentColor"/><circle cx="8" cy="8" r="1.2" fill="currentColor"/><circle cx="12.5" cy="8" r="1.2" fill="currentColor"/></svg>
           </button>

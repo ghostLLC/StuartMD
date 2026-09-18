@@ -654,7 +654,15 @@
     menu.hidden = false;
     const w = menu.offsetWidth || 220;
     const h = menu.offsetHeight || 360;
-    menu.style.left = Math.min(window.innerWidth - w - 8, Math.max(8, x)) + "px";
+    // Feishu-like: place menu to the LEFT of the handle, avoid covering sidebar
+    const sidebar = document.getElementById("sidebar");
+    const sidebarRight =
+      sidebar && sidebar.classList.contains("open") ? sidebar.getBoundingClientRect().right : 0;
+    let left = Math.max(8, x - w - 8);
+    // x passed as handle.right; prefer left of handle
+    left = Math.max(sidebarRight + 8, x - w - 8);
+    if (left + w > window.innerWidth - 8) left = Math.max(8, x + 4);
+    menu.style.left = left + "px";
     menu.style.top = Math.min(window.innerHeight - h - 8, Math.max(8, y)) + "px";
     menu.onclick = (e) => {
       const sub = e.target.closest("[data-bm-sub]");
@@ -3271,20 +3279,16 @@ ${previewHtml}
 
   // ---------- Events ----------
   function closeAllMenus() {
-    const fm = $("#file-menu");
-    const mm = $("#more-menu");
-    const tm = $("#theme-menu");
-    const mp = $("#music-panel");
-    const ft = $("#btn-file-menu");
-    const mt = $("#btn-more-menu");
-    const tt = $("#btn-theme");
-    if (fm) fm.hidden = true;
-    if (mm) mm.hidden = true;
-    if (tm) tm.hidden = true;
-    if (mp) mp.hidden = true;
-    if (ft) ft.setAttribute("aria-expanded", "false");
-    if (mt) mt.setAttribute("aria-expanded", "false");
-    if (tt) tt.setAttribute("aria-expanded", "false");
+    const ids = ["#file-menu", "#more-menu", "#theme-menu", "#music-panel", "#width-menu"];
+    const btns = ["#btn-file-menu", "#btn-more-menu", "#btn-theme", "#btn-width"];
+    ids.forEach((id) => {
+      const n = $(id);
+      if (n) n.hidden = true;
+    });
+    btns.forEach((id) => {
+      const n = $(id);
+      if (n) n.setAttribute("aria-expanded", "false");
+    });
   }
 
   function toggleMenu(triggerId, menuId) {
@@ -3299,6 +3303,11 @@ ${previewHtml}
       $$("#theme-menu [data-theme-choice]").forEach((b) => {
         b.classList.toggle("active-choice", b.dataset.themeChoice === state.theme);
       });
+    }
+    if (willOpen && menuId === "#width-menu") {
+      $$(".width-pick").forEach((b) =>
+        b.classList.toggle("active", b.dataset.width === (state.contentWidth || "default"))
+      );
     }
   }
 
@@ -3492,13 +3501,18 @@ ${previewHtml}
         return;
       }
       const k = e.key.toLowerCase();
-      // Undo / Redo — commit in-flight edits first so new content is on the stack
+      // Undo: Ctrl+Z / Ctrl+Shift+Z  |  Redo: Ctrl+Y / Ctrl+Shift+Y
       if (k === "z" && !e.shiftKey) {
         e.preventDefault();
         if (!undoEdit()) toast("没有可撤销的操作");
         return;
       }
-      if (k === "y" || (k === "z" && e.shiftKey)) {
+      if (k === "z" && e.shiftKey) {
+        e.preventDefault();
+        if (!undoEdit()) toast("没有可撤销的操作");
+        return;
+      }
+      if (k === "y") {
         e.preventDefault();
         if (!redoEdit()) toast("没有可重做的操作");
         return;
@@ -3600,6 +3614,38 @@ ${previewHtml}
     bindSelToolbar();
     bindBlockHandle();
     bindPreviewContextInsert();
+    bindWidthMenu();
+  }
+
+  // ---------- Page width ----------
+  const WIDTHS = ["default", "wide", "full"];
+
+  function setContentWidth(w, persist = true) {
+    const mode = WIDTHS.includes(w) ? w : "default";
+    state.contentWidth = mode;
+    document.body.dataset.width = mode;
+    $$(".width-pick").forEach((b) => b.classList.toggle("active", b.dataset.width === mode));
+    if (persist && state.apiReady && window.pywebview?.api?.save_settings) {
+      window.pywebview.api.save_settings({ content_width: mode }).catch(() => {});
+    }
+  }
+
+  function bindWidthMenu() {
+    const btn = $("#btn-width");
+    const menu = $("#width-menu");
+    if (!btn || !menu || btn.dataset.bound === "1") return;
+    btn.dataset.bound = "1";
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleMenu("#btn-width", "#width-menu");
+    });
+    menu.addEventListener("click", (e) => {
+      const pick = e.target.closest("[data-width]");
+      if (!pick) return;
+      setContentWidth(pick.dataset.width, true);
+      closeAllMenus();
+      toast(`页宽：${pick.dataset.width === "default" ? "默认" : pick.dataset.width === "wide" ? "较宽" : "全宽"}`);
+    });
   }
 
   function bindPreviewContextInsert() {
@@ -4176,6 +4222,11 @@ flowchart LR
         state.newDocMode = s.new_doc_mode;
       }
       if (s?.music && window.StuartMusic) window.StuartMusic.restore(s.music);
+      if (s?.content_width === "default" || s?.content_width === "wide" || s?.content_width === "full") {
+        setContentWidth(s.content_width, false);
+      } else {
+        setContentWidth("default", false);
+      }
       if (s?.last_folder) {
         // Restore folder tree across versions if the path still exists
         try {
