@@ -1815,10 +1815,17 @@
   }
 
   function setContent(text, fromUser) {
-    const changed = el.source.value !== text;
+    const prevVal = el.source.value;
+    const changed = prevVal !== text;
     if (changed) el.source.value = text;
     if (state.content !== text) state.content = text;
     if (fromUser) {
+      // Snapshot the pre-change state immediately so undo can restore inserts
+      if (changed && _hist.stack.length && _hist.stack[_hist.i] !== prevVal) {
+        clearTimeout(_histDebounce);
+        pushHistory(prevVal);
+      }
+      if (!_hist.stack.length) resetHistory(prevVal || "");
       schedulePushHistory(text);
       markDirty();
       scheduleAutoSave();
@@ -1832,7 +1839,7 @@
   let _histDebounce = 0;
 
   function pushHistory(text) {
-    if (_hist.stack[_hist.i] === text) return;
+    if (_hist.i >= 0 && _hist.stack[_hist.i] === text) return;
     _hist.stack = _hist.stack.slice(0, _hist.i + 1);
     _hist.stack.push(text);
     if (_hist.stack.length > _hist.max) _hist.stack.shift();
@@ -1841,7 +1848,7 @@
 
   function schedulePushHistory(text) {
     clearTimeout(_histDebounce);
-    _histDebounce = setTimeout(() => pushHistory(text), 350);
+    _histDebounce = setTimeout(() => pushHistory(text), 280);
   }
 
   function flushHistory() {
@@ -1855,11 +1862,30 @@
     _hist.i = 0;
   }
 
+  /** Commit any in-flight block/source edit so new content enters the undo stack. */
+  function commitActiveEditsForHistory() {
+    $$(".md-block.editing", el.preview).forEach((n) => {
+      try {
+        if (typeof n._stuartCommit === "function") n._stuartCommit();
+      } catch (_) {}
+      const ta = n.querySelector("textarea.md-block-source");
+      try {
+        if (ta && typeof ta._stuartCommit === "function") ta._stuartCommit();
+      } catch (_) {}
+    });
+  }
+
   function applyHistoryText(text) {
+    clearTimeout(_histDebounce);
     el.source.value = text;
     state.content = text;
+    // Force a clean preview rebuild (avoid incremental skip on insert undo)
     lastPreviewSource = "";
+    lastPreviewBlocks = [];
     if (state.mode !== "source") {
+      try {
+        el.preview.innerHTML = "";
+      } catch (_) {}
       renderMarkdown(text);
       lastPreviewSource = text;
       lastPreviewBlocks = splitMarkdownBlocks(text || "");
@@ -1875,6 +1901,8 @@
   }
 
   function undoEdit() {
+    commitActiveEditsForHistory();
+    flushHistory();
     if (_hist.i <= 0) return false;
     _hist.i--;
     applyHistoryText(_hist.stack[_hist.i]);
@@ -1882,6 +1910,8 @@
   }
 
   function redoEdit() {
+    commitActiveEditsForHistory();
+    flushHistory();
     if (_hist.i >= _hist.stack.length - 1) return false;
     _hist.i++;
     applyHistoryText(_hist.stack[_hist.i]);
@@ -3462,16 +3492,15 @@ ${previewHtml}
         return;
       }
       const k = e.key.toLowerCase();
-      // Undo / Redo — always our stack so preview/block edits restore correctly
+      // Undo / Redo — commit in-flight edits first so new content is on the stack
       if (k === "z" && !e.shiftKey) {
         e.preventDefault();
-        flushHistory();
-        undoEdit();
+        if (!undoEdit()) toast("没有可撤销的操作");
         return;
       }
       if (k === "y" || (k === "z" && e.shiftKey)) {
         e.preventDefault();
-        redoEdit();
+        if (!redoEdit()) toast("没有可重做的操作");
         return;
       }
       if (k === "o") {
