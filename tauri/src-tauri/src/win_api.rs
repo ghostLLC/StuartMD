@@ -7,7 +7,7 @@ use std::process::Command;
 
 use crate::fs_api::{
     data_dir, exe_dir, load_json, load_settings_migrated, path_to_file_uri, save_json,
-    settings_path, wallpapers_dir, PROG_ID, VERSION,
+    settings_path, wallpapers_dir, PROG_ID, PROG_ID_PDF, VERSION,
 };
 
 pub fn open_path_os(p: &Path) -> bool {
@@ -131,11 +131,22 @@ pub fn stuart_get_file_association_status() -> Value {
         use winreg::enums::*;
         use winreg::RegKey;
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-        let mut registered = false;
+        let mut md_registered = false;
+        let mut pdf_registered = false;
         let mut command = String::new();
         if let Ok(k) = hkcu.open_subkey(r"Software\Classes\.md") {
             if let Ok(v) = k.get_value::<String, _>("") {
-                registered = v == PROG_ID || v.starts_with("StuartMD");
+                md_registered = v == PROG_ID || v.starts_with("StuartMD");
+            }
+        }
+        if let Ok(k) = hkcu.open_subkey(r"Software\Classes\.pdf\OpenWithProgids") {
+            if let Ok(_) = k.get_raw_value(PROG_ID_PDF) {
+                pdf_registered = true;
+            }
+        }
+        if let Ok(k) = hkcu.open_subkey(r"Software\Classes\Applications\stuartmd.exe\SupportedTypes") {
+            if let Ok(_) = k.get_raw_value(".pdf") {
+                pdf_registered = true;
             }
         }
         if let Ok(k) = hkcu.open_subkey(format!(r"Software\Classes\{}\shell\open\command", PROG_ID)) {
@@ -143,11 +154,16 @@ pub fn stuart_get_file_association_status() -> Value {
                 command = v;
             }
         }
-        return json!({"registered": registered, "command": command});
+        return json!({
+            "registered": md_registered,
+            "md": md_registered,
+            "pdf": pdf_registered,
+            "command": command
+        });
     }
     #[cfg(not(target_os = "windows"))]
     {
-        json!({"registered": false, "command": ""})
+        json!({"registered": false, "md": false, "pdf": false, "command": ""})
     }
 }
 
@@ -162,13 +178,20 @@ pub fn stuart_register_file_association() -> Value {
         let exe_s = exe.to_string_lossy().to_string();
         let cmd = format!("\"{}\" \"%1\"", exe_s);
         let icon = format!("{},0", exe_s);
+
+        // Markdown: claim as primary handler for md-like types
         for ext in [".md", ".markdown", ".mdown", ".mkd"] {
             if let Ok(k) = hkcu.create_subkey(format!(r"Software\Classes\{}", ext)) {
                 let _ = k.0.set_value("", &PROG_ID);
             }
         }
+        // Optional: also appear under .txt Open-with without stealing default
+        if let Ok((k, _)) = hkcu.create_subkey(r"Software\Classes\.txt\OpenWithProgids") {
+            let _ = k.set_value(PROG_ID, &"");
+        }
+
         if let Ok(k) = hkcu.create_subkey(format!(r"Software\Classes\{}", PROG_ID)) {
-            let _ = k.0.set_value("", &"Markdown 文档");
+            let _ = k.0.set_value("", &"Markdown 文档 (StuartMD)");
         }
         if let Ok(k) = hkcu.create_subkey(format!(r"Software\Classes\{}\DefaultIcon", PROG_ID)) {
             let _ = k.0.set_value("", &icon.as_str());
@@ -178,6 +201,42 @@ pub fn stuart_register_file_association() -> Value {
         {
             let _ = k.0.set_value("", &cmd.as_str());
         }
+
+        // PDF: Open-with only — do NOT overwrite the system default PDF handler
+        if let Ok(k) = hkcu.create_subkey(format!(r"Software\Classes\{}", PROG_ID_PDF)) {
+            let _ = k.0.set_value("", &"PDF 文档 (StuartMD)");
+        }
+        if let Ok(k) = hkcu.create_subkey(format!(r"Software\Classes\{}\DefaultIcon", PROG_ID_PDF)) {
+            let _ = k.0.set_value("", &icon.as_str());
+        }
+        if let Ok(k) = hkcu
+            .create_subkey(format!(r"Software\Classes\{}\shell\open\command", PROG_ID_PDF))
+        {
+            let _ = k.0.set_value("", &cmd.as_str());
+        }
+        if let Ok((k, _)) = hkcu.create_subkey(r"Software\Classes\.pdf\OpenWithProgids") {
+            let _ = k.set_value(PROG_ID_PDF, &"");
+        }
+
+        // Applications\<exe> — classic "Open with" list entry (md + pdf)
+        let app_key = r"Software\Classes\Applications\stuartmd.exe";
+        if let Ok(k) = hkcu.create_subkey(app_key) {
+            let _ = k.0.set_value("", &"StuartMD");
+        }
+        if let Ok(k) = hkcu.create_subkey(format!(r"{}\DefaultIcon", app_key)) {
+            let _ = k.0.set_value("", &icon.as_str());
+        }
+        if let Ok(k) = hkcu.create_subkey(format!(r"{}\shell\open\command", app_key)) {
+            let _ = k.0.set_value("", &cmd.as_str());
+        }
+        if let Ok(k) = hkcu.create_subkey(format!(r"{}\SupportedTypes", app_key)) {
+            for ext in [
+                ".md", ".markdown", ".mdown", ".mkd", ".txt", ".pdf",
+            ] {
+                let _ = k.0.set_value(ext, &"");
+            }
+        }
+
         // App Paths so Win+R / shell can launch StuartMD
         if let Ok(k) = hkcu.create_subkey(
             r"Software\Microsoft\Windows\CurrentVersion\App Paths\stuartmd.exe",
@@ -185,7 +244,13 @@ pub fn stuart_register_file_association() -> Value {
             let _ = k.0.set_value("", &exe_s.as_str());
             let _ = k.0.set_value("Path", &exe_dir().to_string_lossy().as_ref());
         }
-        return json!({"ok": true, "command": cmd});
+
+        // Best-effort shell notify so Explorer refreshes Open-with quickly
+        let _ = Command::new("cmd")
+            .args(["/C", "ie4uinit.exe", "-show"])
+            .spawn();
+
+        return json!({"ok": true, "command": cmd, "pdf": true, "md": true});
     }
     #[cfg(not(target_os = "windows"))]
     {

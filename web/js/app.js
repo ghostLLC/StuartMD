@@ -4118,9 +4118,16 @@ flowchart LR
       $("#data-dir-path").textContent = info.data_dir || "—";
 
       const st = await window.pywebview.api.get_file_association_status();
-      $("#assoc-status").textContent = st.registered
-        ? "已注册：StuartMD 可作为 Markdown 打开程序。"
-        : "尚未注册：可点击下方按钮注册到系统「打开方式」。";
+      const mdOk = !!(st.md ?? st.registered);
+      const pdfOk = !!st.pdf;
+      $("#assoc-status").textContent =
+        mdOk && pdfOk
+          ? "已注册：Markdown 与 PDF 均可出现在系统「打开方式」中。"
+          : mdOk
+            ? "已注册 Markdown；PDF 尚未注册，可点击下方按钮补全。"
+            : pdfOk
+              ? "已注册 PDF；Markdown 尚未注册，可点击下方按钮补全。"
+              : "尚未注册：点击下方按钮写入系统「打开方式」（Markdown + PDF）。";
       const us = $("#update-status");
       if (us) us.textContent = `当前版本 ${info.version || VERSION} · 升级不会丢失设置与插件`;
 
@@ -4152,14 +4159,14 @@ flowchart LR
       const res = await window.pywebview.api.register_file_association();
       if (res?.error) toast(res.error);
       else {
-        toast("已注册 Markdown 关联");
+        toast("已注册 Markdown / PDF 打开方式");
         refreshSettingsModal();
       }
     });
     $("#btn-default-apps").addEventListener("click", async () => {
       if (!state.apiReady) return;
       await window.pywebview.api.open_default_apps_settings();
-      toast("请在系统设置中将 .md 默认应用设为 StuartMD");
+      toast("可在系统设置中将 .md 默认应用设为 StuartMD；PDF 用右键「打开方式」即可");
     });
     $("#btn-open-data").addEventListener("click", async () => {
       if (!state.apiReady) return;
@@ -4420,6 +4427,10 @@ flowchart LR
         await applySettings(s);
         const info = await window.pywebview.api.get_app_info();
         state.appInfo = info;
+        // Refresh shell associations after upgrades (md + pdf open-with)
+        try {
+          await window.pywebview.api.register_file_association();
+        } catch (_) {}
         await refreshPluginList();
         if (window.StuartPlugins?.loadAll) {
           await window.StuartPlugins.loadAll();

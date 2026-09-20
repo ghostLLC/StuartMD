@@ -2,6 +2,22 @@
 
 本文件记录 StuartMD 的版本变更，便于开发与发布对照。
 
+## [2.5.1] - 2026-09-17
+
+### 修复
+- **PDF 出现在系统「打开方式」**：此前文件关联只注册了 `.md/.markdown/.mdown/.mkd`，未写入 `.pdf`
+- 注册逻辑补充：
+  - `OpenWithProgids\StuartMD.PDF`（不抢系统默认 PDF 阅读器）
+  - `Applications\stuartmd.exe\SupportedTypes`（.pdf / .md / .txt 等）
+  - 独立 ProgID `StuartMD.PDF`
+- 安装包增加 `fileAssociations`（md Editor + pdf Viewer）
+- 应用启动时自动刷新一次关联（升级后路径变化也能跟上）
+- 设置页状态文案分别显示 Markdown / PDF 注册情况
+
+### 使用
+- 设置 → 默认打开方式 → **注册 Markdown / PDF 打开方式**
+- 对 PDF 右键 → 打开方式 → 选择 StuartMD（若列表未刷新，可稍等或重开资源管理器）
+
 ## [2.5.0] - 2026-09-17
 
 ### 新增
