@@ -2334,6 +2334,7 @@ body[data-theme="wallpaper"] #preview *::selection {
   height: auto;
   min-height: 100%;
   flex-shrink: 0;
+  /* NOTE: do NOT use content-visibility here — WebView2 wheel scroll breaks */
 }
 
 /* Soft scrollbar for modern feel */
@@ -2351,6 +2352,8 @@ body[data-theme="wallpaper"] #preview *::selection {
   border: none;
   outline: none;
   background: transparent;
+  /* Limit layout/paint invalidation radius while typing in reading mode */
+  contain: layout style;
 }
 
 .md-block:hover {

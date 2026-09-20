@@ -166,6 +166,11 @@
     return false;
   }
 
+  // ---------- Perf helpers ----------
+  function nowMs() {
+    return typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
+  }
+
   function createBlockNode(block, index) {
     const wrap = document.createElement("div");
     wrap.className = "md-block";
@@ -177,7 +182,17 @@
       html = `<pre>${escapeHtml(String(e))}</pre>`;
     }
     wrap.innerHTML = html;
-    sanitizeRenderedHtml(wrap);
+    // Fast path: only sanitize when dangerous patterns may be present
+    if (
+      html.indexOf("<script") >= 0 ||
+      html.indexOf("<iframe") >= 0 ||
+      html.indexOf("<object") >= 0 ||
+      html.indexOf("<embed") >= 0 ||
+      html.indexOf("javascript:") >= 0 ||
+      /\son\w+\s*=/i.test(html)
+    ) {
+      sanitizeRenderedHtml(wrap);
+    }
     return wrap;
   }
 
@@ -188,15 +203,16 @@
       root.querySelectorAll("script,iframe,object,embed,link[rel=import]").forEach((n) => n.remove());
       const all = root.querySelectorAll("*");
       for (let i = 0; i < all.length; i++) {
-        const el = all[i];
-        const attrs = Array.from(el.attributes || []);
-        for (let j = 0; j < attrs.length; j++) {
+        const node = all[i];
+        const attrs = node.attributes;
+        if (!attrs || !attrs.length) continue;
+        for (let j = attrs.length - 1; j >= 0; j--) {
           const a = attrs[j];
           const n = a.name || "";
           const v = a.value || "";
-          if (/^on/i.test(n)) el.removeAttribute(n);
+          if (/^on/i.test(n)) node.removeAttribute(n);
           else if ((n === "href" || n === "src" || n === "xlink:href") && /^\s*javascript:/i.test(v)) {
-            el.removeAttribute(n);
+            node.removeAttribute(n);
           }
         }
       }
@@ -310,11 +326,7 @@
       state.findIndex = -1;
       state._findQuery = "";
     }
-    // Throttle outline rebuild — was on every block apply (typing / bulk delete)
-    clearTimeout(applyBlockEditing._outlineT);
-    applyBlockEditing._outlineT = setTimeout(() => {
-      updateOutline();
-    }, 80);
+    updateOutline();
     updateStats();
   }
 
@@ -957,6 +969,13 @@
     let pointerButtons = 0;
     const tick = () => {
       rafId = 0;
+      // Cap hover hit-test frequency (~30fps) — selection path already exits earlier
+      const t = nowMs();
+      if (t - (tick._last || 0) < 32) {
+        rafId = requestAnimationFrame(tick);
+        return;
+      }
+      tick._last = t;
       if (state.mode === "source") {
         hideBlockHandle();
         return;
@@ -1051,6 +1070,17 @@
   function bindPreviewDelegates() {
     if (el.preview.dataset.delegated === "1") return;
     el.preview.dataset.delegated = "1";
+
+    // Outline: one delegated listener (avoids per-heading closures on every rebuild)
+    if (el.outlineList && el.outlineList.dataset.delegated !== "1") {
+      el.outlineList.dataset.delegated = "1";
+      el.outlineList.addEventListener("click", (e) => {
+        const btn = e.target.closest(".outline-item");
+        if (!btn || !el.outlineList.contains(btn)) return;
+        const idx = Number(btn.dataset.hindex);
+        if (Number.isFinite(idx)) jumpToHeadingIndex(idx);
+      });
+    }
 
     el.preview.addEventListener("click", (e) => {
       const a = e.target.closest("a");
@@ -1641,7 +1671,7 @@
     renderTimer = requestAnimationFrame(() => {
       clearTimeout(scheduleRender._t);
       const len = (el.source.value || "").length;
-      const delay = len > 20000 ? 220 : len > 6000 ? 140 : 80;
+      const delay = len > 40000 ? 280 : len > 20000 ? 220 : len > 6000 ? 140 : 80;
       scheduleRender._t = setTimeout(() => {
         const next = el.source.value;
         // P0: identical content → skip expensive DOM rebuild
@@ -1714,33 +1744,64 @@
   }
 
   function updateOutline() {
+    if (updateOutline._t) {
+      updateOutline._again = true;
+      return;
+    }
+    updateOutline._t = setTimeout(() => {
+      updateOutline._t = 0;
+      if (updateOutline._again) {
+        updateOutline._again = false;
+        updateOutline();
+        return;
+      }
+      updateOutlineNow();
+    }, 80);
+  }
+
+  function updateOutlineNow() {
     const heads = liveHeadings();
     let sig = state.mode + "\n";
     for (let i = 0; i < heads.length; i++) {
       sig += heads[i].tagName + "|" + (heads[i].textContent || "") + "\n";
     }
-    // Always rebind after preview DOM rebuild (nodes are new even if text is same)
+    // Skip rebuild when signature unchanged (nodes may be new; delegation handles clicks)
     if (sig === lastOutlineSig && el.outlineList.childElementCount === heads.length) return;
     lastOutlineSig = sig;
     if (!heads.length) {
       el.outlineList.innerHTML = `<div class="empty-hint">暂无大纲</div>`;
       return;
     }
-    el.outlineList.innerHTML = "";
-    heads.forEach((h, i) => {
+    const frag = document.createDocumentFragment();
+    for (let i = 0; i < heads.length; i++) {
+      const h = heads[i];
       if (!h.id) h.id = `h-${i}`;
       const level = Number(h.tagName.substring(1));
       const btn = document.createElement("button");
       btn.className = `outline-item l${level}`;
+      btn.dataset.hindex = String(i);
       btn.textContent = h.textContent || "(空标题)";
       btn.title = h.textContent || "";
-      btn.addEventListener("click", () => jumpToHeadingIndex(i));
-      el.outlineList.appendChild(btn);
-    });
+      frag.appendChild(btn);
+    }
+    el.outlineList.innerHTML = "";
+    el.outlineList.appendChild(frag);
   }
 
   // ---------- Stats ----------
   function updateStats() {
+    if (updateStats._t) {
+      updateStats._pending = true;
+      return;
+    }
+    updateStats._t = setTimeout(() => {
+      updateStats._t = 0;
+      updateStats._pending = false;
+      updateStatsNow();
+    }, 120);
+  }
+
+  function updateStatsNow() {
     const core = CoreDoc();
     const text = el.source.value || "";
     const chars = core ? core.countChars(text) : text.replace(/\s/g, "").length;
@@ -1935,13 +1996,38 @@
   }
 
   function markDirty() {
-    if (!state.dirty) {
-      state.dirty = true;
-      el.dirtyDot.hidden = false;
-      const tab = state.tabs.find((t) => t.id === state.activeTabId);
-      if (tab) tab.dirty = true;
-      renderTabs();
-      updateWindowTitle();
+    if (state.dirty) return;
+    state.dirty = true;
+    el.dirtyDot.hidden = false;
+    const tab = state.tabs.find((t) => t.id === state.activeTabId);
+    if (tab) tab.dirty = true;
+    // Patch tab strip only — full renderTabs on every keystroke was costly
+    patchTabDirtyUi();
+    updateWindowTitle();
+    persistSessionSoon();
+  }
+
+  function patchTabDirtyUi() {
+    const list = $("#tab-list");
+    if (!list) return;
+    const items = list.children;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const id = item.dataset.tabId;
+      const tab = state.tabs.find((t) => String(t.id) === id);
+      const dirty = !!(tab && tab.dirty);
+      const dirtyEl = item.querySelector(".tab-dirty");
+      if (dirty && !dirtyEl) {
+        const d = document.createElement("span");
+        d.className = "tab-dirty";
+        d.title = "未保存";
+        const closeBtn = item.querySelector(".tab-close");
+        if (closeBtn) item.insertBefore(d, closeBtn);
+        else item.appendChild(d);
+      } else if (!dirty && dirtyEl) {
+        dirtyEl.remove();
+      }
+      item.classList.toggle("active", String(state.activeTabId) === id);
     }
   }
 
@@ -2128,11 +2214,22 @@
     return parts[parts.length - 2] || "";
   }
 
+  let _folderSetCache = { n: -1, set: new Set() };
+  function tabFolderSet() {
+    const n = state.tabs.length;
+    if (_folderSetCache.n === n) return _folderSetCache.set;
+    const set = new Set();
+    for (let i = 0; i < n; i++) {
+      const f = folderOf(state.tabs[i].path);
+      if (f) set.add(f);
+    }
+    _folderSetCache = { n, set };
+    return set;
+  }
+
   function tabTitleFor(tab) {
     if (!tab) return "未命名";
-    const folders = new Set(
-      state.tabs.map((t) => folderOf(t.path)).filter(Boolean)
-    );
+    const folders = tabFolderSet();
     const name = tab.name || "未命名";
     if (folders.size > 1 && tab.path) {
       const f = folderOf(tab.path);
@@ -2152,6 +2249,7 @@
   }
 
   function renderTabs() {
+    _folderSetCache = { n: -1, set: new Set() };
     persistSessionSoon();
     const bar = $("#tabbar");
     const list = $("#tab-list");
@@ -2319,7 +2417,7 @@
   let _sessionPersistTimer = 0;
   function persistSessionSoon() {
     clearTimeout(_sessionPersistTimer);
-    _sessionPersistTimer = setTimeout(() => persistSession(), 400);
+    _sessionPersistTimer = setTimeout(() => persistSession(), 900);
   }
 
   /** Persist open tabs + folder + sample-dismiss flag for next cold start. */
@@ -2917,39 +3015,57 @@
       container.innerHTML = `<div class="empty-hint">目录中没有 Markdown 文件</div>`;
       return;
     }
-    items.forEach((item) => {
-      if (item.type === "dir") {
-        const row = document.createElement("div");
-        row.className = "tree-item dir";
-        row.style.paddingLeft = `${8 + depth * 14}px`;
-        row.innerHTML = `<span class="chev">›</span><span class="name"></span>`;
-        row.querySelector(".name").textContent = item.name;
-        const kids = document.createElement("div");
-        kids.className = "tree-children";
-        if (item.children?.length) renderTree(item.children, kids, depth + 1);
-        // expand/collapse via delegated click on #file-tree
-        container.appendChild(row);
-        container.appendChild(kids);
-      } else {
-        const row = document.createElement("div");
-        row.className = "tree-item file";
-        row.dataset.path = item.path || "";
-        row.style.paddingLeft = `${8 + depth * 14 + 14}px`;
-        row.textContent = item.name;
-        row.title = `${item.path}（中键或右键：新窗口打开）`;
-        // Delegated on #file-tree — bound once in bindTreeDelegates
-        container.appendChild(row);
-      }
-    });
+    const frag = document.createDocumentFragment();
+    const walk = (list, d, parent) => {
+      const local = document.createDocumentFragment();
+      list.forEach((item) => {
+        if (item.type === "dir") {
+          const row = document.createElement("div");
+          row.className = "tree-item dir";
+          row.style.paddingLeft = `${8 + d * 14}px`;
+          row.innerHTML = `<span class="chev">›</span><span class="name"></span>`;
+          row.querySelector(".name").textContent = item.name;
+          const kids = document.createElement("div");
+          kids.className = "tree-children";
+          if (item.children?.length) walk(item.children, d + 1, kids);
+          local.appendChild(row);
+          local.appendChild(kids);
+        } else {
+          const row = document.createElement("div");
+          row.className = "tree-item file";
+          row.dataset.path = item.path || "";
+          row.style.paddingLeft = `${8 + d * 14 + 14}px`;
+          row.textContent = item.name;
+          row.title = `${item.path}（中键或右键：新窗口打开）`;
+          local.appendChild(row);
+        }
+      });
+      parent.appendChild(local);
+    };
+    walk(items, depth, frag);
+    container.appendChild(frag);
   }
 
   function markActiveTreeItem() {
     // P0: skip full tree walk when active path is unchanged
     if (state.path === lastTreePath) return;
+    const prev = lastTreePath;
     lastTreePath = state.path;
-    $$(".tree-item.file").forEach((n) => {
-      n.classList.toggle("active", !!state.path && n.dataset.path === state.path);
-    });
+    const tree = el.fileTree;
+    if (!tree) return;
+    // Only touch previous + current nodes
+    if (prev) {
+      try {
+        const old = tree.querySelector(`.tree-item.file[data-path="${CSS.escape(prev)}"]`);
+        if (old) old.classList.remove("active");
+      } catch (_) {}
+    }
+    if (state.path) {
+      try {
+        const cur = tree.querySelector(`.tree-item.file[data-path="${CSS.escape(state.path)}"]`);
+        if (cur) cur.classList.add("active");
+      } catch (_) {}
+    }
   }
 
   // ---------- Recents ----------
@@ -2968,24 +3084,35 @@
     title.className = "recent-title";
     title.textContent = "最近打开";
     el.recentList.appendChild(title);
+    const frag = document.createDocumentFragment();
     recents.slice(0, 8).forEach((r) => {
       const btn = document.createElement("button");
       btn.className = "recent-item";
+      btn.dataset.path = r.path || "";
+      btn.dataset.kind = r.kind || "file";
       btn.innerHTML = `<span></span><span class="path"></span>`;
       const [nameEl, pathEl] = btn.children;
       nameEl.textContent = r.name || r.path;
       pathEl.textContent = r.path;
-      btn.addEventListener("click", async () => {
-        if (r.kind === "folder") {
-          await loadFolder(r.path);
+      frag.appendChild(btn);
+    });
+    el.recentList.appendChild(frag);
+    if (el.recentList.dataset.delegated !== "1") {
+      el.recentList.dataset.delegated = "1";
+      el.recentList.addEventListener("click", async (e) => {
+        const btn = e.target.closest(".recent-item");
+        if (!btn || !el.recentList.contains(btn)) return;
+        const path = btn.dataset.path || "";
+        if (!path) return;
+        if (btn.dataset.kind === "folder") {
+          await loadFolder(path);
           showSidebarPanel("files");
           toggleSidebar(true);
         } else {
-          await openFile(r.path);
+          await openFile(path);
         }
       });
-      el.recentList.appendChild(btn);
-    });
+    }
   }
 
   // ---------- Export ----------
@@ -3177,7 +3304,9 @@ ${previewHtml}
     const needle = q.toLowerCase();
     // Collect ranges first, then wrap from end to start so offsets stay valid
     const ranges = [];
+    const MAX_FIND_MARKS = 400;
     nodes.forEach((node) => {
+      if (ranges.length >= MAX_FIND_MARKS) return;
       const text = node.nodeValue || "";
       const lower = text.toLowerCase();
       let from = 0;
@@ -3185,6 +3314,7 @@ ${previewHtml}
         const i = lower.indexOf(needle, from);
         if (i < 0) break;
         ranges.push({ node, start: i, end: i + q.length });
+        if (ranges.length >= MAX_FIND_MARKS) break;
         from = i + q.length;
       }
     });
