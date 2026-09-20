@@ -310,7 +310,11 @@
       state.findIndex = -1;
       state._findQuery = "";
     }
-    updateOutline();
+    // Throttle outline rebuild — was on every block apply (typing / bulk delete)
+    clearTimeout(applyBlockEditing._outlineT);
+    applyBlockEditing._outlineT = setTimeout(() => {
+      updateOutline();
+    }, 80);
     updateStats();
   }
 
@@ -827,11 +831,14 @@
       }
     }
 
-    // Band fallback: pick closest block, then line inside it if possible
-    const blocks = $$(".md-block", el.preview);
+    // Band fallback — only when elementFromPoint missed; cap scan cost
+    const children = el.preview.children;
     let best = null;
     let bestDist = Infinity;
-    for (const b of blocks) {
+    const maxScan = Math.min(children.length, 400);
+    for (let i = 0; i < maxScan; i++) {
+      const b = children[i];
+      if (!b || !b.classList || !b.classList.contains("md-block")) continue;
       const r = b.getBoundingClientRect();
       if (r.height < 2 || r.width < 2) continue;
       const inY = y >= r.top - 1 && y <= r.bottom + 1;
@@ -943,10 +950,11 @@
       });
     }
 
-    // One document-level tracker — elementFromPoint + band fallback
+    // One document-level tracker — skip while user is selecting (perf)
     let rafId = 0;
     let px = 0;
     let py = 0;
+    let pointerButtons = 0;
     const tick = () => {
       rafId = 0;
       if (state.mode === "source") {
@@ -957,7 +965,20 @@
         hideBlockHandle();
         return;
       }
-      const editingEl = getActiveEditingBlock();
+      // Drag-select / non-collapsed selection: never hit-test blocks (was O(n) per frame)
+      if (pointerButtons & 1) {
+        hideBlockHandle();
+        return;
+      }
+      try {
+        const selNow = window.getSelection();
+        if (selNow && !selNow.isCollapsed) {
+          hideBlockHandle();
+          return;
+        }
+      } catch (_) {}
+      const hasEditing = el.preview && el.preview.querySelector(".md-block.editing");
+      const editingEl = hasEditing ? getActiveEditingBlock() : null;
       const found = blockFromPoint(px, py);
       if (found && found.special) {
         keepBlockHandle();
@@ -987,6 +1008,16 @@
       (e) => {
         px = e.clientX;
         py = e.clientY;
+        pointerButtons = e.buttons || 0;
+        // Primary button down (text drag-select): skip expensive hit-testing entirely
+        if (pointerButtons & 1) {
+          if (rafId) {
+            cancelAnimationFrame(rafId);
+            rafId = 0;
+          }
+          hideBlockHandle();
+          return;
+        }
         if (rafId) return;
         rafId = requestAnimationFrame(tick);
       },
@@ -3767,6 +3798,22 @@ ${previewHtml}
       const mod = e.ctrlKey || e.metaKey;
       if (!mod) {
         if (e.key === "Escape" && !el.findBar.hidden) closeFind();
+        // Reading-mode bulk delete: handle selection delete in one shot
+        if (
+          (e.key === "Delete" || e.key === "Backspace") &&
+          !e.ctrlKey &&
+          !e.metaKey &&
+          !e.altKey &&
+          state.mode !== "source"
+        ) {
+          const ae = document.activeElement;
+          if (ae === el.source) return;
+          if (ae && (ae.isContentEditable || ae.closest?.(".md-block.editing"))) return;
+          if (deletePreviewSelection()) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }
         return;
       }
       const k = e.key.toLowerCase();
@@ -4037,6 +4084,109 @@ ${previewHtml}
       e.preventDefault();
       setLineHeading(Number(e.key));
     }
+  }
+
+  /** Fast path: large selection delete in preview without entering per-block edit. */
+  function rangeSelectsWholeNode(range, node) {
+    try {
+      const r = document.createRange();
+      r.selectNodeContents(node);
+      return (
+        range.compareBoundaryPoints(Range.START_TO_START, r) <= 0 &&
+        range.compareBoundaryPoints(Range.END_TO_END, r) >= 0
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function applySourceText(text) {
+    el.source.value = text;
+    state.content = text;
+    markDirty();
+    scheduleAutoSave();
+    lastPreviewSource = "";
+    lastPreviewBlocks = [];
+    if (state.mode !== "source") {
+      try {
+        el.preview.innerHTML = "";
+      } catch (_) {}
+      renderMarkdown(text);
+      lastPreviewSource = text;
+      lastPreviewBlocks = splitMarkdownBlocks(text);
+    }
+    updateStats();
+    pushHistory(text);
+    emitAgentEvent("document-changed", { source: "bulk-delete" });
+  }
+
+  /**
+   * Delete a preview selection spanning one or more md-blocks in a single
+   * source update + one render. Avoids contenteditable + per-keystroke rebuild.
+   * @returns {boolean} true if handled
+   */
+  function deletePreviewSelection() {
+    if (state.mode === "source") return false;
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount || !el.preview) return false;
+    if (!el.preview.contains(sel.anchorNode) && !el.preview.contains(sel.focusNode)) {
+      return false;
+    }
+    const range = sel.getRangeAt(0);
+    const nodes = $$(".md-block", el.preview);
+    const affected = [];
+    for (const b of nodes) {
+      try {
+        if (range.intersectsNode(b)) affected.push(b);
+      } catch (_) {}
+    }
+    if (!affected.length) return false;
+
+    const srcBlocks = splitMarkdownBlocks(el.source.value || "");
+    const idxs = affected
+      .map((b) => Number(b.dataset.index))
+      .filter((n) => Number.isFinite(n) && n >= 0 && n < srcBlocks.length);
+    if (!idxs.length) return false;
+    idxs.sort((a, b) => a - b);
+    const from = idxs[0];
+    const to = idxs[idxs.length - 1];
+    const multi = to > from || affected.length > 1;
+
+    const next = srcBlocks.slice();
+    if (multi) {
+      // Large multi-block selection: drop whole covered blocks (fast)
+      for (let i = from; i <= to; i++) next[i] = "";
+    } else {
+      // Single block partial selection
+      const blockEl =
+        el.preview.querySelector(`.md-block[data-index="${from}"]`) || affected[0];
+      try {
+        // Mutate live DOM once, then convert back to markdown
+        range.deleteContents();
+        const mdText = htmlToMarkdown(blockEl).replace(/^\n+|\n+$/g, "");
+        next[from] = mdText;
+      } catch (_) {
+        next[from] = "";
+      }
+    }
+
+    const kept = [];
+    for (let i = 0; i < next.length; i++) {
+      if (i >= from && i <= to) {
+        if (next[i] && String(next[i]).trim()) kept.push(next[i]);
+      } else {
+        kept.push(next[i]);
+      }
+    }
+    const text = joinBlocks(kept);
+    try {
+      sel.removeAllRanges();
+    } catch (_) {}
+    hideSelToolbar();
+    hideBlockHandle();
+    hideBlockMenu();
+    applySourceText(text);
+    return true;
   }
 
   /** WYSIWYG block: execCommand + convert via htmlToMarkdown on blur. */

@@ -50,7 +50,7 @@ pub fn stuart_open_sample() -> Value {
         "path": null,
         "name": "示例文档.md",
         "kind": "markdown",
-        "content": "# StuartMD 示例\n\n这是一份内置示例文档。\n\n## 支持的语法\n\n- **加粗**、*斜体*、~~删除线~~\n- 表格、任务列表、代码高亮\n- 行内 $E=mc^2$ 与块级公式\n\n$$\n\\int_0^1 x^2\\,dx = \\frac{1}{3}\n$$\n",
+        "content": include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../samples/示例文档.md")),
         "size": 0
     })
 }

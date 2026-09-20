@@ -2,6 +2,16 @@
 
 本文件记录 StuartMD 的版本变更，便于开发与发布对照。
 
+## [2.6.1] - 2026-09-17
+
+### 新增 / 修复
+- **示例文档补全**：恢复完整语法演示、快捷键、PDF、外观与「性能测试段落」；内置 fallback 同步用仓库 `samples/示例文档.md`
+- **阅读模式大段选中删除卡顿**（性能）：
+  - 拖选时不再每帧做块命中检测（原 `getBoundingClientRect` 全量扫描是主因）
+  - 新增预览选区 **Delete/Backspace 快路径**：多块删除只改 Markdown 源一次 + 单次渲染，不再进 contenteditable 逐键重排
+  - 大纲重建节流 80ms；悬停 fallback 扫描块数上限
+  - 无 editing 时跳过 `getActiveEditingBlock` 清理路径
+
 ## [2.6.0] - 2026-09-17
 
 ### 修复 / 启动体验
