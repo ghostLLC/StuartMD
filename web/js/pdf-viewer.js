@@ -6,7 +6,15 @@
     // no-op
   }
   if (window.pdfjsLib) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "libs/pdf.worker.min.js";
+    // Resolve against page URL so file-association / new-window opens still find the worker
+    try {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+        "libs/pdf.worker.min.js",
+        window.location.href
+      ).href;
+    } catch (_) {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = "libs/pdf.worker.min.js";
+    }
   }
 
   const state = {
@@ -109,10 +117,13 @@
       const p1 = await state.doc.getPage(1);
       const vp1 = p1.getViewport({ scale: 1, rotation: p1.rotate + state.rotation });
       state.landscape = vp1.width >= vp1.height;
+      // Compute scale only, then ALWAYS paint pages (blank-view fix)
       await fitToWidth(false);
+      await renderAll();
 
       document.title = `${payload.name} — StuartMD`;
     } catch (err) {
+      console.error("PDF open failed", err);
       toast("PDF 打开失败：" + (err && err.message ? err.message : err));
       e.area.hidden = true;
       e.welcome.hidden = false;
@@ -121,30 +132,52 @@
 
   async function renderAll() {
     const e = el();
+    if (!state.doc || !e.scroll) return;
     e.scroll.innerHTML = "";
     // Create lightweight placeholders first; paint pages as they enter view
     const pageEls = [];
-    for (let n = 1; n <= state.total; n++) {
-      const page1 = await state.doc.getPage(1);
+    const total = state.total || 0;
+    // Cache page-1 metrics once (avoid N× getPage(1) on long reports)
+    let page1 = null;
+    let vp0 = null;
+    try {
+      page1 = await state.doc.getPage(1);
       const rotation = ((page1.rotate || 0) + state.rotation) % 360;
-      // provisional size from page 1; real size set on paint
-      const vp0 = page1.getViewport({ scale: state.scale, rotation });
+      vp0 = page1.getViewport({ scale: state.scale, rotation });
+    } catch (_) {}
+    const minH = vp0 ? Math.max(200, vp0.height * 0.8) : 480;
+    const frag = document.createDocumentFragment();
+    for (let n = 1; n <= total; n++) {
       const wrap = document.createElement("div");
       wrap.className = "pdf-page pending";
       wrap.dataset.page = String(n);
-      wrap.style.minHeight = Math.max(200, vp0.height * 0.8) + "px";
+      wrap.style.minHeight = `${minH}px`;
       wrap.innerHTML = `<div class="pdf-page-placeholder">第 ${n} 页…</div>`;
-      e.scroll.appendChild(wrap);
+      frag.appendChild(wrap);
       pageEls.push(wrap);
     }
+    e.scroll.appendChild(frag);
     bindHighlightLayer();
 
     const paint = async (wrap) => {
-      if (wrap.dataset.painted === "1") return;
+      if (!wrap || wrap.dataset.painted === "1") return;
+      if (!state.doc) return;
       wrap.dataset.painted = "1";
       const num = Number(wrap.dataset.page);
-      await renderPage(num, wrap);
+      try {
+        await renderPage(num, wrap);
+      } catch (err) {
+        wrap.dataset.painted = "";
+        wrap.classList.add("pending");
+        wrap.innerHTML = `<div class="pdf-page-placeholder">第 ${num} 页渲染失败</div>`;
+        console.error("PDF page render failed", num, err);
+      }
     };
+
+    // Always paint the first pages immediately so the view is never blank
+    for (let i = 0; i < Math.min(2, pageEls.length); i++) {
+      await paint(pageEls[i]);
+    }
 
     if ("IntersectionObserver" in window) {
       const io = new IntersectionObserver(
@@ -156,10 +189,19 @@
             }
           });
         },
-        { root: e.scroll, rootMargin: "400px 0px" }
+        { root: e.scroll, rootMargin: "600px 0px" }
       );
-      pageEls.forEach((w) => io.observe(w));
+      pageEls.forEach((w) => {
+        if (w.dataset.painted !== "1") io.observe(w);
+      });
       state._io = io;
+      // Safety net: if IO never fires (zero-size root / headless quirk), paint page 1–3
+      setTimeout(() => {
+        if (!state.doc) return;
+        pageEls.slice(0, 3).forEach((w) => {
+          if (w.dataset.painted !== "1") paint(w);
+        });
+      }, 400);
     } else {
       for (const w of pageEls) await paint(w);
     }
@@ -167,6 +209,7 @@
 
   async function renderPage(num, existingWrap) {
     const e = el();
+    if (!state.doc) return;
     const page = await state.doc.getPage(num);
     // Include page.Rotate (stored rotation) + user rotation → works for landscape PDFs
     const rotation = ((page.rotate || 0) + state.rotation) % 360;
@@ -474,6 +517,7 @@
   window.StuartMDPdf = {
     openPdf,
     hidePdf,
+    renderAll,
     isActive: () => !el().area.hidden && !!state.doc,
   };
 })();

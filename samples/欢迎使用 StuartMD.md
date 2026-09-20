@@ -4,7 +4,7 @@
 
 **项目仓库：** [https://github.com/ghostLLC/StuartMD](https://github.com/ghostLLC/StuartMD)
 
-**当前版本：** 2.5.1
+**当前版本：** 2.5.2
 
 ---
 
