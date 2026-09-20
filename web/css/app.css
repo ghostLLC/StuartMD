@@ -2591,6 +2591,41 @@ body[data-theme="wallpaper"] #preview *::selection {
   outline-offset: 1px;
 }
 
+/* Comment-only marks on arbitrary selected text */
+.pdf-cm {
+  position: absolute;
+  width: 3px;
+  border-radius: 2px;
+  background: #3b82f6;
+  opacity: 0.75;
+  pointer-events: none;
+}
+
+.pdf-cm-bubble {
+  position: absolute;
+  font-size: 11px;
+  line-height: 1;
+  pointer-events: none;
+  filter: grayscale(0.1);
+  user-select: none;
+}
+
+#pdf-scroll:not(.highlight-mode) .pdf-cm,
+#pdf-scroll:not(.highlight-mode) .pdf-cm-bubble {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.pdf-cm.selected {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
+
+.pdf-cm-bubble.selected {
+  outline: 2px solid #2563eb;
+  border-radius: 4px;
+}
+
 /* Text layer on TOP — transparent glyphs for selection; canvas type shows through highlight */
 .pdf-text-layer {
   position: absolute;

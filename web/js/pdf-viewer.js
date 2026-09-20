@@ -131,25 +131,72 @@
     const m = el().annotMenu;
     if (m) m.hidden = true;
     state.selectedHlId = null;
-    document.querySelectorAll(".pdf-hl.selected").forEach((n) => n.classList.remove("selected"));
+    document.querySelectorAll(".pdf-hl.selected, .pdf-cm.selected").forEach((n) =>
+      n.classList.remove("selected")
+    );
   }
 
+  /** Menu for an existing annotation (highlight / comment). */
   function showAnnotMenu(x, y, annId) {
     const m = el().annotMenu;
     if (!m) return;
     state.selectedHlId = annId;
-    // fill recolor chips
+    state._menuKind = "annot";
+    const a = findAnnot(annId);
+    const isCm = a && a.type === "comment";
+    m.innerHTML = `
+      <button type="button" data-annot-act="comment">${a && a.comment ? "编辑评论" : "添加评论"}</button>
+      ${isCm ? "" : `<div class="pdf-annot-colors" id="pdf-annot-colors"></div>`}
+      <button type="button" data-annot-act="erase">擦除此标注</button>
+    `;
+    if (!isCm) {
+      const box = document.getElementById("pdf-annot-colors");
+      if (box) {
+        PALETTE.forEach((c) => {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.title = c.label;
+          b.style.background = c.hex;
+          b.addEventListener("click", async (ev) => {
+            ev.stopPropagation();
+            await recolorAnnotation(annId, c.id);
+            hideAnnotMenu();
+          });
+          box.appendChild(b);
+        });
+      }
+    }
+    m.hidden = false;
+    const w = m.offsetWidth || 150;
+    const h = m.offsetHeight || 80;
+    m.style.left = Math.min(window.innerWidth - w - 8, Math.max(8, x)) + "px";
+    m.style.top = Math.min(window.innerHeight - h - 8, Math.max(8, y)) + "px";
+  }
+
+  /**
+   * Menu for a live text selection (any content — not only highlights).
+   * Right-click on selected PDF text → comment / highlight.
+   */
+  function showSelectionMenu(x, y) {
+    const m = el().annotMenu;
+    if (!m) return;
+    state.selectedHlId = null;
+    state._menuKind = "selection";
+    m.innerHTML = `
+      <button type="button" data-sel-act="comment">添加评论</button>
+      <button type="button" data-sel-act="highlight">高亮选中</button>
+      <div class="pdf-annot-colors" id="pdf-annot-colors"></div>
+    `;
     const box = document.getElementById("pdf-annot-colors");
     if (box) {
-      box.innerHTML = "";
       PALETTE.forEach((c) => {
         const b = document.createElement("button");
         b.type = "button";
-        b.title = c.label;
+        b.title = `用${c.label}色高亮`;
         b.style.background = c.hex;
         b.addEventListener("click", async (ev) => {
           ev.stopPropagation();
-          await recolorAnnotation(annId, c.id);
+          await addHighlightFromSelection(c.id);
           hideAnnotMenu();
         });
         box.appendChild(b);
@@ -157,7 +204,7 @@
     }
     m.hidden = false;
     const w = m.offsetWidth || 150;
-    const h = m.offsetHeight || 80;
+    const h = m.offsetHeight || 100;
     m.style.left = Math.min(window.innerWidth - w - 8, Math.max(8, x)) + "px";
     m.style.top = Math.min(window.innerHeight - h - 8, Math.max(8, y)) + "px";
   }
@@ -587,37 +634,158 @@
     state.annotations
       .filter((a) => (a.page || 1) === pageNum)
       .forEach((a) => {
-        (a.rects || []).forEach((r) => {
+        const isComment = a.type === "comment";
+        (a.rects || []).forEach((r, ri) => {
+          const left = r.x * viewport.width;
+          const top = r.y * viewport.height;
+          const width = r.w * viewport.width;
+          const height = Math.max(r.h * viewport.height, 2);
+
+          if (isComment) {
+            // Comment-only: slim bar + bubble on first line — does not tint whole selection
+            if (ri === 0) {
+              const bar = document.createElement("div");
+              bar.className = "pdf-cm";
+              bar.dataset.id = a.id;
+              bar.style.left = `${Math.max(0, left - 3)}px`;
+              bar.style.top = `${top}px`;
+              bar.style.height = `${height}px`;
+              bar.style.pointerEvents = pickable ? "auto" : "none";
+              bar.title = a.comment || "评论";
+              bindAnnotEl(bar, a.id, pickable);
+              layer.appendChild(bar);
+              const bubble = document.createElement("div");
+              bubble.className = "pdf-cm-bubble";
+              bubble.dataset.id = a.id;
+              bubble.textContent = "💬";
+              bubble.style.left = `${left + width + 2}px`;
+              bubble.style.top = `${top - 10}px`;
+              bubble.style.pointerEvents = pickable ? "auto" : "none";
+              bubble.title = a.comment || "评论";
+              bindAnnotEl(bubble, a.id, pickable);
+              layer.appendChild(bubble);
+            }
+            return;
+          }
+
           const box = document.createElement("div");
           box.className = "pdf-hl" + (a.comment ? " has-comment" : "");
           box.dataset.id = a.id;
           box.dataset.color = a.color || "yellow";
-          box.style.left = `${r.x * viewport.width}px`;
-          box.style.top = `${r.y * viewport.height}px`;
-          box.style.width = `${r.w * viewport.width}px`;
-          box.style.height = `${Math.max(r.h * viewport.height, 2)}px`;
+          box.style.left = `${left}px`;
+          box.style.top = `${top}px`;
+          box.style.width = `${width}px`;
+          box.style.height = `${height}px`;
           box.style.background = colorMeta(a.color || state.hlColor).css;
           box.style.pointerEvents = pickable ? "auto" : "none";
           box.title = a.comment || a.text || "标注";
-          if (pickable) {
-            box.addEventListener("click", (ev) => {
-              ev.preventDefault();
-              ev.stopPropagation();
-              document.querySelectorAll(".pdf-hl.selected").forEach((n) => n.classList.remove("selected"));
-              box.classList.add("selected");
-              state.selectedHlId = a.id;
-            });
-            box.addEventListener("contextmenu", (ev) => {
-              ev.preventDefault();
-              ev.stopPropagation();
-              document.querySelectorAll(".pdf-hl.selected").forEach((n) => n.classList.remove("selected"));
-              box.classList.add("selected");
-              showAnnotMenu(ev.clientX, ev.clientY, a.id);
-            });
-          }
+          bindAnnotEl(box, a.id, pickable);
           layer.appendChild(box);
         });
       });
+  }
+
+  function bindAnnotEl(node, id, pickable) {
+    if (!pickable) return;
+    node.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      document
+        .querySelectorAll(".pdf-hl.selected, .pdf-cm.selected")
+        .forEach((n) => n.classList.remove("selected"));
+      node.classList.add("selected");
+      state.selectedHlId = id;
+    });
+    node.addEventListener("contextmenu", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      document
+        .querySelectorAll(".pdf-hl.selected, .pdf-cm.selected")
+        .forEach((n) => n.classList.remove("selected"));
+      node.classList.add("selected");
+      showAnnotMenu(ev.clientX, ev.clientY, id);
+    });
+  }
+
+  /** Capture current PDF text selection into state._pendingSel. */
+  function captureSelectionCtx(ev) {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return false;
+    const text = sel.toString().trim();
+    if (!text) return false;
+    const range = sel.getRangeAt(0);
+    const wrap =
+      (ev && ev.target && ev.target.closest && ev.target.closest(".pdf-page")) ||
+      range.startContainer?.parentElement?.closest?.(".pdf-page");
+    if (!wrap || !el().scroll?.contains(wrap)) return false;
+    const wrapBox = wrap.getBoundingClientRect();
+    const rects = hlRectsFromClientRects(range.getClientRects(), wrapBox);
+    if (!rects.length) return false;
+    state._pendingSel = {
+      text,
+      rects,
+      page: Number(wrap.dataset.page || 1),
+    };
+    return true;
+  }
+
+  async function addHighlightFromSelection(colorId) {
+    const ctx = state._pendingSel;
+    if (!ctx || !state.path) {
+      toast("请先选中 PDF 文字");
+      return;
+    }
+    const ann = {
+      type: "highlight",
+      color: colorId || state.hlColor || "yellow",
+      page: ctx.page,
+      text: ctx.text,
+      rects: ctx.rects,
+    };
+    try {
+      const res = await api("add_annotation", state.path, ann);
+      if (res?.error) {
+        toast(res.error);
+        return;
+      }
+      state.annotations = await api("load_annotations", state.path);
+      await loadNativePdfAnnotations();
+      pushAnnotHistory();
+      await refreshAnnots();
+      toast("已高亮选中");
+    } catch (_) {
+      toast("高亮失败");
+    }
+  }
+
+  async function addCommentFromSelection(commentText) {
+    const ctx = state._pendingSel;
+    if (!ctx || !state.path) {
+      toast("请先选中 PDF 文字");
+      return;
+    }
+    const ann = {
+      type: "comment",
+      color: "gray",
+      page: ctx.page,
+      text: ctx.text,
+      comment: commentText,
+      rects: ctx.rects,
+    };
+    try {
+      const res = await api("add_annotation", state.path, ann);
+      if (res?.error) {
+        toast(res.error);
+        return;
+      }
+      state.annotations = await api("load_annotations", state.path);
+      await loadNativePdfAnnotations();
+      pushAnnotHistory();
+      await refreshAnnots();
+      toast("评论已添加");
+    } catch (_) {
+      toast("评论失败");
+    }
   }
 
   function findAnnot(id) {
@@ -695,7 +863,17 @@
     };
 
     e.scroll.oncontextmenu = (ev) => {
-      if (ev.target.closest(".pdf-hl")) return;
+      // Existing annotation → its own menu
+      if (ev.target.closest(".pdf-hl") || ev.target.closest(".pdf-cm") || ev.target.closest(".pdf-cm-bubble")) {
+        ev.preventDefault();
+        return;
+      }
+      // ANY selected PDF text → selection menu (comment / highlight)
+      if (captureSelectionCtx(ev)) {
+        ev.preventDefault();
+        showSelectionMenu(ev.clientX, ev.clientY);
+        return;
+      }
       hideAnnotMenu();
     };
   }
@@ -788,8 +966,8 @@
 
   function openCommentModal(id) {
     const e = el();
-    _commentTargetId = id;
-    const a = findAnnot(id);
+    _commentTargetId = id; // null → new comment on current selection
+    const a = id ? findAnnot(id) : null;
     if (e.commentInput) e.commentInput.value = (a && (a.comment || a.text)) || "";
     if (e.commentModal) e.commentModal.hidden = false;
     e.commentInput?.focus();
@@ -806,11 +984,22 @@
     const id = _commentTargetId;
     const text = (e.commentInput && e.commentInput.value ? e.commentInput.value : "").trim();
     closeCommentModal();
-    if (!id) return;
+    if (!id) {
+      // New comment on selected text
+      if (!text) {
+        toast("评论内容为空");
+        return;
+      }
+      await addCommentFromSelection(text);
+      return;
+    }
     const a = findAnnot(id);
     if (!a) return;
     a.comment = text;
     a.text = text || a.text;
+    if (text && a.type !== "comment") {
+      // keep highlight type; only attach comment text
+    }
     await persistAnnots();
     await refreshAnnots();
     toast(text ? "评论已保存" : "评论已清空");
@@ -900,8 +1089,20 @@
       { passive: false }
     );
 
-    // Annot context menu actions
+    // Annot / selection context menu actions (delegated — menu HTML is rebuilt)
     e.annotMenu?.addEventListener("click", async (ev) => {
+      const selBtn = ev.target.closest("[data-sel-act]");
+      if (selBtn) {
+        const act = selBtn.dataset.selAct;
+        if (act === "comment") {
+          openCommentModal(null); // new comment on selection
+          hideAnnotMenu();
+        } else if (act === "highlight") {
+          await addHighlightFromSelection(state.hlColor || "yellow");
+          hideAnnotMenu();
+        }
+        return;
+      }
       const btn = ev.target.closest("[data-annot-act]");
       if (!btn) return;
       const act = btn.dataset.annotAct;
@@ -921,14 +1122,18 @@
       if (ev.target === e.commentModal) closeCommentModal();
     });
 
+    // Keep selection context until menu action (mousedown on menu must not clear)
     document.addEventListener("mousedown", (ev) => {
       if (e.palette && !e.palette.hidden && !ev.target.closest(".pdf-color-wrap")) {
         e.palette.hidden = true;
       }
       const menu = e.annotMenu;
       if (menu && !menu.hidden) {
-        if (ev.target.closest("#pdf-annot-menu") || ev.target.closest(".pdf-hl")) return;
+        if (ev.target.closest("#pdf-annot-menu") || ev.target.closest(".pdf-hl") || ev.target.closest(".pdf-cm")) {
+          return;
+        }
         hideAnnotMenu();
+        state._pendingSel = null;
       }
     });
     document.addEventListener("keydown", (ev) => {
