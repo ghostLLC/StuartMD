@@ -2403,6 +2403,31 @@ body[data-theme="wallpaper"] #preview *::selection {
   transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 
+/* Boot splash — covers white webview flash until first UI decision */
+#boot-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: var(--bg, #ffffff);
+  pointer-events: none;
+}
+
+#boot-splash[hidden] {
+  display: none !important;
+}
+
+[data-theme="dark"] #boot-splash {
+  background: #1e1e1e;
+}
+
+[data-theme="gray"] #boot-splash {
+  background: #2b2b2e;
+}
+
+[data-theme="sepia"] #boot-splash {
+  background: #f4ecd8;
+}
+
 /* ========== PDF viewer ========== */
 #pdf-area {
   flex: 1;

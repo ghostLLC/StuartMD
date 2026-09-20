@@ -24,6 +24,7 @@
     activeTabId: null,
     tabSeq: 1,
     isSampleDoc: false,
+    sampleDismissed: false,
     workspaceRoot: "",
   };
 
@@ -2120,6 +2121,7 @@
   }
 
   function renderTabs() {
+    persistSessionSoon();
     const bar = $("#tabbar");
     const list = $("#tab-list");
     if (!bar || !list) return;
@@ -2247,6 +2249,10 @@
       const ok = confirm(`「${tabTitleFor(tab)}」有未保存修改，确定关闭？`);
       if (!ok) return;
     }
+    // Closing the welcome/sample marks it dismissed → next cold start shows home
+    if (tab.welcome || isWelcomeOrSamplePath(tab.path, tab.name) || tab.name === "欢迎使用 StuartMD.md") {
+      state.sampleDismissed = true;
+    }
     state.tabs.splice(idx, 1);
     if (state.activeTabId === id) {
       const next = state.tabs[Math.min(idx, state.tabs.length - 1)];
@@ -2276,6 +2282,102 @@
       }
     }
     renderTabs();
+    persistSession();
+  }
+
+  let _sessionPersistTimer = 0;
+  function persistSessionSoon() {
+    clearTimeout(_sessionPersistTimer);
+    _sessionPersistTimer = setTimeout(() => persistSession(), 400);
+  }
+
+  /** Persist open tabs + folder + sample-dismiss flag for next cold start. */
+  function persistSession() {
+    if (!state.apiReady || !window.pywebview?.api?.save_settings) return;
+    const tabs = [];
+    const seen = new Set();
+    state.tabs.forEach((t) => {
+      const p = t.path || null;
+      if (!p || seen.has(p)) return;
+      seen.add(p);
+      tabs.push(p);
+    });
+    window.pywebview.api
+      .save_settings({
+        session: {
+          tabs,
+          active_path: state.path || "",
+        },
+        last_folder: state.folder || "",
+        sample_dismissed: !!state.sampleDismissed,
+      })
+      .catch(() => {});
+  }
+
+  function hideBootSplash() {
+    const b = $("#boot-splash");
+    if (b) b.hidden = true;
+  }
+
+  function showHomePage() {
+    el.welcome.hidden = false;
+    el.editorArea.hidden = true;
+    const pdf = $("#pdf-area");
+    if (pdf) pdf.hidden = true;
+    hideBootSplash();
+  }
+
+  async function openSampleDirect() {
+    // First-run path: open sample immediately — never flash the home card first
+    if (window.pywebview?.api?.open_welcome) {
+      const welcome = await window.pywebview.api.open_welcome();
+      if (welcome && !welcome.error) {
+        state.isSampleDoc = true;
+        state.sampleDismissed = false;
+        setDocument(welcome);
+        hideBootSplash();
+        persistSession();
+        return true;
+      }
+    }
+    if (typeof SAMPLE === "string") {
+      state.isSampleDoc = true;
+      setDocument({ path: null, name: "欢迎使用 StuartMD.md", content: SAMPLE, welcome: true });
+      hideBootSplash();
+      return true;
+    }
+    return false;
+  }
+
+  async function restoreSessionTabs(session) {
+    const paths = (session && Array.isArray(session.tabs) ? session.tabs : []).filter(
+      (p) => p && typeof p === "string"
+    );
+    if (!paths.length) return false;
+    let restored = 0;
+    for (const p of paths) {
+      try {
+        if (window.pywebview.api.file_exists) {
+          const ex = await window.pywebview.api.file_exists(p);
+          if (ex === false) continue;
+        }
+        const res = await window.pywebview.api.open_path(p);
+        if (!res || res.error || res.kind === "folder") continue;
+        if (res.b64 || res.content != null) {
+          await addOrFocusTab(res);
+          restored++;
+        }
+      } catch (_) {}
+    }
+    if (!restored) return false;
+    const activePath = (session && session.active_path) || "";
+    if (activePath) {
+      const tab = state.tabs.find((t) => t.path === activePath);
+      if (tab) activateTab(tab.id);
+    }
+    hideBootSplash();
+    persistSession();
+    return true;
   }
 
   function bindTabBar() {
@@ -2677,6 +2779,7 @@
     }
     if (!state.apiReady) {
       state.isSampleDoc = true;
+      state.sampleDismissed = false;
       setDocument({ path: null, name: "示例文档.md", content: SAMPLE });
       setMode("preview");
       return;
@@ -2687,6 +2790,7 @@
       return;
     }
     state.isSampleDoc = true;
+    state.sampleDismissed = false;
     if (state.openMode === "current_window" || state.tabs.length) {
       await addOrFocusTab(res);
     } else {
@@ -2694,6 +2798,7 @@
     }
     setMode("preview");
     await refreshRecents();
+    persistSession();
   }
 
   // ---------- Folder tree ----------
@@ -2725,6 +2830,7 @@
     renderTree(res.items || [], el.fileTree, 0);
     toggleSidebar(true);
     showSidebarPanel("files");
+    persistSession();
   }
 
   function bindTreeDelegates() {
@@ -3765,13 +3871,17 @@ ${previewHtml}
       }
     });
 
-    // beforeunload-ish: warn dirty via title
+    // beforeunload-ish: warn dirty via title + persist session
     window.addEventListener("beforeunload", (e) => {
+      persistSession();
       if (state.dirty) {
         e.preventDefault();
         e.returnValue = "";
-        return "";
       }
+    });
+    window.addEventListener("pagehide", () => persistSession());
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") persistSession();
     });
     bindPreviewDelegates();
     bindSelToolbar();
@@ -4427,42 +4537,55 @@ flowchart LR
         await applySettings(s);
         const info = await window.pywebview.api.get_app_info();
         state.appInfo = info;
-        // Refresh shell associations after upgrades (md + pdf open-with)
-        try {
-          await window.pywebview.api.register_file_association();
-        } catch (_) {}
-        await refreshPluginList();
-        if (window.StuartPlugins?.loadAll) {
-          await window.StuartPlugins.loadAll();
-        }
+        // Association + plugins: non-critical, do not block boot path
+        state.sampleDismissed = !!(s && s.sample_dismissed);
+        setTimeout(() => {
+          try {
+            window.pywebview.api.register_file_association?.()?.catch?.(() => {});
+          } catch (_) {}
+        }, 2500);
+        setTimeout(async () => {
+          try {
+            await refreshPluginList();
+            if (window.StuartPlugins?.loadAll) await window.StuartPlugins.loadAll();
+          } catch (_) {}
+        }, 0);
         window.dispatchEvent(new CustomEvent("stuart-ready"));
         if (info?.startup_file) {
+          hideBootSplash();
           const res = await window.pywebview.api.open_path(info.startup_file);
           if (res?.error) {
             toast(res.error);
+            showHomePage();
           } else if (res?.kind === "folder") {
             await loadFolder(res.path);
+            showHomePage();
           } else if (res?.b64 || res?.content != null) {
-            // Always open documents from CLI / file association
             if (state.openMode === "current_window" || state.tabs.length) {
               await addOrFocusTab(res);
             } else {
               setDocument(res);
             }
             if (res.path) setWorkspaceFromPath(res.path);
+            hideBootSplash();
+            persistSession();
           }
-        } else if (window.pywebview.api.open_welcome) {
-          const welcome = await window.pywebview.api.open_welcome();
-          if (welcome && !welcome.error) {
-            state.isSampleDoc = true;
-            if (state.openMode === "current_window" || state.openMode === "smart") {
-              await addOrFocusTab(welcome);
+        } else {
+          const session = (s && s.session) || { tabs: [], active_path: "" };
+          const restored = await restoreSessionTabs(session);
+          if (!restored) {
+            if (!state.sampleDismissed) {
+              const ok = await openSampleDirect();
+              if (!ok) showHomePage();
             } else {
-              setDocument(welcome);
+              showHomePage();
             }
           }
         }
-      } catch (_) {}
+      } catch (_) {
+        hideBootSplash();
+        showHomePage();
+      }
     }
 
     if (window.pywebview?.api) {
@@ -4471,13 +4594,14 @@ flowchart LR
       window.addEventListener("pywebviewready", onReady, { once: true });
       setTimeout(() => {
         if (!state.apiReady) {
+          hideBootSplash();
           setDocument({ path: null, name: "欢迎使用 StuartMD.md", content: SAMPLE, welcome: true });
         }
       }, 800);
     }
 
-    // show welcome card only until intro document loads
-    el.welcome.hidden = false;
+    // Splash covers white flash; home card is shown only when boot decides so
+    el.welcome.hidden = true;
     el.editorArea.hidden = true;
   }
 

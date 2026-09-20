@@ -5,7 +5,7 @@
 (function (global) {
   "use strict";
 
-  const SCHEMA_VERSION = 2;
+  const SCHEMA_VERSION = 3;
 
   const DEFAULTS = {
     schema_version: SCHEMA_VERSION,
@@ -23,6 +23,9 @@
     new_doc_mode: "tab",
     content_width: "default",
     music: { volume: 0.4, currentId: "rain", customName: "", playing: false },
+    // Session restore: first launch opens sample; after sample closed → home
+    sample_dismissed: false,
+    session: { tabs: [], active_path: "" },
   };
 
   function migrate(raw) {
@@ -38,6 +41,16 @@
         s.theme = "light";
       }
     }
+    if (from < 3 && typeof s.sample_dismissed === "undefined") {
+      const hasRecent = Array.isArray(s.recent) && s.recent.length > 0;
+      const hasFolder = !!(s.last_folder && String(s.last_folder).length);
+      s.sample_dismissed = hasRecent || hasFolder;
+    }
+    if (!s.session || typeof s.session !== "object") {
+      s.session = { tabs: [], active_path: "" };
+    }
+    if (!Array.isArray(s.session.tabs)) s.session.tabs = [];
+    if (typeof s.session.active_path !== "string") s.session.active_path = "";
     Object.keys(DEFAULTS).forEach((k) => {
       if (typeof s[k] === "undefined") s[k] = DEFAULTS[k];
     });

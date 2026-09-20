@@ -245,10 +245,8 @@ pub fn stuart_register_file_association() -> Value {
             let _ = k.0.set_value("Path", &exe_dir().to_string_lossy().as_ref());
         }
 
-        // Best-effort shell notify so Explorer refreshes Open-with quickly
-        let _ = Command::new("cmd")
-            .args(["/C", "ie4uinit.exe", "-show"])
-            .spawn();
+        // Do NOT spawn cmd/ie4uinit here — it flashes a console window on every boot.
+        // Registry writes are enough for Explorer "Open with" after a refresh.
 
         return json!({"ok": true, "command": cmd, "pdf": true, "md": true});
     }
@@ -280,15 +278,24 @@ fn parse_version(v: &str) -> (u64, u64, u64) {
 #[tauri::command]
 pub fn stuart_check_update() -> Value {
     let url = "https://api.github.com/repos/ghostLLC/StuartMD/releases/latest";
-    let out = Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-Command",
-            &format!(
-                "(Invoke-WebRequest -UseBasicParsing -Uri '{url}' -Headers @{{'User-Agent'='StuartMD/{VERSION}'}}).Content"
-            ),
-        ])
-        .output();
+    #[cfg(target_os = "windows")]
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let mut cmd = Command::new("powershell");
+    cmd.args([
+        "-NoProfile",
+        "-WindowStyle",
+        "Hidden",
+        "-Command",
+        &format!(
+            "(Invoke-WebRequest -UseBasicParsing -Uri '{url}' -Headers @{{'User-Agent'='StuartMD/{VERSION}'}}).Content"
+        ),
+    ]);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let out = cmd.output();
     let text = match out {
         Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
         _ => {

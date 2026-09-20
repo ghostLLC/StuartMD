@@ -6,10 +6,10 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 const APP_ID: &str = "StuartMD";
-pub const VERSION: &str = "2.5.2";
+pub const VERSION: &str = "2.6.0";
 pub const PROG_ID: &str = "StuartMD.Markdown";
 pub const PROG_ID_PDF: &str = "StuartMD.PDF";
-pub const SETTINGS_SCHEMA: i64 = 2;
+pub const SETTINGS_SCHEMA: i64 = 3;
 const PDF_MAX: u64 = 40 * 1024 * 1024;
 pub const MD_EXTS: [&str; 5] = [".md", ".markdown", ".mdown", ".mkd", ".txt"];
 
@@ -92,6 +92,8 @@ pub fn default_settings() -> Value {
         "new_doc_mode": "tab",
         "content_width": "default",
         "music": {"volume": 0.4, "currentId": "rain", "customName": "", "playing": false},
+        "sample_dismissed": false,
+        "session": {"tabs": [], "active_path": ""},
     })
 }
 
@@ -118,6 +120,25 @@ pub fn migrate_settings(raw: Option<Value>) -> Value {
                 obj.insert("theme".into(), json!("light"));
             }
             obj.insert("glass".into(), json!(false));
+        }
+    }
+
+    if from_v < 3 {
+        // Existing installs already used the app — don't force the sample page on them
+        if let Some(obj) = s.as_object_mut() {
+            let has_recent = obj
+                .get("recent")
+                .and_then(|r| r.as_array())
+                .map(|a| !a.is_empty())
+                .unwrap_or(false);
+            let has_folder = obj
+                .get("last_folder")
+                .and_then(|f| f.as_str())
+                .map(|f| !f.is_empty())
+                .unwrap_or(false);
+            if has_recent || has_folder {
+                obj.insert("sample_dismissed".into(), json!(true));
+            }
         }
     }
 
@@ -712,7 +733,7 @@ pub fn stuart_open_welcome() -> Value {
         "name": "欢迎使用 StuartMD.md",
         "kind": "markdown",
         "welcome": true,
-        "content": "# StuartMD\n\n轻量 Markdown 阅读与编辑器。\n\n**项目仓库：** https://github.com/ghostLLC/StuartMD\n\n**当前版本：** 2.5.2\n\n## 能做什么\n\n- 读文档：美化排版、公式、表格、代码高亮\n- 写笔记：阅读 / 分栏 / 源码，点击段落直接编辑\n- 飞书式交互：块手柄、选中浮动栏、块菜单；双击代码/公式/图表进源码编辑\n- 撤销重做：Ctrl+Z / Ctrl+Y\n- 看 PDF：标黄批注\n- 多窗口、主题、多语言\n",
+        "content": "# StuartMD\n\n轻量 Markdown 阅读与编辑器。\n\n**项目仓库：** https://github.com/ghostLLC/StuartMD\n\n**当前版本：** 2.6.0\n\n## 能做什么\n\n- 读文档：美化排版、公式、表格、代码高亮\n- 写笔记：阅读 / 分栏 / 源码，点击段落直接编辑\n- 飞书式交互：块手柄、选中浮动栏、块菜单；双击代码/公式/图表进源码编辑\n- 撤销重做：Ctrl+Z / Ctrl+Y\n- 看 PDF：标黄批注\n- 多窗口、主题、多语言\n",
         "size": 0
     })
 }
