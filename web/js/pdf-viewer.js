@@ -1,4 +1,4 @@
-/* StuartMD PDF viewer — pdf.js + multi-color annotations + native PDF export */
+/* StuartMD PDF viewer — pdf.js + annotation bar / underline / comments */
 (function () {
   "use strict";
 
@@ -13,14 +13,13 @@
     }
   }
 
-  /** Light highlighter colors — distinct from selection blue */
   const PALETTE = [
-    { id: "yellow", label: "黄", css: "rgba(255,232,96,0.34)", hex: "#ffe566", pdf: [1.0, 0.91, 0.23] },
-    { id: "green", label: "绿", css: "rgba(120,200,130,0.34)", hex: "#78c882", pdf: [0.47, 0.78, 0.51] },
-    { id: "blue", label: "蓝", css: "rgba(100,170,230,0.32)", hex: "#64aae6", pdf: [0.39, 0.67, 0.9] },
-    { id: "pink", label: "粉", css: "rgba(240,150,180,0.32)", hex: "#f096b4", pdf: [0.94, 0.59, 0.71] },
-    { id: "orange", label: "橙", css: "rgba(250,180,90,0.34)", hex: "#fab45a", pdf: [0.98, 0.71, 0.35] },
-    { id: "purple", label: "紫", css: "rgba(180,150,230,0.32)", hex: "#b496e6", pdf: [0.71, 0.59, 0.9] },
+    { id: "yellow", label: "黄", css: "rgba(255,232,96,0.34)", hex: "#ffe566", pdf: [1.0, 0.91, 0.23], line: "#d4a800" },
+    { id: "green", label: "绿", css: "rgba(120,200,130,0.34)", hex: "#78c882", pdf: [0.47, 0.78, 0.51], line: "#3d9a4f" },
+    { id: "blue", label: "蓝", css: "rgba(100,170,230,0.32)", hex: "#64aae6", pdf: [0.39, 0.67, 0.9], line: "#2b7fd4" },
+    { id: "pink", label: "粉", css: "rgba(240,150,180,0.32)", hex: "#f096b4", pdf: [0.94, 0.59, 0.71], line: "#d4568a" },
+    { id: "orange", label: "橙", css: "rgba(250,180,90,0.34)", hex: "#fab45a", pdf: [0.98, 0.71, 0.35], line: "#d4862b" },
+    { id: "purple", label: "紫", css: "rgba(180,150,230,0.32)", hex: "#b496e6", pdf: [0.71, 0.59, 0.9], line: "#7a4fd4" },
   ];
 
   function colorMeta(id) {
@@ -34,16 +33,16 @@
     page: 1,
     total: 1,
     scale: 1.2,
+    baseScale: 1.2,
     rotation: 0,
-    mode: "none", // highlight | none
     annotations: [],
     landscape: false,
     spread: false,
     selectedHlId: null,
     hlColor: "yellow",
+    _pendingSel: null,
   };
 
-  /** Annotation undo/redo (PDF area only) */
   const annotHist = { stack: [], i: -1, max: 80 };
 
   const el = () => ({
@@ -53,11 +52,12 @@
     scroll: document.getElementById("pdf-scroll"),
     pageInput: document.getElementById("pdf-page-input"),
     pageLabel: document.getElementById("pdf-page-label"),
-    btnHighlight: document.getElementById("pdf-highlight"),
+    btnColor: document.getElementById("pdf-highlight"),
     btnSpread: document.getElementById("pdf-spread"),
     annotMenu: document.getElementById("pdf-annot-menu"),
     palette: document.getElementById("pdf-color-palette"),
-    colorDot: document.getElementById("pdf-color-dot"),
+    annotBar: document.getElementById("pdf-annot-bar"),
+    hoverTip: document.getElementById("pdf-hover-tip"),
     commentPanel: document.getElementById("pdf-comment-panel"),
     commentInput: document.getElementById("pdf-comment-input"),
     commentQuote: document.getElementById("pdf-comment-quote"),
@@ -100,15 +100,15 @@
     state.annotations = cloneAnnots(list);
     if (state.path) {
       try {
-        await api("save_annotations", state.path, state.annotations);
+        const sidecar = state.annotations.filter((a) => !a.native);
+        await api("save_annotations", state.path, sidecar);
       } catch (_) {}
     }
     await refreshAnnots();
   }
 
   async function undoAnnot() {
-    if (!pdfActive()) return false;
-    if (annotHist.i <= 0) return false;
+    if (!pdfActive() || annotHist.i <= 0) return false;
     annotHist.i--;
     await applyAnnotSnapshot(annotHist.stack[annotHist.i]);
     toast("已撤销标注");
@@ -116,8 +116,7 @@
   }
 
   async function redoAnnot() {
-    if (!pdfActive()) return false;
-    if (annotHist.i >= annotHist.stack.length - 1) return false;
+    if (!pdfActive() || annotHist.i >= annotHist.stack.length - 1) return false;
     annotHist.i++;
     await applyAnnotSnapshot(annotHist.stack[annotHist.i]);
     toast("已重做标注");
@@ -129,21 +128,34 @@
     return !!(e.area && !e.area.hidden && state.doc);
   }
 
+  function hideAnnotBar() {
+    const b = el().annotBar;
+    if (b) b.hidden = true;
+  }
+
+  function showAnnotBar(x, y) {
+    const b = el().annotBar;
+    if (!b) return;
+    b.hidden = false;
+    const w = b.offsetWidth || 140;
+    const h = b.offsetHeight || 36;
+    b.style.left = `${Math.min(window.innerWidth - w - 8, Math.max(8, x))}px`;
+    b.style.top = `${Math.min(window.innerHeight - h - 8, Math.max(8, y))}px`;
+  }
+
   function hideAnnotMenu() {
     const m = el().annotMenu;
     if (m) m.hidden = true;
     state.selectedHlId = null;
-    document.querySelectorAll(".pdf-hl.selected, .pdf-cm.selected").forEach((n) =>
-      n.classList.remove("selected")
-    );
+    document
+      .querySelectorAll(".pdf-hl.selected, .pdf-cm.selected, .pdf-cm-bubble.selected")
+      .forEach((n) => n.classList.remove("selected"));
   }
 
-  /** Menu for an existing annotation (highlight / comment). */
   function showAnnotMenu(x, y, annId) {
     const m = el().annotMenu;
     if (!m) return;
     state.selectedHlId = annId;
-    state._menuKind = "annot";
     const a = findAnnot(annId);
     const isCm = a && a.type === "comment";
     m.innerHTML = `
@@ -171,64 +183,8 @@
     m.hidden = false;
     const w = m.offsetWidth || 150;
     const h = m.offsetHeight || 80;
-    m.style.left = Math.min(window.innerWidth - w - 8, Math.max(8, x)) + "px";
-    m.style.top = Math.min(window.innerHeight - h - 8, Math.max(8, y)) + "px";
-  }
-
-  /**
-   * Menu for a live text selection (any content — not only highlights).
-   * Right-click on selected PDF text → comment / highlight.
-   */
-  function showSelectionMenu(x, y) {
-    const m = el().annotMenu;
-    if (!m) return;
-    state.selectedHlId = null;
-    state._menuKind = "selection";
-    m.innerHTML = `
-      <button type="button" data-sel-act="comment">添加评论</button>
-      <button type="button" data-sel-act="highlight">高亮选中</button>
-      <div class="pdf-annot-colors" id="pdf-annot-colors"></div>
-    `;
-    const box = document.getElementById("pdf-annot-colors");
-    if (box) {
-      PALETTE.forEach((c) => {
-        const b = document.createElement("button");
-        b.type = "button";
-        b.title = `用${c.label}色高亮`;
-        b.style.background = c.hex;
-        b.addEventListener("click", async (ev) => {
-          ev.stopPropagation();
-          await addHighlightFromSelection(c.id);
-          hideAnnotMenu();
-        });
-        box.appendChild(b);
-      });
-    }
-    m.hidden = false;
-    const w = m.offsetWidth || 150;
-    const h = m.offsetHeight || 100;
-    m.style.left = Math.min(window.innerWidth - w - 8, Math.max(8, x)) + "px";
-    m.style.top = Math.min(window.innerHeight - h - 8, Math.max(8, y)) + "px";
-  }
-
-  function setModeUI() {
-    const e = el();
-    const on = state.mode === "highlight";
-    if (e.btnHighlight) {
-      e.btnHighlight.classList.toggle("active", on);
-      e.btnHighlight.title = on
-        ? "标注中：选中文字即可标注（点击关闭）"
-        : "标注（默认关闭）：开启后选中文字标注；右上可选颜色";
-    }
-    if (e.scroll) e.scroll.classList.toggle("highlight-mode", on);
-    if (e.btnSpread) {
-      e.btnSpread.classList.toggle("active", !!state.spread);
-      e.btnSpread.title = state.spread ? "单页显示" : "双页显示";
-    }
-    if (e.colorDot) {
-      const c = colorMeta(state.hlColor);
-      e.colorDot.style.background = c.hex;
-    }
+    m.style.left = `${Math.min(window.innerWidth - w - 8, Math.max(8, x))}px`;
+    m.style.top = `${Math.min(window.innerHeight - h - 8, Math.max(8, y))}px`;
   }
 
   function renderPalette() {
@@ -245,7 +201,6 @@
         ev.stopPropagation();
         state.hlColor = c.id;
         e.palette.hidden = true;
-        setModeUI();
         toast(`标注颜色：${c.label}`);
       });
       e.palette.appendChild(b);
@@ -267,7 +222,6 @@
     state.doc = null;
   }
 
-  /** Pull native PDF Highlight/Text annotations (Edge/WPS) into our model. */
   async function loadNativePdfAnnotations() {
     if (!state.doc || !state.path) return;
     try {
@@ -281,31 +235,49 @@
         let raw = [];
         try {
           raw = await page.getAnnotations({ intent: "display" });
-        } catch (_) {
-          raw = [];
-        }
+        } catch (_) {}
         for (const a of raw || []) {
           const sub = a.subtype || a.Subtype || "";
-          if (sub !== "Highlight" && sub !== "Text" && sub !== "Underline" && sub !== "StrikeOut") continue;
-          const comment = a.contentsObj?.str || a.contents || a.titleObj?.str || "";
+          if (!["Highlight", "Text", "Underline", "StrikeOut", "Squiggly"].includes(sub)) continue;
+          const comment = a.contentsObj?.str || a.contents || "";
           const col = pdfColorToId(a.color);
-          if (sub === "Highlight" || sub === "Underline" || sub === "StrikeOut") {
-            const rects = quadToRects(a.quadPoints || a.quadpoints, W, H);
-            if (!rects.length) continue;
+          if (sub === "Text") {
+            const rect = a.rect || a.Rect;
+            let rects = [];
+            if (rect && rect.length >= 4) {
+              const x0 = Math.min(rect[0], rect[2]) / W;
+              const x1 = Math.max(rect[0], rect[2]) / W;
+              const yTop = 1 - Math.max(rect[1], rect[3]) / H;
+              const yBot = 1 - Math.min(rect[1], rect[3]) / H;
+              rects = [{ x: x0, y: yTop, w: Math.max(x1 - x0, 0.02), h: Math.max(yBot - yTop, 0.015) }];
+            }
             merged.push({
               id: "pdf-native-" + n + "-" + (a.id || merged.length),
-              type: "highlight",
+              type: "comment",
               native: true,
               page: n,
               color: col,
               text: String(comment || "").slice(0, 200),
-              comment: comment ? String(comment) : "",
+              comment: String(comment || ""),
               rects,
             });
+            continue;
           }
+          const rects = quadToRects(a.quadPoints || a.quadpoints, W, H);
+          if (!rects.length) continue;
+          const type = sub === "Underline" ? "underline" : sub === "StrikeOut" ? "strike" : "highlight";
+          merged.push({
+            id: "pdf-native-" + n + "-" + (a.id || merged.length),
+            type,
+            native: true,
+            page: n,
+            color: col,
+            text: String(comment || "").slice(0, 200),
+            comment: comment ? String(comment) : "",
+            rects,
+          });
         }
       }
-      // Keep sidecar items + native (native first so they show even without sidecar)
       const sidecar = state.annotations.filter((a) => !a.native);
       const nativeOnly = merged.filter((m) => !sidecar.some((s) => s.id === m.id));
       state.annotations = [...nativeOnly, ...sidecar];
@@ -317,7 +289,6 @@
   function pdfColorToId(color) {
     if (!color || !color.length) return "yellow";
     const [r, g, b] = color;
-    // nearest palette
     let best = PALETTE[0];
     let bestD = Infinity;
     PALETTE.forEach((c) => {
@@ -334,7 +305,6 @@
   function quadToRects(quads, W, H) {
     if (!quads || !quads.length) return [];
     const rects = [];
-    // QuadPoints: 8 numbers per quad, PDF space y-up
     for (let i = 0; i + 7 < quads.length; i += 8) {
       const xs = [quads[i], quads[i + 2], quads[i + 4], quads[i + 6]];
       const ys = [quads[i + 1], quads[i + 3], quads[i + 5], quads[i + 7]];
@@ -364,15 +334,15 @@
     e.area.hidden = false;
     await disposeDoc();
     hideAnnotMenu();
+    hideAnnotBar();
+    hideHoverTip();
     state.path = payload.path;
     state.name = payload.name;
     state.annotations = payload.annotations || [];
     state.page = 1;
     state.rotation = 0;
     state.scale = 1.2;
-    state.mode = "none";
     e.scroll.innerHTML = "";
-    setModeUI();
 
     try {
       const bin = atob(payload.b64);
@@ -392,7 +362,6 @@
       if (state.landscape) await fitToWidth(false);
       else await fitScaleToHeight(false);
       await renderAll();
-
       document.title = `${payload.name} — StuartMD`;
     } catch (err) {
       console.error("PDF open failed", err);
@@ -402,18 +371,48 @@
     }
   }
 
-  function makePageWrap(num, minH) {
+  function makePageWrap(num, vp0) {
     const wrap = document.createElement("div");
     wrap.className = "pdf-page pending";
     wrap.dataset.page = String(num);
-    wrap.style.minHeight = `${minH}px`;
+    if (vp0 && vp0.width > 10 && vp0.height > 10) {
+      wrap.style.width = `${vp0.width}px`;
+      wrap.style.minHeight = `${vp0.height}px`;
+    } else {
+      wrap.style.minHeight = "480px";
+    }
     wrap.innerHTML = `<div class="pdf-page-placeholder">第 ${num} 页…</div>`;
     return wrap;
+  }
+
+  function clearLiveZoom() {
+    const e = el();
+    if (!e.scroll) return;
+    e.scroll.classList.remove("pdf-zooming");
+    e.scroll.querySelectorAll(".pdf-page").forEach((p) => {
+      p.style.transform = "";
+      p.style.transformOrigin = "";
+    });
+  }
+
+  /** Scale painted pages in-place so Ctrl+wheel does not blank the view. */
+  function applyLiveZoom() {
+    const e = el();
+    if (!e.scroll || !state.baseScale || state.baseScale <= 0) return;
+    const ratio = state.scale / state.baseScale;
+    e.scroll.classList.add("pdf-zooming");
+    e.scroll.querySelectorAll(".pdf-page").forEach((p) => {
+      if (p.dataset.painted === "1") {
+        p.style.transform = `scale(${ratio})`;
+        p.style.transformOrigin = "top center";
+      }
+    });
   }
 
   async function renderAll() {
     const e = el();
     if (!state.doc || !e.scroll) return;
+    clearLiveZoom();
     e.scroll.innerHTML = "";
     hideAnnotMenu();
     const total = state.total || 0;
@@ -423,20 +422,20 @@
       const rotation = ((page1.rotate || 0) + state.rotation) % 360;
       vp0 = page1.getViewport({ scale: state.scale, rotation });
     } catch (_) {}
-    const minH = vp0 ? Math.max(200, vp0.height * 0.8) : 480;
 
     const pageEls = [];
     const frag = document.createDocumentFragment();
     if (state.spread) {
       e.scroll.classList.add("spread-mode");
+      const half = vp0 ? { width: vp0.width, height: vp0.height } : null;
       for (let n = 1; n <= total; n += 2) {
         const row = document.createElement("div");
         row.className = "pdf-spread";
-        const a = makePageWrap(n, minH);
+        const a = makePageWrap(n, half);
         row.appendChild(a);
         pageEls.push(a);
         if (n + 1 <= total) {
-          const b = makePageWrap(n + 1, minH);
+          const b = makePageWrap(n + 1, half);
           row.appendChild(b);
           pageEls.push(b);
         }
@@ -445,7 +444,7 @@
     } else {
       e.scroll.classList.remove("spread-mode");
       for (let n = 1; n <= total; n++) {
-        const wrap = makePageWrap(n, minH);
+        const wrap = makePageWrap(n, vp0);
         frag.appendChild(wrap);
         pageEls.push(wrap);
       }
@@ -470,6 +469,7 @@
     for (let i = 0; i < Math.min(state.spread ? 4 : 2, pageEls.length); i++) {
       await paint(pageEls[i]);
     }
+    state.baseScale = state.scale;
 
     if ("IntersectionObserver" in window) {
       const io = new IntersectionObserver(
@@ -507,7 +507,6 @@
     const wrap = existingWrap || document.createElement("div");
     wrap.className = "pdf-page";
     wrap.dataset.page = String(num);
-    wrap.dataset.rotation = String(rotation);
     wrap.style.width = `${viewport.width}px`;
     wrap.style.height = `${viewport.height}px`;
     wrap.style.minHeight = "";
@@ -522,7 +521,6 @@
     canvas.style.height = `${viewport.height}px`;
     wrap.appendChild(canvas);
 
-    // Text layer first (selectable), annot on top for left-click when mark mode off
     const layer = document.createElement("div");
     layer.className = "pdf-text-layer";
     layer.style.width = `${viewport.width}px`;
@@ -561,13 +559,7 @@
       span.textContent = item.str;
       span.setAttribute(
         "style",
-        [
-          `left:${tx[4]}px`,
-          `top:${top}px`,
-          `font-size:${fs}px`,
-          `transform:rotate(${angle}rad)`,
-          `transform-origin:0 0`,
-        ].join(";")
+        `left:${tx[4]}px;top:${top}px;font-size:${fs}px;transform:rotate(${angle}rad);transform-origin:0 0`
       );
       frag.appendChild(span);
     });
@@ -599,10 +591,6 @@
     if (reRender) await renderAll();
   }
 
-  async function fitView() {
-    await fitScaleToHeight(true);
-  }
-
   async function rotateView() {
     state.rotation = ((state.rotation || 0) + 90) % 360;
     const page = state.doc ? await state.doc.getPage(1) : null;
@@ -615,7 +603,6 @@
     toast(`已旋转 ${state.rotation}°`);
   }
 
-  /** Full line-box rects (match top/bottom of selection). */
   function hlRectsFromClientRects(clientRects, wrapBox) {
     const rects = [];
     for (let i = 0; i < clientRects.length; i++) {
@@ -633,164 +620,61 @@
 
   function drawAnnotationsForPage(layer, pageNum, viewport) {
     layer.innerHTML = "";
-    const pickable = state.mode !== "highlight";
     state.annotations
       .filter((a) => (a.page || 1) === pageNum)
       .forEach((a) => {
-        const isComment = a.type === "comment";
-        (a.rects || []).forEach((r, ri) => {
-          const left = r.x * viewport.width;
-          const top = r.y * viewport.height;
-          const width = r.w * viewport.width;
-          const height = Math.max(r.h * viewport.height, 2);
-
-          if (isComment) {
-            // Comment-only: slim bar + bubble on first line — does not tint whole selection
-            if (ri === 0) {
-              const bar = document.createElement("div");
-              bar.className = "pdf-cm";
-              bar.dataset.id = a.id;
-              bar.style.left = `${Math.max(0, left - 3)}px`;
-              bar.style.top = `${top}px`;
-              bar.style.height = `${height}px`;
-              bar.style.pointerEvents = pickable ? "auto" : "none";
-              bar.title = a.comment || "评论";
-              bindAnnotEl(bar, a.id, pickable);
-              layer.appendChild(bar);
-              const bubble = document.createElement("div");
-              bubble.className = "pdf-cm-bubble";
-              bubble.dataset.id = a.id;
-              bubble.textContent = "💬";
-              bubble.style.left = `${left + width + 2}px`;
-              bubble.style.top = `${top - 10}px`;
-              bubble.style.pointerEvents = pickable ? "auto" : "none";
-              bubble.title = a.comment || "评论";
-              bindAnnotEl(bubble, a.id, pickable);
-              layer.appendChild(bubble);
-            }
-            return;
-          }
-
+        const type = a.type || "highlight";
+        (a.rects || []).forEach((r) => {
           const box = document.createElement("div");
           box.className = "pdf-hl" + (a.comment ? " has-comment" : "");
           box.dataset.id = a.id;
+          box.dataset.type = type;
           box.dataset.color = a.color || "yellow";
-          box.style.left = `${left}px`;
-          box.style.top = `${top}px`;
-          box.style.width = `${width}px`;
-          box.style.height = `${height}px`;
-          box.style.background = colorMeta(a.color || state.hlColor).css;
-          box.style.pointerEvents = pickable ? "auto" : "none";
+          const cm = colorMeta(a.color || state.hlColor);
+          box.style.left = `${r.x * viewport.width}px`;
+          box.style.top = `${r.y * viewport.height}px`;
+          box.style.width = `${r.w * viewport.width}px`;
+          const hPx = Math.max(r.h * viewport.height, 2);
+          box.style.height = `${hPx}px`;
+          if (type === "underline" || type === "comment") {
+            box.style.background = "transparent";
+            box.style.borderBottom = `2px solid ${type === "comment" ? "#3b82f6" : cm.line}`;
+            box.style.height = `${Math.max(hPx * 0.85, 3)}px`;
+          } else if (type === "strike") {
+            box.style.background = "transparent";
+            box.style.setProperty("--pdf-ann-color", cm.line);
+          } else {
+            box.style.background = cm.css;
+          }
+          box.style.pointerEvents = "auto";
           box.title = a.comment || a.text || "标注";
-          bindAnnotEl(box, a.id, pickable);
+          bindAnnotEl(box, a.id);
           layer.appendChild(box);
         });
       });
   }
 
-  function bindAnnotEl(node, id, pickable) {
-    if (!pickable) return;
+  function bindAnnotEl(node, id) {
     node.addEventListener("click", (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
       document
-        .querySelectorAll(".pdf-hl.selected, .pdf-cm.selected, .pdf-cm-bubble.selected")
+        .querySelectorAll(".pdf-hl.selected, .pdf-cm.selected")
         .forEach((n) => n.classList.remove("selected"));
       node.classList.add("selected");
       state.selectedHlId = id;
-      // Left-click select → show actions immediately (WPS-like)
-      showAnnotMenu(ev.clientX || node.getBoundingClientRect().left, ev.clientY || node.getBoundingClientRect().bottom, id);
+      const r = node.getBoundingClientRect();
+      showAnnotMenu(ev.clientX || r.left, ev.clientY || r.bottom, id);
     });
     node.addEventListener("contextmenu", (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
       document
-        .querySelectorAll(".pdf-hl.selected, .pdf-cm.selected, .pdf-cm-bubble.selected")
+        .querySelectorAll(".pdf-hl.selected, .pdf-cm.selected")
         .forEach((n) => n.classList.remove("selected"));
       node.classList.add("selected");
       showAnnotMenu(ev.clientX, ev.clientY, id);
     });
-  }
-
-  /** Capture current PDF text selection into state._pendingSel. */
-  function captureSelectionCtx(ev) {
-    const sel = window.getSelection();
-    if (!sel || sel.isCollapsed || !sel.rangeCount) return false;
-    const text = sel.toString().trim();
-    if (!text) return false;
-    const range = sel.getRangeAt(0);
-    const wrap =
-      (ev && ev.target && ev.target.closest && ev.target.closest(".pdf-page")) ||
-      range.startContainer?.parentElement?.closest?.(".pdf-page");
-    if (!wrap || !el().scroll?.contains(wrap)) return false;
-    const wrapBox = wrap.getBoundingClientRect();
-    const rects = hlRectsFromClientRects(range.getClientRects(), wrapBox);
-    if (!rects.length) return false;
-    state._pendingSel = {
-      text,
-      rects,
-      page: Number(wrap.dataset.page || 1),
-    };
-    return true;
-  }
-
-  async function addHighlightFromSelection(colorId) {
-    const ctx = state._pendingSel;
-    if (!ctx || !state.path) {
-      toast("请先选中 PDF 文字");
-      return;
-    }
-    const ann = {
-      type: "highlight",
-      color: colorId || state.hlColor || "yellow",
-      page: ctx.page,
-      text: ctx.text,
-      rects: ctx.rects,
-    };
-    try {
-      const res = await api("add_annotation", state.path, ann);
-      if (res?.error) {
-        toast(res.error);
-        return;
-      }
-      state.annotations = await api("load_annotations", state.path);
-      await loadNativePdfAnnotations();
-      pushAnnotHistory();
-      await refreshAnnots();
-      toast("已高亮选中");
-    } catch (_) {
-      toast("高亮失败");
-    }
-  }
-
-  async function addCommentFromSelection(commentText) {
-    const ctx = state._pendingSel;
-    if (!ctx || !state.path) {
-      toast("请先选中 PDF 文字");
-      return;
-    }
-    const ann = {
-      type: "comment",
-      color: "gray",
-      page: ctx.page,
-      text: ctx.text,
-      comment: commentText,
-      rects: ctx.rects,
-    };
-    try {
-      const res = await api("add_annotation", state.path, ann);
-      if (res?.error) {
-        toast(res.error);
-        return;
-      }
-      state.annotations = await api("load_annotations", state.path);
-      await loadNativePdfAnnotations();
-      pushAnnotHistory();
-      await refreshAnnots();
-      toast("评论已添加");
-    } catch (_) {
-      toast("评论失败");
-    }
   }
 
   function findAnnot(id) {
@@ -810,76 +694,144 @@
     const a = findAnnot(id);
     if (!a) return;
     a.color = colorId;
-    if (a.native) {
-      // native items are display-only unless exported — still recolor locally
-    }
     await persistAnnots();
     await refreshAnnots();
     toast("已改标注颜色");
   }
 
+  function captureSelectionCtx(ev) {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return false;
+    const text = sel.toString().trim();
+    if (!text) return false;
+    const range = sel.getRangeAt(0);
+    const wrap =
+      (ev && ev.target && ev.target.closest && ev.target.closest(".pdf-page")) ||
+      range.startContainer?.parentElement?.closest?.(".pdf-page");
+    if (!wrap || !el().scroll?.contains(wrap)) return false;
+    const wrapBox = wrap.getBoundingClientRect();
+    const rects = hlRectsFromClientRects(range.getClientRects(), wrapBox);
+    if (!rects.length) return false;
+    state._pendingSel = {
+      text,
+      rects,
+      page: Number(wrap.dataset.page || 1),
+      clientX: ev ? ev.clientX : null,
+      clientY: ev ? ev.clientY : null,
+    };
+    return true;
+  }
+
+  async function addAnnotFromSelection(type, colorId, commentText) {
+    const ctx = state._pendingSel;
+    if (!ctx || !state.path) {
+      toast("请先选中 PDF 文字");
+      return;
+    }
+    const ann = {
+      type,
+      color: colorId || state.hlColor || "yellow",
+      page: ctx.page,
+      text: ctx.text,
+      comment: commentText || "",
+      rects: ctx.rects,
+    };
+    try {
+      const res = await api("add_annotation", state.path, ann);
+      if (res?.error) {
+        toast(res.error);
+        return;
+      }
+      state.annotations = await api("load_annotations", state.path);
+      await loadNativePdfAnnotations();
+      pushAnnotHistory();
+      await refreshAnnots();
+      toast(
+        type === "highlight"
+          ? "已高光"
+          : type === "underline"
+            ? "已下划线"
+            : type === "strike"
+              ? "已删除线"
+              : "已添加"
+      );
+    } catch (_) {
+      toast("标注失败");
+    }
+  }
+
+  function hideHoverTip() {
+    const t = el().hoverTip;
+    if (t) t.hidden = true;
+  }
+
+  function showHoverTip(text, x, y) {
+    const t = el().hoverTip;
+    if (!t) return;
+    t.textContent = text;
+    t.hidden = false;
+    const w = t.offsetWidth || 200;
+    const h = t.offsetHeight || 40;
+    t.style.left = `${Math.min(window.innerWidth - w - 8, Math.max(8, x + 14))}px`;
+    t.style.top = `${Math.min(window.innerHeight - h - 8, Math.max(8, y + 16))}px`;
+  }
+
   function bindHighlightLayer() {
     const e = el();
-    e.scroll.onmouseup = async (ev) => {
+
+    e.scroll.onmouseup = (ev) => {
       hideAnnotMenu();
-      if (state.mode !== "highlight") return;
-      if (ev.target.closest("#pdf-toolbar")) return;
+      if (ev.target.closest("#pdf-toolbar")) {
+        hideAnnotBar();
+        return;
+      }
+      // Show mini toolbar for any selection
       const sel = window.getSelection();
-      if (!sel || sel.isCollapsed || !sel.rangeCount) return;
-      const text = sel.toString().trim();
-      if (!text) return;
-      const range = sel.getRangeAt(0);
-      const wrap =
-        ev.target.closest(".pdf-page") ||
-        range.startContainer.parentElement?.closest(".pdf-page");
-      if (!wrap) return;
-      const pageNum = Number(wrap.dataset.page || 1);
-      const rectLayer = wrap.querySelector(".pdf-annot-layer");
-      const wrapBox = wrap.getBoundingClientRect();
-      const rects = hlRectsFromClientRects(range.getClientRects(), wrapBox);
-      if (!rects.length) return;
-      const colorId = state.hlColor || "yellow";
-      const ann = {
-        type: "highlight",
-        color: colorId,
-        page: pageNum,
-        text,
-        rects,
-      };
-      try {
-        const res = await api("add_annotation", state.path, ann);
-        if (res?.error) {
-          toast(res.error);
-          return;
-        }
-        state.annotations = await api("load_annotations", state.path);
-        // re-merge natives
-        await loadNativePdfAnnotations();
-        pushAnnotHistory();
-        sel.removeAllRanges();
-        const page = await state.doc.getPage(pageNum);
-        const rotation = ((page.rotate || 0) + state.rotation) % 360;
-        const viewport = page.getViewport({ scale: state.scale, rotation });
-        drawAnnotationsForPage(rectLayer, pageNum, viewport);
-        toast("已标注");
-      } catch (_) {
-        toast("标注失败");
+      if (!sel || sel.isCollapsed || !sel.rangeCount || !sel.toString().trim()) {
+        hideAnnotBar();
+        return;
+      }
+      if (captureSelectionCtx(ev)) {
+        showAnnotBar(ev.clientX + 8, ev.clientY + 12);
+      } else {
+        hideAnnotBar();
       }
     };
 
     e.scroll.oncontextmenu = (ev) => {
-      // Existing annotation → its own menu
-      if (ev.target.closest(".pdf-hl") || ev.target.closest(".pdf-cm") || ev.target.closest(".pdf-cm-bubble")) {
+      if (ev.target.closest(".pdf-hl") || ev.target.closest(".pdf-cm")) {
         ev.preventDefault();
         return;
       }
-      // ANY selected PDF text → selection menu (comment / highlight)
       if (captureSelectionCtx(ev)) {
         ev.preventDefault();
-        showSelectionMenu(ev.clientX, ev.clientY);
+        showAnnotBar(ev.clientX, ev.clientY);
         return;
       }
       hideAnnotMenu();
+      hideAnnotBar();
+    };
+
+    // Hover tip for comments
+    e.scroll.onmousemove = (ev) => {
+      const hl = ev.target.closest && ev.target.closest(".pdf-hl");
+      if (!hl) {
+        hideHoverTip();
+        return;
+      }
+      const id = hl.dataset.id;
+      const a = id ? findAnnot(id) : null;
+      if (a && (a.comment || a.type === "comment")) {
+        const txt = a.comment || a.text || "";
+        if (txt) showHoverTip(txt, ev.clientX, ev.clientY);
+        else hideHoverTip();
+      } else {
+        hideHoverTip();
+      }
+    };
+
+    e.scroll.onmouseleave = () => {
+      hideHoverTip();
     };
   }
 
@@ -891,7 +843,7 @@
         pushAnnotHistory();
         await refreshAnnots();
         hideAnnotMenu();
-        toast("已隐藏原生标注（导出前不会写回 PDF）");
+        toast("已隐藏原生标注");
         return;
       }
       const res = await api("delete_annotation", state.path, id);
@@ -926,7 +878,7 @@
 
   async function clearAll() {
     if (!state.path) return;
-    if (!confirm("确定清除该 PDF 的全部标注？\n此操作不可撤销（除非立刻 Ctrl+Z）。")) return;
+    if (!confirm("确定清除该 PDF 的全部标注？\n可用 Ctrl+Z 立刻撤销。")) return;
     if (!confirm("再次确认：清除全部标注？")) return;
     try {
       await api("clear_annotations", state.path);
@@ -940,7 +892,6 @@
     }
   }
 
-  /** Export sidecar annotations into the PDF as native Highlight + Text (WPS/Edge). */
   async function exportAnnotsToPdf() {
     if (!state.path) {
       toast("请先打开 PDF");
@@ -957,16 +908,13 @@
         toast(res.error);
         return;
       }
-      toast("已写入 PDF 原生批注（可用 WPS / Edge 打开查看）");
-      if (res.path && res.path !== state.path) {
-        toast("另存为：" + res.path);
-      }
+      toast("已写入 PDF 原生批注（WPS / Edge 可打开）");
     } catch (err) {
       toast("写入 PDF 失败：" + (err && err.message ? err.message : err));
     }
   }
 
-  // ---- Floating comment panel (WPS-like) ----
+  // ---- Floating comment panel ----
   let _commentTargetId = null;
   const _panelPos = { x: 0, y: 0, has: false };
 
@@ -997,11 +945,7 @@
     _commentTargetId = id;
     const a = id ? findAnnot(id) : null;
     if (e.commentTitle) {
-      e.commentTitle.textContent = a
-        ? a.type === "comment"
-          ? "编辑评论"
-          : "高亮评论"
-        : "添加评论";
+      e.commentTitle.textContent = a ? "编辑评论" : "添加评论";
     }
     if (e.commentQuote) {
       const quote =
@@ -1037,8 +981,13 @@
         toast("评论内容为空");
         return;
       }
-      await addCommentFromSelection(text);
+      await addAnnotFromSelection("comment", state.hlColor, text);
       closeCommentPanel();
+      const sel = window.getSelection();
+      try {
+        sel.removeAllRanges();
+      } catch (_) {}
+      hideAnnotBar();
       return;
     }
     const a = findAnnot(id);
@@ -1098,7 +1047,11 @@
       await renderAll();
       return;
     }
-    zoomTimer = setTimeout(() => renderAll(), 140);
+    // Live scale first — avoid blank/thin placeholders while Ctrl+wheel
+    applyLiveZoom();
+    zoomTimer = setTimeout(async () => {
+      await renderAll();
+    }, 200);
   }
 
   function bindChrome() {
@@ -1135,25 +1088,19 @@
         .querySelector(`.pdf-page[data-page="${state.page}"]`)
         ?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
-    on("pdf-zoom-in", () => setZoom(state.scale + 0.15, true));
-    on("pdf-zoom-out", () => setZoom(state.scale - 0.15, true));
-    on("pdf-fit", () => fitView());
+    on("pdf-zoom-in", () => setZoom(state.scale + 0.15, false));
+    on("pdf-zoom-out", () => setZoom(state.scale - 0.15, false));
+    on("pdf-fit", () => fitScaleToHeight(true));
     on("pdf-rotate", () => rotateView());
     on("pdf-spread", async () => {
       state.spread = !state.spread;
-      setModeUI();
+      if (e.btnSpread) e.btnSpread.classList.toggle("active", !!state.spread);
       if (state.spread) await fitToWidth(true);
       else await fitScaleToHeight(true);
       toast(state.spread ? "双页显示" : "单页显示");
     });
-    on("pdf-highlight", () => {
-      state.mode = state.mode === "highlight" ? "none" : "highlight";
-      setModeUI();
-      hideAnnotMenu();
-      refreshAnnots();
-      toast(state.mode === "highlight" ? "标注已开启" : "标注已关闭：可点选后右键操作");
-    });
-    on("pdf-hl-color", (ev) => {
+    // Pen = color palette (not a mode toggle)
+    on("pdf-highlight", (ev) => {
       ev.stopPropagation();
       if (!e.palette) return;
       e.palette.hidden = !e.palette.hidden;
@@ -1162,34 +1109,45 @@
     on("pdf-export-annots", () => exportAnnotsToPdf());
     on("pdf-clear", () => clearAll());
 
+    // Mini annot bar actions
+    e.annotBar?.addEventListener("click", async (ev) => {
+      const btn = ev.target.closest("[data-pa]");
+      if (!btn) return;
+      const act = btn.dataset.pa;
+      const bar = e.annotBar;
+      const br = bar ? bar.getBoundingClientRect() : { left: 200, top: 200 };
+      if (act === "highlight") {
+        await addAnnotFromSelection("highlight", state.hlColor);
+        hideAnnotBar();
+        const sel = window.getSelection();
+        try {
+          sel.removeAllRanges();
+        } catch (_) {}
+      } else if (act === "underline") {
+        await addAnnotFromSelection("underline", state.hlColor);
+        hideAnnotBar();
+      } else if (act === "strike") {
+        await addAnnotFromSelection("strike", state.hlColor);
+        hideAnnotBar();
+      } else if (act === "comment") {
+        openCommentPanel(null, br.left, br.top + 8);
+        hideAnnotBar();
+      }
+    });
+
     e.scroll?.addEventListener(
       "wheel",
       (ev) => {
         if (!ev.ctrlKey && !ev.metaKey) return;
         if (!state.doc) return;
         ev.preventDefault();
-        const dir = ev.deltaY > 0 ? -0.12 : 0.12;
+        const dir = ev.deltaY > 0 ? -0.1 : 0.1;
         setZoom(state.scale + dir, false);
       },
       { passive: false }
     );
 
-    // Annot / selection context menu actions (delegated — menu HTML is rebuilt)
     e.annotMenu?.addEventListener("click", async (ev) => {
-      const selBtn = ev.target.closest("[data-sel-act]");
-      if (selBtn) {
-        const act = selBtn.dataset.selAct;
-        const menu = e.annotMenu;
-        const mr = menu ? menu.getBoundingClientRect() : { left: 200, top: 200 };
-        if (act === "comment") {
-          openCommentPanel(null, mr.left, mr.top);
-          hideAnnotMenu();
-        } else if (act === "highlight") {
-          await addHighlightFromSelection(state.hlColor || "yellow");
-          hideAnnotMenu();
-        }
-        return;
-      }
       const btn = ev.target.closest("[data-annot-act]");
       if (!btn) return;
       const act = btn.dataset.annotAct;
@@ -1197,9 +1155,8 @@
       if (!id) return;
       const menu = e.annotMenu;
       const mr = menu ? menu.getBoundingClientRect() : { left: 200, top: 200 };
-      if (act === "erase") {
-        await eraseAnnotation(id);
-      } else if (act === "comment") {
+      if (act === "erase") await eraseAnnotation(id);
+      else if (act === "comment") {
         openCommentPanel(id, mr.left, mr.top);
         hideAnnotMenu();
       }
@@ -1210,33 +1167,34 @@
     document.getElementById("pdf-comment-close")?.addEventListener("click", () => closeCommentPanel());
     bindCommentPanelDrag();
 
-    // Keep selection context until menu action (mousedown on menu must not clear)
     document.addEventListener("mousedown", (ev) => {
       if (e.palette && !e.palette.hidden && !ev.target.closest(".pdf-color-wrap")) {
         e.palette.hidden = true;
       }
+      if (e.annotBar && !e.annotBar.hidden && !ev.target.closest("#pdf-annot-bar")) {
+        // keep bar if selecting; hide only when clicking outside without selection
+        const sel = window.getSelection();
+        if (!sel || sel.isCollapsed) hideAnnotBar();
+      }
       const menu = e.annotMenu;
       if (menu && !menu.hidden) {
-        if (ev.target.closest("#pdf-annot-menu") || ev.target.closest(".pdf-hl") || ev.target.closest(".pdf-cm")) {
-          return;
-        }
+        if (ev.target.closest("#pdf-annot-menu") || ev.target.closest(".pdf-hl")) return;
         hideAnnotMenu();
-        state._pendingSel = null;
       }
     });
     document.addEventListener("keydown", (ev) => {
       if (ev.key === "Escape") {
         hideAnnotMenu();
+        hideAnnotBar();
         closeCommentPanel();
+        hideHoverTip();
         if (e.palette) e.palette.hidden = true;
       }
     });
 
-    // Annotation undo/redo when PDF is the active surface
     window.addEventListener("keydown", (ev) => {
       const mod = ev.ctrlKey || ev.metaKey;
-      if (!mod) return;
-      if (!pdfActive()) return;
+      if (!mod || !pdfActive()) return;
       const ae = document.activeElement;
       const typing =
         ae === document.getElementById("source") ||
@@ -1253,13 +1211,16 @@
       }
     });
 
-    setModeUI();
+    if (e.btnSpread) e.btnSpread.title = "双页显示";
+    if (e.btnColor) e.btnColor.title = "标注颜色";
   }
 
   function hidePdf() {
     const e = el();
     e.area.hidden = true;
     hideAnnotMenu();
+    hideAnnotBar();
+    hideHoverTip();
     closeCommentPanel();
     disposeDoc();
     state.path = null;

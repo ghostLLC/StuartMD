@@ -2547,12 +2547,37 @@ body[data-theme="wallpaper"] #preview *::selection {
 /* Visual highlight bands (interaction rules defined later with layer order) */
 .pdf-hl {
   position: absolute;
-  /* Full line-box band; translucent so glyphs stay readable */
   background: rgba(255, 232, 96, 0.34);
   mix-blend-mode: normal;
   opacity: 1;
   border-radius: 1px;
   pointer-events: none;
+}
+
+.pdf-hl[data-type="underline"] {
+  background: transparent;
+  border-bottom: 2px solid var(--pdf-ann-color, #3b82f6);
+  border-radius: 0;
+}
+
+.pdf-hl[data-type="strike"] {
+  background: transparent;
+  border-radius: 0;
+}
+
+.pdf-hl[data-type="strike"]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  border-top: 2px solid var(--pdf-ann-color, #ef4444);
+}
+
+.pdf-hl[data-type="comment"] {
+  background: transparent;
+  border-bottom: 2px solid #3b82f6;
+  border-radius: 0;
 }
 
 .pdf-hl[data-color="green"] { background: rgba(120, 200, 130, 0.34); }
@@ -2562,23 +2587,78 @@ body[data-theme="wallpaper"] #preview *::selection {
 .pdf-hl[data-color="purple"] { background: rgba(180, 150, 230, 0.32); }
 .pdf-hl[data-color="gray"] { background: rgba(160, 160, 160, 0.28); }
 
-.pdf-hl.has-comment::after {
-  content: "💬";
-  position: absolute;
-  right: 0;
-  top: -12px;
-  font-size: 10px;
-  line-height: 1;
-}
-
-#pdf-scroll:not(.highlight-mode) .pdf-hl {
-  pointer-events: auto;
-  cursor: pointer;
-}
+.pdf-hl[data-type="underline"][data-color="green"] { background: transparent; border-bottom-color: #3d9a4f; }
+.pdf-hl[data-type="underline"][data-color="blue"] { background: transparent; border-bottom-color: #2b7fd4; }
+.pdf-hl[data-type="underline"][data-color="pink"] { background: transparent; border-bottom-color: #d4568a; }
+.pdf-hl[data-type="underline"][data-color="orange"] { background: transparent; border-bottom-color: #d4862b; }
+.pdf-hl[data-type="underline"][data-color="purple"] { background: transparent; border-bottom-color: #7a4fd4; }
+.pdf-hl[data-type="underline"][data-color="gray"] { background: transparent; border-bottom-color: #666; }
 
 .pdf-hl.selected {
   outline: 2px solid #2563eb;
   outline-offset: 1px;
+}
+
+/* Selection mini toolbar near mouse after selecting PDF text */
+.pdf-annot-bar {
+  position: fixed;
+  z-index: 220;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+}
+
+.pdf-annot-bar[hidden] { display: none !important; }
+
+.pdf-annot-bar button {
+  width: 30px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pdf-annot-bar button:hover {
+  background: var(--bg-hover);
+}
+
+/* Comment hover tip follows cursor */
+.pdf-hover-tip {
+  position: fixed;
+  z-index: 230;
+  max-width: 280px;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text);
+  pointer-events: none;
+  white-space: pre-wrap;
+}
+
+.pdf-hover-tip[hidden] { display: none !important; }
+
+/* Live zoom: scale painted pages instead of blanking */
+#pdf-scroll.pdf-zooming .pdf-page {
+  will-change: transform;
+}
+
+#pdf-scroll.pdf-zooming .pdf-page.pending {
+  opacity: 0.35;
 }
 
 /* Comment-only marks on arbitrary selected text */
@@ -2655,17 +2735,16 @@ body[data-theme="wallpaper"] #preview *::selection {
   text-shadow: none;
 }
 
-/* Mark mode ON: text selectable, existing marks not clickable */
-#pdf-scroll.highlight-mode .pdf-hl,
-#pdf-scroll.highlight-mode .pdf-cm,
-#pdf-scroll.highlight-mode .pdf-cm-bubble {
-  pointer-events: none !important;
+/* Annot marks always clickable when they have content (no mode toggle) */
+.pdf-hl[data-type],
+.pdf-cm,
+.pdf-cm-bubble {
+  pointer-events: auto;
+  cursor: pointer;
 }
 
-/* Mark mode OFF: left-click picks highlight / comment marks */
-#pdf-scroll:not(.highlight-mode) .pdf-hl,
-#pdf-scroll:not(.highlight-mode) .pdf-cm,
-#pdf-scroll:not(.highlight-mode) .pdf-cm-bubble {
+.pdf-hl[data-type="highlight"],
+.pdf-hl:not([data-type]) {
   pointer-events: auto;
   cursor: pointer;
 }

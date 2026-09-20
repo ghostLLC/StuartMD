@@ -288,11 +288,8 @@
             </div>
             <div class="pdf-tb-right">
               <div class="pdf-color-wrap">
-                <button class="icon-btn sm" id="pdf-highlight" title="标注（默认关闭）：选中文字后标注；点击切换开关" aria-label="标注">
+                <button class="icon-btn sm" id="pdf-highlight" title="标注颜色" aria-label="标注颜色">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h4l10-10a2.8 2.8 0 0 0-4-4L4 16v4z"/><path d="M12 6l6 6"/></svg>
-                </button>
-                <button class="icon-btn sm" id="pdf-hl-color" title="标注颜色" aria-label="标注颜色">
-                  <span class="pdf-color-dot" id="pdf-color-dot"></span>
                 </button>
                 <div id="pdf-color-palette" class="pdf-color-palette" hidden></div>
               </div>
@@ -305,11 +302,24 @@
             </div>
           </div>
           <div id="pdf-scroll" class="pane"></div>
-          <div id="pdf-annot-menu" class="pdf-annot-menu" hidden>
-            <button type="button" data-annot-act="comment">添加 / 编辑评论</button>
-            <div class="pdf-annot-colors" id="pdf-annot-colors"></div>
-            <button type="button" data-annot-act="erase">擦除此标注</button>
+          <!-- Selection mini toolbar: highlight / underline / strike / comment -->
+          <div id="pdf-annot-bar" class="pdf-annot-bar" hidden>
+            <button type="button" data-pa="highlight" title="高光">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M4 20h4l10-10a2.8 2.8 0 0 0-4-4L4 16v4z" opacity=".25"/><path d="M4 20h4l10-10a2.8 2.8 0 0 0-4-4L4 16v4z" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+            </button>
+            <button type="button" data-pa="underline" title="下划线">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4v7a5 5 0 0 0 10 0V4M5 20h14"/></svg>
+            </button>
+            <button type="button" data-pa="strike" title="删除线">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h16M8 8c1-2 3-3 5-3 3 0 5 1.5 5 4M9 16c1 2 3 3 5 3 2.5 0 4.5-1.2 4.5-3.5"/></svg>
+            </button>
+            <button type="button" data-pa="comment" title="评论">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 5h14v10H8l-3 3V5z"/></svg>
+            </button>
           </div>
+          <!-- Hover tip for comments (follows mouse) -->
+          <div id="pdf-hover-tip" class="pdf-hover-tip" hidden></div>
+          <div id="pdf-annot-menu" class="pdf-annot-menu" hidden></div>
           <div id="pdf-comment-panel" class="pdf-comment-panel" hidden>
             <div class="pdf-comment-head" id="pdf-comment-drag">
               <span class="pdf-comment-title" id="pdf-comment-title">批注评论</span>

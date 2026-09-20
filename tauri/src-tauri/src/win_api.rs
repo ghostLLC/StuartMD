@@ -581,6 +581,18 @@ pub fn stuart_export_pdf_annotations(pdf_path: String, items: Value) -> Value {
             Object::Real(rgb[2]),
         ];
 
+        let ann_type = obj
+            .get("type")
+            .and_then(|t| t.as_str())
+            .unwrap_or("highlight");
+        let subtype_str = match ann_type {
+            "underline" => "Underline",
+            "strike" => "StrikeOut",
+            "comment" => "Underline",
+            _ => "Highlight",
+        };
+        let ca = if ann_type == "highlight" { 0.4 } else { 1.0 };
+
         let mut new_refs: Vec<Object> = Vec::new();
 
         if let Some(rects) = obj.get("rects").and_then(|r| r.as_array()) {
@@ -602,7 +614,7 @@ pub fn stuart_export_pdf_annotations(pdf_path: String, items: Value) -> Value {
                 };
                 let mut dict = dictionary! {
                     "Type" => "Annot",
-                    "Subtype" => "Highlight",
+                    "Subtype" => subtype_str,
                     "Rect" => Object::Array(vec![real(rx0), real(ry0), real(rx1), real(ry1)]),
                     "QuadPoints" => Object::Array(vec![
                         real(x0), real(y_top),
@@ -611,7 +623,7 @@ pub fn stuart_export_pdf_annotations(pdf_path: String, items: Value) -> Value {
                         real(x1), real(y_bot),
                     ]),
                     "C" => Object::Array(color_arr.clone()),
-                    "CA" => Object::Real(0.4),
+                    "CA" => Object::Real(ca),
                     "F" => Object::Integer(4),
                 };
                 if !comment.is_empty() {
