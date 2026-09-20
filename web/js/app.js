@@ -160,9 +160,11 @@
   function blockNeedsPostProcess(block) {
     // Skip KaTeX / image resolve on plain paragraphs for speed
     if (!block) return false;
-    if (block.indexOf("$") >= 0) return true;
     if (block.indexOf("\\(") >= 0 || block.indexOf("\\[") >= 0) return true;
     if (/!\[[^\]]*\]\(/.test(block)) return true;
+    if (/(^|[^\\A-Za-z0-9])\$\$/.test(block) || /(^|[^\\A-Za-z0-9])\$[^$\n]+\$/.test(block)) {
+      return true;
+    }
     return false;
   }
 
@@ -171,16 +173,46 @@
     return typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
   }
 
-  function createBlockNode(block, index) {
-    const wrap = document.createElement("div");
-    wrap.className = "md-block";
-    wrap.dataset.index = String(index);
+  /** LRU-ish cache: markdown block source → rendered HTML (tab switch / undo / re-render). */
+  const _blockHtmlCache = new Map();
+  const BLOCK_HTML_CACHE_MAX = 800;
+
+  function renderBlockHtml(block) {
+    const hit = _blockHtmlCache.get(block);
+    if (hit != null) return hit;
     let html = "";
     try {
       html = md.render(block);
     } catch (e) {
       html = `<pre>${escapeHtml(String(e))}</pre>`;
     }
+    if (_blockHtmlCache.size >= BLOCK_HTML_CACHE_MAX) {
+      // Drop oldest ~1/4
+      let n = BLOCK_HTML_CACHE_MAX >> 2;
+      for (const k of _blockHtmlCache.keys()) {
+        _blockHtmlCache.delete(k);
+        if (--n <= 0) break;
+      }
+    }
+    _blockHtmlCache.set(block, html);
+    return html;
+  }
+
+  /** splitMarkdownBlocks result cache — same text must not re-parse. */
+  let _splitCache = { text: null, blocks: null };
+  function splitBlocksCached(text) {
+    const t = text || "";
+    if (_splitCache.text === t && _splitCache.blocks) return _splitCache.blocks;
+    const blocks = splitMarkdownBlocks(t);
+    _splitCache = { text: t, blocks };
+    return blocks;
+  }
+
+  function createBlockNode(block, index) {
+    const wrap = document.createElement("div");
+    wrap.className = "md-block";
+    wrap.dataset.index = String(index);
+    const html = renderBlockHtml(block);
     wrap.innerHTML = html;
     // Fast path: only sanitize when dangerous patterns may be present
     if (
@@ -251,10 +283,24 @@
     }
   }
 
+  /** First few KaTeX/image passes sync; rest deferred off the critical path. */
+  function postProcessBlocks(nodes) {
+    if (!nodes || !nodes.length) return;
+    const SYNC = 6;
+    for (let i = 0; i < nodes.length && i < SYNC; i++) postProcessBlock(nodes[i]);
+    if (nodes.length > SYNC) {
+      scheduleIdle(() => {
+        for (let i = SYNC; i < nodes.length; i++) {
+          if (nodes[i].isConnected) postProcessBlock(nodes[i]);
+        }
+      });
+    }
+  }
+
   function applyBlockEditing() {
     if (state.mode === "source") return;
     const raw = el.source.value || "";
-    const blocks = splitMarkdownBlocks(raw);
+    const blocks = splitBlocksCached(raw);
     if (!blocks.length) {
       el.preview.innerHTML = "";
       lastPreviewBlocks = [];
@@ -277,14 +323,15 @@
     const changedMid = blocks.length - prefix - suffix + (prev.length - prefix - suffix);
     const heavy = !prev.length || changedMid > Math.max(12, blocks.length * 0.7);
 
+    const needPP = [];
     if (heavy) {
       el.preview.innerHTML = "";
       const frag = document.createDocumentFragment();
-      blocks.forEach((block, index) => {
-        const wrap = createBlockNode(block, index);
-        if (blockNeedsPostProcess(block)) postProcessBlock(wrap);
+      for (let index = 0; index < blocks.length; index++) {
+        const wrap = createBlockNode(blocks[index], index);
+        if (blockNeedsPostProcess(blocks[index])) needPP.push(wrap);
         frag.appendChild(wrap);
-      });
+      }
       el.preview.appendChild(frag);
     } else {
       const total = blocks.length;
@@ -298,7 +345,7 @@
       const frag = document.createDocumentFragment();
       for (let i = prefix; i < total - keepTailCount; i++) {
         const wrap = createBlockNode(blocks[i], i);
-        if (blockNeedsPostProcess(blocks[i])) postProcessBlock(wrap);
+        if (blockNeedsPostProcess(blocks[i])) needPP.push(wrap);
         frag.appendChild(wrap);
       }
       for (let i = 0; i < suffixNodes.length; i++) {
@@ -312,6 +359,7 @@
         all[i].dataset.index = String(i);
       }
     }
+    if (needPP.length) postProcessBlocks(needPP);
 
     const midStart = prefix;
     const midEnd = blocks.length - suffix;
@@ -1373,9 +1421,9 @@
       state.content = joined;
       markDirty();
       scheduleAutoSave();
+      // Incremental path: applyBlockEditing diffs against lastPreviewBlocks
       renderMarkdown(joined);
       lastPreviewSource = joined;
-      lastPreviewBlocks = splitMarkdownBlocks(joined);
       pushHistory(joined);
       emitAgentEvent("document-changed", { source: "block-edit" });
       try {
@@ -1391,7 +1439,6 @@
       node.innerHTML = "";
       renderMarkdown(el.source.value);
       lastPreviewSource = el.source.value;
-      lastPreviewBlocks = splitMarkdownBlocks(el.source.value || "");
       pushHistory(el.source.value || "");
     };
     ta._stuartCommit = commit;
@@ -1988,9 +2035,9 @@
     if (pdfArea) pdfArea.hidden = true;
     el.statusPath.textContent = path || "未保存文档";
     updateWindowTitle();
+    // applyBlockEditing already fills lastPreviewBlocks / lastPreviewSource
     renderMarkdown(state.content);
     lastPreviewSource = state.content;
-    lastPreviewBlocks = splitMarkdownBlocks(state.content);
     markActiveTreeItem();
     updatePinUi();
   }
@@ -2116,9 +2163,8 @@
       } catch (_) {}
       renderMarkdown(text);
       lastPreviewSource = text;
-      lastPreviewBlocks = splitMarkdownBlocks(text || "");
     }
-    updateStats();
+    updateStatsNow();
     markDirty();
     scheduleAutoSave();
     const tab = state.tabs.find((t) => t.id === state.activeTabId);
@@ -2260,6 +2306,7 @@
     bar.style.display = show ? "flex" : "none";
     if (bar.hidden) return;
     list.innerHTML = "";
+    const frag = document.createDocumentFragment();
     state.tabs.forEach((tab) => {
       const item = document.createElement("div");
       item.className = "tab-item" + (tab.id === state.activeTabId ? " active" : "");
@@ -2281,23 +2328,10 @@
       close.type = "button";
       close.title = "关闭标签";
       close.textContent = "×";
-      close.addEventListener("click", (e) => {
-        e.stopPropagation();
-        closeTab(tab.id);
-      });
       item.appendChild(close);
-      item.addEventListener("click", () => activateTab(tab.id));
-      item.addEventListener("dragstart", (e) => {
-        item.classList.add("dragging");
-        e.dataTransfer.setData("text/stuart-tab", String(tab.id));
-        e.dataTransfer.setData("text/plain", tab.path || tab.name || "");
-        e.dataTransfer.effectAllowed = "move";
-      });
-      item.addEventListener("dragend", () => {
-        item.classList.remove("dragging");
-      });
-      list.appendChild(item);
+      frag.appendChild(item);
     });
+    list.appendChild(frag);
   }
 
   function setTabBarVisible() {
@@ -2511,7 +2545,40 @@
 
   function bindTabBar() {
     const bar = $("#tabbar");
-    if (!bar) return;
+    const list = $("#tab-list");
+    if (!bar || !list || bar.dataset.bound === "1") return;
+    bar.dataset.bound = "1";
+    // Delegated click / close / drag — avoid per-tab listeners on every rebuild
+    if (list.dataset.delegated !== "1") {
+      list.dataset.delegated = "1";
+      list.addEventListener("click", (e) => {
+        const close = e.target.closest(".tab-close");
+        const item = e.target.closest(".tab-item");
+        if (!item) return;
+        const id = Number(item.dataset.tabId);
+        if (!Number.isFinite(id)) return;
+        if (close) {
+          e.stopPropagation();
+          closeTab(id);
+          return;
+        }
+        activateTab(id);
+      });
+      list.addEventListener("dragstart", (e) => {
+        const item = e.target.closest(".tab-item");
+        if (!item) return;
+        item.classList.add("dragging");
+        const id = item.dataset.tabId;
+        const tab = state.tabs.find((t) => String(t.id) === id);
+        e.dataTransfer.setData("text/stuart-tab", String(id));
+        e.dataTransfer.setData("text/plain", (tab && (tab.path || tab.name)) || "");
+        e.dataTransfer.effectAllowed = "move";
+      });
+      list.addEventListener("dragend", (e) => {
+        const item = e.target.closest(".tab-item");
+        if (item) item.classList.remove("dragging");
+      });
+    }
     bar.addEventListener("dragover", (e) => {
       if (e.dataTransfer.types.includes("text/stuart-tab") || e.dataTransfer.types.includes("Files")) {
         e.preventDefault();

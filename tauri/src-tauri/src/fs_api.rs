@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 const APP_ID: &str = "StuartMD";
-pub const VERSION: &str = "2.7.0";
+pub const VERSION: &str = "2.7.1";
 pub const PROG_ID: &str = "StuartMD.Markdown";
 pub const PROG_ID_PDF: &str = "StuartMD.PDF";
 pub const SETTINGS_SCHEMA: i64 = 3;
@@ -223,6 +223,14 @@ pub fn push_recent(path: &str, kind: &str) {
             .and_then(|r| r.as_array())
             .cloned()
             .unwrap_or_default();
+        // Already at head with same kind → skip disk write
+        if let Some(first) = recents.first() {
+            let p = first.get("path").and_then(|x| x.as_str()).unwrap_or("");
+            let k = first.get("kind").and_then(|x| x.as_str()).unwrap_or("");
+            if p == path && k == kind {
+                return;
+            }
+        }
         recents.retain(|r| r.get("path").and_then(|p| p.as_str()) != Some(path));
         recents.insert(0, json!({"path": path, "name": name, "kind": kind}));
         recents.truncate(20);
@@ -733,7 +741,7 @@ pub fn stuart_open_welcome() -> Value {
         "name": "欢迎使用 StuartMD.md",
         "kind": "markdown",
         "welcome": true,
-        "content": "# StuartMD\n\n轻量 Markdown 阅读与编辑器。\n\n**项目仓库：** https://github.com/ghostLLC/StuartMD\n\n**当前版本：** 2.7.0\n\n## 能做什么\n\n- 读文档：美化排版、公式、表格、代码高亮\n- 写笔记：阅读 / 分栏 / 源码，点击段落直接编辑\n- 飞书式交互：块手柄、选中浮动栏、块菜单；双击代码/公式/图表进源码编辑\n- 撤销重做：Ctrl+Z / Ctrl+Y\n- 看 PDF：标黄批注\n- 多窗口、主题、多语言\n",
+        "content": "# StuartMD\n\n轻量 Markdown 阅读与编辑器。\n\n**项目仓库：** https://github.com/ghostLLC/StuartMD\n\n**当前版本：** 2.7.1\n\n## 能做什么\n\n- 读文档：美化排版、公式、表格、代码高亮\n- 写笔记：阅读 / 分栏 / 源码，点击段落直接编辑\n- 飞书式交互：块手柄、选中浮动栏、块菜单；双击代码/公式/图表进源码编辑\n- 撤销重做：Ctrl+Z / Ctrl+Y\n- 看 PDF：标黄批注\n- 多窗口、主题、多语言\n",
         "size": 0
     })
 }
