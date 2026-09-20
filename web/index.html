@@ -261,24 +261,44 @@
         <div id="pdf-area" hidden>
           <div id="pdf-toolbar">
             <div class="pdf-tb-left">
-              <button class="icon-btn sm" id="pdf-prev" title="上一页">◀</button>
+              <button class="icon-btn sm" id="pdf-prev" title="上一页" aria-label="上一页">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+              </button>
               <input type="number" id="pdf-page-input" min="1" value="1" title="页码" />
               <span id="pdf-page-label">/ 1</span>
-              <button class="icon-btn sm" id="pdf-next" title="下一页">▶</button>
-              <button class="icon-btn sm" id="pdf-zoom-out" title="缩小">−</button>
-              <button class="icon-btn sm" id="pdf-zoom-in" title="放大">＋</button>
-              <button class="icon-btn sm" id="pdf-fit" title="适应宽度">宽</button>
-              <button class="icon-btn sm" id="pdf-fit-h" title="适应高度">高</button>
-              <button class="icon-btn sm" id="pdf-rotate" title="旋转 90°">转</button>
+              <button class="icon-btn sm" id="pdf-next" title="下一页" aria-label="下一页">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+              </button>
+              <span class="pdf-tb-sep"></span>
+              <button class="icon-btn sm" id="pdf-zoom-out" title="缩小 (Ctrl+滚轮)" aria-label="缩小">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M8 11h6M20 20l-3.5-3.5"/></svg>
+              </button>
+              <button class="icon-btn sm" id="pdf-zoom-in" title="放大 (Ctrl+滚轮)" aria-label="放大">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M8 11h6M11 8v6M20 20l-3.5-3.5"/></svg>
+              </button>
+              <button class="icon-btn sm" id="pdf-fit" title="适应高度" aria-label="适应高度">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="12" height="16" rx="1"/><path d="M3 8v8M21 8v8"/></svg>
+              </button>
+              <button class="icon-btn sm" id="pdf-rotate" title="顺时针旋转 90°" aria-label="旋转">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/></svg>
+              </button>
+              <button class="icon-btn sm" id="pdf-spread" title="双页显示" aria-label="双页">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="8" height="14" rx="1"/><rect x="13" y="5" width="8" height="14" rx="1"/></svg>
+              </button>
             </div>
             <div class="pdf-tb-right">
-              <button class="btn sm" id="pdf-highlight" title="选中文字后标黄">标黄</button>
-              <button class="btn sm" id="pdf-copy" title="复制选中文本">复制</button>
-              <button class="btn sm" id="pdf-erase" title="点击高亮以擦除">擦除</button>
-              <button class="btn sm" id="pdf-clear" title="清除全部高亮">清除</button>
+              <button class="icon-btn sm" id="pdf-highlight" title="标黄（默认关闭）：开启后选中文字即可标黄" aria-label="标黄">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h4l10-10a2.8 2.8 0 0 0-4-4L4 16v4z"/><path d="M12 6l6 6"/></svg>
+              </button>
+              <button class="icon-btn sm" id="pdf-clear" title="清除全部高亮" aria-label="清除高亮">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M9 7V5h6v2M7 7l1 12h8l1-12"/></svg>
+              </button>
             </div>
           </div>
           <div id="pdf-scroll" class="pane"></div>
+          <div id="pdf-annot-menu" class="pdf-annot-menu" hidden>
+            <button type="button" id="pdf-annot-erase">擦除此高亮</button>
+          </div>
         </div>
       </section>
     </div>

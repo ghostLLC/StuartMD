@@ -2,11 +2,7 @@
 (function () {
   "use strict";
 
-  if (!window.pdfjsLib && window.pdfjsViewer) {
-    // no-op
-  }
   if (window.pdfjsLib) {
-    // Resolve against page URL so file-association / new-window opens still find the worker
     try {
       window.pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
         "libs/pdf.worker.min.js",
@@ -17,6 +13,7 @@
     }
   }
 
+  const HL_COLOR = "#fff59d";
   const state = {
     path: null,
     name: "",
@@ -24,12 +21,13 @@
     page: 1,
     total: 1,
     scale: 1.2,
-    rotation: 0, // additional user rotation: 0/90/180/270
-    mode: "highlight", // highlight | erase | none
+    rotation: 0,
+    // highlight OFF by default — erase via click/right-click on marks
+    mode: "none", // highlight | none
     annotations: [],
-    rendering: false,
-    pendingPage: null,
     landscape: false,
+    spread: false,
+    selectedHlId: null,
   };
 
   const el = () => ({
@@ -40,7 +38,8 @@
     pageInput: document.getElementById("pdf-page-input"),
     pageLabel: document.getElementById("pdf-page-label"),
     btnHighlight: document.getElementById("pdf-highlight"),
-    btnErase: document.getElementById("pdf-erase"),
+    btnSpread: document.getElementById("pdf-spread"),
+    annotMenu: document.getElementById("pdf-annot-menu"),
   });
 
   function toast(msg) {
@@ -59,15 +58,38 @@
     return window.pywebview.api[name](...args);
   }
 
+  function hideAnnotMenu() {
+    const m = el().annotMenu;
+    if (m) m.hidden = true;
+    state.selectedHlId = null;
+    document.querySelectorAll(".pdf-hl.selected").forEach((n) => n.classList.remove("selected"));
+  }
+
+  function showAnnotMenu(x, y, annId) {
+    const m = el().annotMenu;
+    if (!m) return;
+    state.selectedHlId = annId;
+    m.hidden = false;
+    const w = m.offsetWidth || 130;
+    const h = m.offsetHeight || 40;
+    m.style.left = Math.min(window.innerWidth - w - 8, Math.max(8, x)) + "px";
+    m.style.top = Math.min(window.innerHeight - h - 8, Math.max(8, y)) + "px";
+  }
+
   function setModeUI() {
     const e = el();
-    if (!e.btnHighlight) return;
-    e.btnHighlight.classList.toggle("active", state.mode === "highlight");
-    e.btnHighlight.textContent = state.mode === "highlight" ? "标黄中" : "标黄";
-    e.btnErase.classList.toggle("active", state.mode === "erase");
-    e.btnErase.textContent = state.mode === "erase" ? "擦除中" : "擦除";
-    e.scroll.classList.toggle("erase-mode", state.mode === "erase");
-    e.scroll.classList.toggle("highlight-mode", state.mode === "highlight");
+    const on = state.mode === "highlight";
+    if (e.btnHighlight) {
+      e.btnHighlight.classList.toggle("active", on);
+      e.btnHighlight.title = on
+        ? "标黄中：选中文字即可标黄（点击关闭）"
+        : "标黄（默认关闭）：开启后选中文字即可标黄";
+    }
+    if (e.scroll) e.scroll.classList.toggle("highlight-mode", on);
+    if (e.btnSpread) {
+      e.btnSpread.classList.toggle("active", !!state.spread);
+      e.btnSpread.title = state.spread ? "单页显示" : "双页显示";
+    }
   }
 
   async function disposeDoc() {
@@ -95,13 +117,17 @@
     e.editor.hidden = true;
     e.area.hidden = false;
     await disposeDoc();
+    hideAnnotMenu();
     state.path = payload.path;
     state.name = payload.name;
     state.annotations = payload.annotations || [];
     state.page = 1;
     state.rotation = 0;
     state.scale = 1.2;
+    // Default: highlight tool off
+    state.mode = "none";
     e.scroll.innerHTML = "";
+    setModeUI();
 
     try {
       const bin = atob(payload.b64);
@@ -113,12 +139,12 @@
       e.pageInput.max = String(state.total);
       e.pageLabel.textContent = `/ ${state.total}`;
 
-      // Detect landscape (incl. rotated pages) and auto-fit width
       const p1 = await state.doc.getPage(1);
       const vp1 = p1.getViewport({ scale: 1, rotation: p1.rotate + state.rotation });
       state.landscape = vp1.width >= vp1.height;
-      // Compute scale only, then ALWAYS paint pages (blank-view fix)
-      await fitToWidth(false);
+      // Smart initial fit: portrait → height, landscape → width
+      if (state.landscape) await fitToWidth(false);
+      else await fitScaleToHeight(false);
       await renderAll();
 
       document.title = `${payload.name} — StuartMD`;
@@ -130,31 +156,53 @@
     }
   }
 
+  function makePageWrap(num, minH) {
+    const wrap = document.createElement("div");
+    wrap.className = "pdf-page pending";
+    wrap.dataset.page = String(num);
+    wrap.style.minHeight = `${minH}px`;
+    wrap.innerHTML = `<div class="pdf-page-placeholder">第 ${num} 页…</div>`;
+    return wrap;
+  }
+
   async function renderAll() {
     const e = el();
     if (!state.doc || !e.scroll) return;
     e.scroll.innerHTML = "";
-    // Create lightweight placeholders first; paint pages as they enter view
-    const pageEls = [];
+    hideAnnotMenu();
     const total = state.total || 0;
-    // Cache page-1 metrics once (avoid N× getPage(1) on long reports)
-    let page1 = null;
     let vp0 = null;
     try {
-      page1 = await state.doc.getPage(1);
+      const page1 = await state.doc.getPage(1);
       const rotation = ((page1.rotate || 0) + state.rotation) % 360;
       vp0 = page1.getViewport({ scale: state.scale, rotation });
     } catch (_) {}
     const minH = vp0 ? Math.max(200, vp0.height * 0.8) : 480;
+
+    const pageEls = [];
     const frag = document.createDocumentFragment();
-    for (let n = 1; n <= total; n++) {
-      const wrap = document.createElement("div");
-      wrap.className = "pdf-page pending";
-      wrap.dataset.page = String(n);
-      wrap.style.minHeight = `${minH}px`;
-      wrap.innerHTML = `<div class="pdf-page-placeholder">第 ${n} 页…</div>`;
-      frag.appendChild(wrap);
-      pageEls.push(wrap);
+    if (state.spread) {
+      e.scroll.classList.add("spread-mode");
+      for (let n = 1; n <= total; n += 2) {
+        const row = document.createElement("div");
+        row.className = "pdf-spread";
+        const a = makePageWrap(n, minH);
+        row.appendChild(a);
+        pageEls.push(a);
+        if (n + 1 <= total) {
+          const b = makePageWrap(n + 1, minH);
+          row.appendChild(b);
+          pageEls.push(b);
+        }
+        frag.appendChild(row);
+      }
+    } else {
+      e.scroll.classList.remove("spread-mode");
+      for (let n = 1; n <= total; n++) {
+        const wrap = makePageWrap(n, minH);
+        frag.appendChild(wrap);
+        pageEls.push(wrap);
+      }
     }
     e.scroll.appendChild(frag);
     bindHighlightLayer();
@@ -174,8 +222,7 @@
       }
     };
 
-    // Always paint the first pages immediately so the view is never blank
-    for (let i = 0; i < Math.min(2, pageEls.length); i++) {
+    for (let i = 0; i < Math.min(state.spread ? 4 : 2, pageEls.length); i++) {
       await paint(pageEls[i]);
     }
 
@@ -195,10 +242,9 @@
         if (w.dataset.painted !== "1") io.observe(w);
       });
       state._io = io;
-      // Safety net: if IO never fires (zero-size root / headless quirk), paint page 1–3
       setTimeout(() => {
         if (!state.doc) return;
-        pageEls.slice(0, 3).forEach((w) => {
+        pageEls.slice(0, 4).forEach((w) => {
           if (w.dataset.painted !== "1") paint(w);
         });
       }, 400);
@@ -211,7 +257,6 @@
     const e = el();
     if (!state.doc) return;
     const page = await state.doc.getPage(num);
-    // Include page.Rotate (stored rotation) + user rotation → works for landscape PDFs
     const rotation = ((page.rotate || 0) + state.rotation) % 360;
     const viewport = page.getViewport({ scale: state.scale, rotation });
     const wrap = existingWrap || document.createElement("div");
@@ -255,8 +300,8 @@
 
     await page.render({ canvasContext: ctx, viewport, transform: [dpr, 0, 0, dpr, 0, 0] }).promise;
 
-    // text layer — viewport.transform already handles rotation (portrait + landscape)
     const textContent = await page.getTextContent();
+    const frag = document.createDocumentFragment();
     textContent.items.forEach((item) => {
       if (!item.str) return;
       const tx = window.pdfjsLib.Util.transform(viewport.transform, item.transform);
@@ -272,10 +317,22 @@
       const span = document.createElement("span");
       span.textContent = item.str;
       span.setAttribute("style", style);
-      layer.appendChild(span);
+      frag.appendChild(span);
     });
+    layer.appendChild(frag);
 
     drawAnnotationsForPage(annotLayer, num, viewport);
+  }
+
+  async function fitScaleToHeight(reRender = true) {
+    const e = el();
+    if (!state.doc) return;
+    const page = await state.doc.getPage(1);
+    const rotation = ((page.rotate || 0) + state.rotation) % 360;
+    const vp1 = page.getViewport({ scale: 1, rotation });
+    const avail = Math.max(320, e.scroll.clientHeight - 40);
+    state.scale = Math.max(0.4, Math.min(3, avail / vp1.height));
+    if (reRender) await renderAll();
   }
 
   async function fitToWidth(reRender = true) {
@@ -284,20 +341,16 @@
     const page = await state.doc.getPage(1);
     const rotation = ((page.rotate || 0) + state.rotation) % 360;
     const vp1 = page.getViewport({ scale: 1, rotation });
-    const avail = Math.max(320, e.scroll.clientWidth - 40);
-    state.scale = Math.max(0.4, Math.min(3, avail / vp1.width));
+    const gap = state.spread ? 12 : 0;
+    const pagesWide = state.spread ? 2 : 1;
+    const avail = Math.max(320, e.scroll.clientWidth - 40 - gap);
+    state.scale = Math.max(0.35, Math.min(3, avail / (vp1.width * pagesWide)));
     if (reRender) await renderAll();
   }
 
-  async function fitToHeight() {
-    const e = el();
-    if (!state.doc) return;
-    const page = await state.doc.getPage(1);
-    const rotation = ((page.rotate || 0) + state.rotation) % 360;
-    const vp1 = page.getViewport({ scale: 1, rotation });
-    const avail = Math.max(320, e.scroll.clientHeight - 40);
-    state.scale = Math.max(0.4, Math.min(3, avail / vp1.height));
-    await renderAll();
+  /** Toolbar "适应" — height fit (single control). */
+  async function fitView() {
+    await fitScaleToHeight(true);
   }
 
   async function rotateView() {
@@ -314,6 +367,7 @@
 
   function drawAnnotationsForPage(layer, pageNum, viewport) {
     layer.innerHTML = "";
+    const pickable = state.mode !== "highlight";
     state.annotations
       .filter((a) => (a.page || 1) === pageNum)
       .forEach((a) => {
@@ -325,15 +379,25 @@
           box.style.top = `${r.y * viewport.height}px`;
           box.style.width = `${r.w * viewport.width}px`;
           box.style.height = `${r.h * viewport.height}px`;
-          box.style.background = a.color || "#fff59d";
+          box.style.background = a.color || HL_COLOR;
+          box.style.pointerEvents = pickable ? "auto" : "none";
           box.title = a.text ? a.text.slice(0, 80) : "高亮";
-          box.addEventListener("click", async (ev) => {
-            if (state.mode === "erase") {
+          if (pickable) {
+            box.addEventListener("click", (ev) => {
               ev.preventDefault();
               ev.stopPropagation();
-              await eraseAnnotation(a.id);
-            }
-          });
+              document.querySelectorAll(".pdf-hl.selected").forEach((n) => n.classList.remove("selected"));
+              box.classList.add("selected");
+              state.selectedHlId = a.id;
+            });
+            box.addEventListener("contextmenu", (ev) => {
+              ev.preventDefault();
+              ev.stopPropagation();
+              document.querySelectorAll(".pdf-hl.selected").forEach((n) => n.classList.remove("selected"));
+              box.classList.add("selected");
+              showAnnotMenu(ev.clientX, ev.clientY, a.id);
+            });
+          }
           layer.appendChild(box);
         });
       });
@@ -342,15 +406,17 @@
   function bindHighlightLayer() {
     const e = el();
     e.scroll.onmouseup = async (ev) => {
+      hideAnnotMenu();
       if (state.mode !== "highlight") return;
-      // don't start from toolbar
       if (ev.target.closest("#pdf-toolbar")) return;
       const sel = window.getSelection();
       if (!sel || sel.isCollapsed || !sel.rangeCount) return;
       const text = sel.toString().trim();
       if (!text) return;
       const range = sel.getRangeAt(0);
-      const wrap = ev.target.closest(".pdf-page") || range.startContainer.parentElement?.closest(".pdf-page");
+      const wrap =
+        ev.target.closest(".pdf-page") ||
+        range.startContainer.parentElement?.closest(".pdf-page");
       if (!wrap) return;
       const pageNum = Number(wrap.dataset.page || 1);
       const rectLayer = wrap.querySelector(".pdf-annot-layer");
@@ -370,7 +436,7 @@
       if (!rects.length) return;
       const ann = {
         type: "highlight",
-        color: "#fff59d",
+        color: HL_COLOR,
         page: pageNum,
         text,
         rects,
@@ -384,12 +450,19 @@
         state.annotations = await api("load_annotations", state.path);
         sel.removeAllRanges();
         const page = await state.doc.getPage(pageNum);
-        const viewport = page.getViewport({ scale: state.scale });
+        const rotation = ((page.rotate || 0) + state.rotation) % 360;
+        const viewport = page.getViewport({ scale: state.scale, rotation });
         drawAnnotationsForPage(rectLayer, pageNum, viewport);
         toast("已标黄");
       } catch (_) {
         toast("标黄失败");
       }
+    };
+
+    e.scroll.oncontextmenu = (ev) => {
+      // Allow default menu outside annot; annot handler stops propagation
+      if (ev.target.closest(".pdf-hl")) return;
+      hideAnnotMenu();
     };
   }
 
@@ -402,57 +475,55 @@
       }
       state.annotations = await api("load_annotations", state.path);
       await refreshAnnots();
+      hideAnnotMenu();
       toast("已擦除高亮");
-    } catch (_) {}
+    } catch (_) {
+      toast("擦除失败");
+    }
   }
 
   async function refreshAnnots() {
     const e = el();
+    if (!state.doc) return;
     for (const wrap of e.scroll.querySelectorAll(".pdf-page")) {
       const pageNum = Number(wrap.dataset.page);
       const layer = wrap.querySelector(".pdf-annot-layer");
+      if (!layer) continue;
       const page = await state.doc.getPage(pageNum);
-      const viewport = page.getViewport({ scale: state.scale });
+      const rotation = ((page.rotate || 0) + state.rotation) % 360;
+      const viewport = page.getViewport({ scale: state.scale, rotation });
       drawAnnotationsForPage(layer, pageNum, viewport);
     }
   }
 
   async function clearAll() {
     if (!state.path) return;
-    if (!confirm("清除该 PDF 的全部高亮？")) return;
+    const ok = confirm("确定清除该 PDF 的全部高亮？\n此操作不可撤销。");
+    if (!ok) return;
+    const ok2 = confirm("再次确认：清除全部高亮？");
+    if (!ok2) return;
     try {
       await api("clear_annotations", state.path);
       state.annotations = [];
       await refreshAnnots();
+      hideAnnotMenu();
       toast("已清除全部高亮");
-    } catch (_) {}
+    } catch (_) {
+      toast("清除失败");
+    }
   }
 
-  async function copySelection() {
-    const sel = window.getSelection();
-    const text = sel && !sel.isCollapsed ? sel.toString() : "";
-    if (!text) {
-      toast("请先选中文本");
+  let zoomTimer = 0;
+  async function setZoom(scale, immediate) {
+    state.scale = Math.max(0.35, Math.min(4, scale));
+    clearTimeout(zoomTimer);
+    if (immediate) {
+      await renderAll();
       return;
     }
-    try {
-      await navigator.clipboard.writeText(text);
-      toast("已复制");
-    } catch (_) {
-      // fallback
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      ta.remove();
-      toast("已复制");
-    }
-  }
-
-  async function setZoom(scale) {
-    state.scale = Math.max(0.5, Math.min(3, scale));
-    await renderAll();
+    zoomTimer = setTimeout(() => {
+      renderAll();
+    }, 140);
   }
 
   function bindChrome() {
@@ -462,16 +533,18 @@
       if (n) n.addEventListener("click", fn);
     };
     on("pdf-prev", async () => {
+      const step = state.spread ? 2 : 1;
       if (state.page > 1) {
-        state.page -= 1;
+        state.page = Math.max(1, state.page - step);
         e.pageInput.value = String(state.page);
         const p = e.scroll.querySelector(`.pdf-page[data-page="${state.page}"]`);
         p?.scrollIntoView({ behavior: "smooth", block: "start" });
       }
     });
     on("pdf-next", async () => {
+      const step = state.spread ? 2 : 1;
       if (state.page < state.total) {
-        state.page += 1;
+        state.page = Math.min(state.total, state.page + step);
         e.pageInput.value = String(state.page);
         const p = e.scroll.querySelector(`.pdf-page[data-page="${state.page}"]`);
         p?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -484,30 +557,64 @@
       const p = e.scroll.querySelector(`.pdf-page[data-page="${state.page}"]`);
       p?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
-    on("pdf-zoom-in", () => setZoom(state.scale + 0.15));
-    on("pdf-zoom-out", () => setZoom(state.scale - 0.15));
-    on("pdf-fit", () => fitToWidth(true));
-    on("pdf-fit-h", () => fitToHeight());
+    on("pdf-zoom-in", () => setZoom(state.scale + 0.15, true));
+    on("pdf-zoom-out", () => setZoom(state.scale - 0.15, true));
+    on("pdf-fit", () => fitView());
     on("pdf-rotate", () => rotateView());
+    on("pdf-spread", async () => {
+      state.spread = !state.spread;
+      setModeUI();
+      // Re-fit so two pages fit the pane when spreading
+      if (state.spread) await fitToWidth(true);
+      else await fitScaleToHeight(true);
+      toast(state.spread ? "双页显示" : "单页显示");
+    });
     on("pdf-highlight", () => {
       state.mode = state.mode === "highlight" ? "none" : "highlight";
       setModeUI();
-      toast(state.mode === "highlight" ? "选中文本即可标黄" : "已关闭标黄");
+      hideAnnotMenu();
+      // Refresh pickability of existing marks
+      refreshAnnots();
+      toast(state.mode === "highlight" ? "标黄已开启：选中文字即可标黄" : "标黄已关闭：可点选高亮后右键擦除");
     });
-    on("pdf-erase", () => {
-      state.mode = state.mode === "erase" ? "none" : "erase";
-      setModeUI();
-      toast(state.mode === "erase" ? "点击高亮即可擦除" : "已关闭擦除");
+    on("pdf-clear", () => clearAll());
+
+    // Ctrl + wheel → zoom
+    e.scroll?.addEventListener(
+      "wheel",
+      (ev) => {
+        if (!ev.ctrlKey && !ev.metaKey) return;
+        if (!state.doc) return;
+        ev.preventDefault();
+        const dir = ev.deltaY > 0 ? -0.12 : 0.12;
+        setZoom(state.scale + dir, false);
+      },
+      { passive: false }
+    );
+
+    // Annot context menu
+    const menu = document.getElementById("pdf-annot-menu");
+    document.getElementById("pdf-annot-erase")?.addEventListener("click", async () => {
+      const id = state.selectedHlId;
+      if (!id) return;
+      await eraseAnnotation(id);
     });
-    on("pdf-copy", copySelection);
-    on("pdf-clear", clearAll);
+    document.addEventListener("mousedown", (ev) => {
+      if (!menu || menu.hidden) return;
+      if (ev.target.closest("#pdf-annot-menu") || ev.target.closest(".pdf-hl")) return;
+      hideAnnotMenu();
+    });
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") hideAnnotMenu();
+    });
+
     setModeUI();
   }
 
   function hidePdf() {
     const e = el();
     e.area.hidden = true;
-    // Fire-and-forget dispose; avoid leaking PDF.js workers/bitmaps
+    hideAnnotMenu();
     disposeDoc();
     state.path = null;
   }

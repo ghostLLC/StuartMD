@@ -2461,6 +2461,13 @@ body[data-theme="wallpaper"] #preview *::selection {
   gap: 6px;
 }
 
+.pdf-tb-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  margin: 0 2px;
+}
+
 #pdf-page-input {
   width: 52px;
   height: 28px;
@@ -2490,6 +2497,24 @@ body[data-theme="wallpaper"] #preview *::selection {
   gap: 16px;
 }
 
+#pdf-scroll.spread-mode {
+  gap: 20px;
+}
+
+.pdf-spread {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 12px;
+  justify-content: center;
+  align-items: flex-start;
+  width: 100%;
+}
+
+.pdf-spread .pdf-page {
+  margin: 0;
+}
+
 .pdf-page {
   position: relative;
   background: #fff;
@@ -2515,13 +2540,17 @@ body[data-theme="wallpaper"] #preview *::selection {
   display: block;
 }
 
+/*
+ * Text layer: keep transparent glyphs but DO NOT dim the layer (opacity on the
+ * parent made the system blue selection look detached from the page).
+ */
 .pdf-text-layer {
   position: absolute;
   inset: 0;
   overflow: hidden;
-  opacity: 0.25;
   line-height: 1;
   user-select: text;
+  z-index: 2;
 }
 
 .pdf-text-layer span {
@@ -2529,13 +2558,31 @@ body[data-theme="wallpaper"] #preview *::selection {
   white-space: pre;
   transform-origin: 0 0;
   color: transparent;
+  background: transparent;
   cursor: text;
+}
+
+/* Soft amber selection — matches highlight color, no harsh system blue */
+.pdf-text-layer ::selection,
+.pdf-text-layer span::selection,
+.pdf-page ::selection {
+  background: rgba(255, 214, 64, 0.42);
+  color: transparent;
+  text-shadow: none;
+}
+
+body[data-theme="dark"] .pdf-text-layer ::selection,
+body[data-theme="dark"] .pdf-text-layer span::selection,
+body[data-theme="gray"] .pdf-text-layer ::selection,
+body[data-theme="gray"] .pdf-text-layer span::selection {
+  background: rgba(255, 214, 64, 0.35);
 }
 
 .pdf-annot-layer {
   position: absolute;
   inset: 0;
   pointer-events: none;
+  z-index: 3;
 }
 
 .pdf-hl {
@@ -2544,16 +2591,19 @@ body[data-theme="wallpaper"] #preview *::selection {
   border-radius: 2px;
   pointer-events: none;
   opacity: 0.85;
+  background: #fff59d;
 }
 
-#pdf-scroll.erase-mode .pdf-hl {
+/* When highlight mode is OFF, existing marks can be picked / right-clicked */
+#pdf-scroll:not(.highlight-mode) .pdf-hl {
   pointer-events: auto;
   cursor: pointer;
-  outline: 1px dashed rgba(0, 0, 0, 0.25);
 }
 
-#pdf-scroll.erase-mode .pdf-hl:hover {
-  opacity: 0.5;
+.pdf-hl.selected {
+  outline: 2px solid #3b82f6;
+  outline-offset: 1px;
+  opacity: 0.95;
 }
 
 .pdf-page-label {
@@ -2564,13 +2614,47 @@ body[data-theme="wallpaper"] #preview *::selection {
   color: rgba(0, 0, 0, 0.35);
   font-family: var(--font-ui);
   pointer-events: none;
+  z-index: 4;
 }
 
-#pdf-highlight.active,
-#pdf-erase.active {
+#pdf-highlight.active {
   background: var(--text);
   color: var(--bg);
   border-color: var(--text);
+}
+
+.pdf-annot-menu {
+  position: fixed;
+  z-index: 200;
+  min-width: 120px;
+  padding: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+  font-family: var(--font-ui);
+}
+
+.pdf-annot-menu[hidden] {
+  display: none !important;
+}
+
+.pdf-annot-menu button {
+  display: block;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.pdf-annot-menu button:hover {
+  background: var(--bg-hover);
+  color: #dc2626;
 }
 
 /* ========== Wallpaper theme ========== */
