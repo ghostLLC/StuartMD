@@ -58,8 +58,10 @@
     annotMenu: document.getElementById("pdf-annot-menu"),
     palette: document.getElementById("pdf-color-palette"),
     colorDot: document.getElementById("pdf-color-dot"),
-    commentModal: document.getElementById("pdf-comment-modal"),
+    commentPanel: document.getElementById("pdf-comment-panel"),
     commentInput: document.getElementById("pdf-comment-input"),
+    commentQuote: document.getElementById("pdf-comment-quote"),
+    commentTitle: document.getElementById("pdf-comment-title"),
   });
 
   function toast(msg) {
@@ -520,17 +522,18 @@
     canvas.style.height = `${viewport.height}px`;
     wrap.appendChild(canvas);
 
-    const annotLayer = document.createElement("div");
-    annotLayer.className = "pdf-annot-layer";
-    annotLayer.style.width = `${viewport.width}px`;
-    annotLayer.style.height = `${viewport.height}px`;
-    wrap.appendChild(annotLayer);
-
+    // Text layer first (selectable), annot on top for left-click when mark mode off
     const layer = document.createElement("div");
     layer.className = "pdf-text-layer";
     layer.style.width = `${viewport.width}px`;
     layer.style.height = `${viewport.height}px`;
     wrap.appendChild(layer);
+
+    const annotLayer = document.createElement("div");
+    annotLayer.className = "pdf-annot-layer";
+    annotLayer.style.width = `${viewport.width}px`;
+    annotLayer.style.height = `${viewport.height}px`;
+    wrap.appendChild(annotLayer);
 
     const label = document.createElement("div");
     label.className = "pdf-page-label";
@@ -691,16 +694,18 @@
       ev.preventDefault();
       ev.stopPropagation();
       document
-        .querySelectorAll(".pdf-hl.selected, .pdf-cm.selected")
+        .querySelectorAll(".pdf-hl.selected, .pdf-cm.selected, .pdf-cm-bubble.selected")
         .forEach((n) => n.classList.remove("selected"));
       node.classList.add("selected");
       state.selectedHlId = id;
+      // Left-click select → show actions immediately (WPS-like)
+      showAnnotMenu(ev.clientX || node.getBoundingClientRect().left, ev.clientY || node.getBoundingClientRect().bottom, id);
     });
     node.addEventListener("contextmenu", (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
       document
-        .querySelectorAll(".pdf-hl.selected, .pdf-cm.selected")
+        .querySelectorAll(".pdf-hl.selected, .pdf-cm.selected, .pdf-cm-bubble.selected")
         .forEach((n) => n.classList.remove("selected"));
       node.classList.add("selected");
       showAnnotMenu(ev.clientX, ev.clientY, id);
@@ -961,21 +966,65 @@
     }
   }
 
-  // ---- Comment modal ----
+  // ---- Floating comment panel (WPS-like) ----
   let _commentTargetId = null;
+  const _panelPos = { x: 0, y: 0, has: false };
 
-  function openCommentModal(id) {
+  function placeCommentPanel(x, y) {
     const e = el();
-    _commentTargetId = id; // null → new comment on current selection
+    const p = e.commentPanel;
+    if (!p) return;
+    const w = p.offsetWidth || 340;
+    const h = p.offsetHeight || 200;
+    let left;
+    let top;
+    if (_panelPos.has && x == null) {
+      left = _panelPos.x;
+      top = _panelPos.y;
+    } else {
+      left = Math.min(window.innerWidth - w - 12, Math.max(8, (x || 120) + 8));
+      top = Math.min(window.innerHeight - h - 12, Math.max(8, (y || 80) + 8));
+    }
+    p.style.left = `${left}px`;
+    p.style.top = `${top}px`;
+    _panelPos.x = left;
+    _panelPos.y = top;
+    _panelPos.has = true;
+  }
+
+  function openCommentPanel(id, anchorX, anchorY) {
+    const e = el();
+    _commentTargetId = id;
     const a = id ? findAnnot(id) : null;
+    if (e.commentTitle) {
+      e.commentTitle.textContent = a
+        ? a.type === "comment"
+          ? "编辑评论"
+          : "高亮评论"
+        : "添加评论";
+    }
+    if (e.commentQuote) {
+      const quote =
+        (a && (a.text || a.comment)) ||
+        (state._pendingSel && state._pendingSel.text) ||
+        "";
+      if (quote) {
+        e.commentQuote.hidden = false;
+        e.commentQuote.textContent = String(quote).slice(0, 120);
+      } else {
+        e.commentQuote.hidden = true;
+        e.commentQuote.textContent = "";
+      }
+    }
     if (e.commentInput) e.commentInput.value = (a && (a.comment || a.text)) || "";
-    if (e.commentModal) e.commentModal.hidden = false;
+    if (e.commentPanel) e.commentPanel.hidden = false;
+    placeCommentPanel(anchorX, anchorY);
     e.commentInput?.focus();
   }
 
-  function closeCommentModal() {
+  function closeCommentPanel() {
     const e = el();
-    if (e.commentModal) e.commentModal.hidden = true;
+    if (e.commentPanel) e.commentPanel.hidden = true;
     _commentTargetId = null;
   }
 
@@ -983,26 +1032,62 @@
     const e = el();
     const id = _commentTargetId;
     const text = (e.commentInput && e.commentInput.value ? e.commentInput.value : "").trim();
-    closeCommentModal();
     if (!id) {
-      // New comment on selected text
       if (!text) {
         toast("评论内容为空");
         return;
       }
       await addCommentFromSelection(text);
+      closeCommentPanel();
       return;
     }
     const a = findAnnot(id);
-    if (!a) return;
+    if (!a) {
+      closeCommentPanel();
+      return;
+    }
     a.comment = text;
     a.text = text || a.text;
-    if (text && a.type !== "comment") {
-      // keep highlight type; only attach comment text
-    }
     await persistAnnots();
     await refreshAnnots();
     toast(text ? "评论已保存" : "评论已清空");
+  }
+
+  function bindCommentPanelDrag() {
+    const p = el().commentPanel;
+    const handle = document.getElementById("pdf-comment-drag");
+    if (!p || !handle || handle.dataset.bound === "1") return;
+    handle.dataset.bound = "1";
+    let dragging = false;
+    let ox = 0;
+    let oy = 0;
+    handle.addEventListener("mousedown", (ev) => {
+      if (ev.target.closest("button")) return;
+      dragging = true;
+      const r = p.getBoundingClientRect();
+      ox = ev.clientX - r.left;
+      oy = ev.clientY - r.top;
+      ev.preventDefault();
+    });
+    window.addEventListener(
+      "mousemove",
+      (ev) => {
+        if (!dragging || p.hidden) return;
+        const w = p.offsetWidth;
+        const h = p.offsetHeight;
+        const left = Math.min(window.innerWidth - w - 4, Math.max(4, ev.clientX - ox));
+        const top = Math.min(window.innerHeight - h - 4, Math.max(4, ev.clientY - oy));
+        p.style.left = `${left}px`;
+        p.style.top = `${top}px`;
+        _panelPos.x = left;
+        _panelPos.y = top;
+        _panelPos.has = true;
+      },
+      { passive: true }
+    );
+    window.addEventListener("mouseup", () => {
+      dragging = false;
+    });
   }
 
   let zoomTimer = 0;
@@ -1094,8 +1179,10 @@
       const selBtn = ev.target.closest("[data-sel-act]");
       if (selBtn) {
         const act = selBtn.dataset.selAct;
+        const menu = e.annotMenu;
+        const mr = menu ? menu.getBoundingClientRect() : { left: 200, top: 200 };
         if (act === "comment") {
-          openCommentModal(null); // new comment on selection
+          openCommentPanel(null, mr.left, mr.top);
           hideAnnotMenu();
         } else if (act === "highlight") {
           await addHighlightFromSelection(state.hlColor || "yellow");
@@ -1108,19 +1195,20 @@
       const act = btn.dataset.annotAct;
       const id = state.selectedHlId;
       if (!id) return;
+      const menu = e.annotMenu;
+      const mr = menu ? menu.getBoundingClientRect() : { left: 200, top: 200 };
       if (act === "erase") {
         await eraseAnnotation(id);
       } else if (act === "comment") {
-        openCommentModal(id);
+        openCommentPanel(id, mr.left, mr.top);
         hideAnnotMenu();
       }
     });
 
     document.getElementById("pdf-comment-ok")?.addEventListener("click", () => saveComment());
-    document.getElementById("pdf-comment-cancel")?.addEventListener("click", () => closeCommentModal());
-    e.commentModal?.addEventListener("click", (ev) => {
-      if (ev.target === e.commentModal) closeCommentModal();
-    });
+    document.getElementById("pdf-comment-cancel")?.addEventListener("click", () => closeCommentPanel());
+    document.getElementById("pdf-comment-close")?.addEventListener("click", () => closeCommentPanel());
+    bindCommentPanelDrag();
 
     // Keep selection context until menu action (mousedown on menu must not clear)
     document.addEventListener("mousedown", (ev) => {
@@ -1139,7 +1227,7 @@
     document.addEventListener("keydown", (ev) => {
       if (ev.key === "Escape") {
         hideAnnotMenu();
-        closeCommentModal();
+        closeCommentPanel();
         if (e.palette) e.palette.hidden = true;
       }
     });
@@ -1172,7 +1260,7 @@
     const e = el();
     e.area.hidden = true;
     hideAnnotMenu();
-    closeCommentModal();
+    closeCommentPanel();
     disposeDoc();
     state.path = null;
   }

@@ -1,6 +1,6 @@
 [package]
 name = "stuartmd"
-version = "2.9.1"
+version = "2.9.2"
 description = "StuartMD desktop shell (Tauri)"
 authors = ["StuartMD"]
 edition = "2021"

@@ -310,14 +310,16 @@
             <div class="pdf-annot-colors" id="pdf-annot-colors"></div>
             <button type="button" data-annot-act="erase">擦除此标注</button>
           </div>
-          <div id="pdf-comment-modal" class="pdf-comment-modal" hidden>
-            <div class="pdf-comment-card">
-              <div class="pdf-comment-title">批注评论</div>
-              <textarea id="pdf-comment-input" rows="4" placeholder="输入评论内容（将写入 PDF 批注，便于与 WPS / Edge 互通）"></textarea>
-              <div class="pdf-comment-actions">
-                <button type="button" class="btn sm" id="pdf-comment-cancel">取消</button>
-                <button type="button" class="btn sm primary" id="pdf-comment-ok">确定</button>
-              </div>
+          <div id="pdf-comment-panel" class="pdf-comment-panel" hidden>
+            <div class="pdf-comment-head" id="pdf-comment-drag">
+              <span class="pdf-comment-title" id="pdf-comment-title">批注评论</span>
+              <button type="button" class="pdf-comment-x" id="pdf-comment-close" title="关闭">×</button>
+            </div>
+            <div class="pdf-comment-quote" id="pdf-comment-quote" hidden></div>
+            <textarea id="pdf-comment-input" rows="4" placeholder="输入评论…（可拖动标题栏，边看边写）"></textarea>
+            <div class="pdf-comment-actions">
+              <button type="button" class="btn sm" id="pdf-comment-cancel">关闭</button>
+              <button type="button" class="btn sm primary" id="pdf-comment-ok">保存</button>
             </div>
           </div>
         </div>

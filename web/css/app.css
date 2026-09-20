@@ -2544,17 +2544,7 @@ body[data-theme="wallpaper"] #preview *::selection {
   z-index: 0;
 }
 
-/*
- * Highlight layer sits BETWEEN canvas and text layer.
- * Edge/WPS style: yellow under glyphs, not a lid on top of type.
- */
-.pdf-annot-layer {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 1;
-}
-
+/* Visual highlight bands (interaction rules defined later with layer order) */
 .pdf-hl {
   position: absolute;
   /* Full line-box band; translucent so glyphs stay readable */
@@ -2626,7 +2616,18 @@ body[data-theme="wallpaper"] #preview *::selection {
   border-radius: 4px;
 }
 
-/* Text layer on TOP — transparent glyphs for selection; canvas type shows through highlight */
+/*
+ * Layers: canvas → text (selectable) → annot.
+ * Annot is on TOP so highlights can be left-clicked when mark mode is off;
+ * the layer itself is pointer-events:none — only .pdf-hl / .pdf-cm capture.
+ */
+.pdf-annot-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+
 .pdf-text-layer {
   position: absolute;
   inset: 0;
@@ -2652,6 +2653,21 @@ body[data-theme="wallpaper"] #preview *::selection {
   background: rgba(96, 165, 250, 0.4);
   color: transparent;
   text-shadow: none;
+}
+
+/* Mark mode ON: text selectable, existing marks not clickable */
+#pdf-scroll.highlight-mode .pdf-hl,
+#pdf-scroll.highlight-mode .pdf-cm,
+#pdf-scroll.highlight-mode .pdf-cm-bubble {
+  pointer-events: none !important;
+}
+
+/* Mark mode OFF: left-click picks highlight / comment marks */
+#pdf-scroll:not(.highlight-mode) .pdf-hl,
+#pdf-scroll:not(.highlight-mode) .pdf-cm,
+#pdf-scroll:not(.highlight-mode) .pdf-cm-bubble {
+  pointer-events: auto;
+  cursor: pointer;
 }
 
 body[data-theme="dark"] .pdf-text-layer ::selection,
@@ -2752,37 +2768,73 @@ body[data-theme="gray"] .pdf-text-layer span::selection {
   border: 1px solid rgba(0, 0, 0, 0.12) !important;
 }
 
-.pdf-comment-modal {
+/* Floating comment panel — WPS-style, draggable, no modal backdrop */
+.pdf-comment-panel {
   position: fixed;
-  inset: 0;
-  z-index: 300;
-  background: rgba(0, 0, 0, 0.28);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.pdf-comment-modal[hidden] { display: none !important; }
-
-.pdf-comment-card {
-  width: min(420px, 92vw);
+  z-index: 320;
+  width: min(340px, 88vw);
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 16px;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.2);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+  padding: 0 0 10px;
+  font-family: var(--font-ui);
+}
+
+.pdf-comment-panel[hidden] { display: none !important; }
+
+.pdf-comment-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  cursor: move;
+  user-select: none;
+  background: var(--bg-soft);
+  border-radius: 10px 10px 0 0;
 }
 
 .pdf-comment-title {
   font-weight: 600;
-  margin-bottom: 10px;
-  font-family: var(--font-ui);
+  font-size: 13px;
 }
 
-.pdf-comment-card textarea {
-  width: 100%;
+.pdf-comment-x {
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.pdf-comment-x:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.pdf-comment-quote {
+  margin: 8px 10px 0;
+  padding: 6px 8px;
+  border-left: 3px solid #3b82f6;
+  background: var(--bg-soft);
+  color: var(--text-2);
+  font-size: 12px;
+  border-radius: 0 4px 4px 0;
+  max-height: 48px;
+  overflow: hidden;
+}
+
+.pdf-comment-panel textarea {
+  display: block;
+  width: calc(100% - 20px);
+  margin: 8px 10px 0;
   resize: vertical;
-  min-height: 90px;
+  min-height: 72px;
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px 10px;
@@ -2796,7 +2848,8 @@ body[data-theme="gray"] .pdf-text-layer span::selection {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin-top: 12px;
+  margin-top: 10px;
+  padding: 0 10px;
 }
 
 .pdf-page-label {
