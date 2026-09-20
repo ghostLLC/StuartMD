@@ -13,7 +13,7 @@
     }
   }
 
-  const HL_COLOR = "#ffe566";
+  const HL_COLOR = "rgba(255, 232, 96, 0.38)";
   const state = {
     path: null,
     name: "",
@@ -303,15 +303,23 @@
 
     const textContent = await page.getTextContent();
     const frag = document.createDocumentFragment();
+    const vscale = viewport.scale || 1;
     textContent.items.forEach((item) => {
       if (!item.str) return;
       const tx = window.pdfjsLib.Util.transform(viewport.transform, item.transform);
       const angle = Math.atan2(tx[1], tx[0]);
       const fontHeight = Math.hypot(tx[2], tx[3]);
+      // Prefer PDF text-space height → device px (aligns better with canvas glyphs)
+      const fs =
+        typeof item.height === "number" && item.height > 0
+          ? item.height * vscale
+          : fontHeight * 0.82;
+      // Baseline sits at tx[5]; glyph top ≈ baseline − ascent (not full em-box)
+      const top = tx[5] - fs * 0.95;
       const style = [
         `left:${tx[4]}px`,
-        `top:${tx[5] - fontHeight}px`,
-        `font-size:${fontHeight}px`,
+        `top:${top}px`,
+        `font-size:${fs}px`,
         `transform:rotate(${angle}rad)`,
         `transform-origin:0 0`,
       ].join(";");
@@ -379,14 +387,14 @@
       const y = (cr.top - wrapBox.top) / wrapBox.height;
       const w = cr.width / wrapBox.width;
       const h = cr.height / wrapBox.height;
-      // Bias downward: keep ~60% of line height on the lower part of the box
-      const topPad = h * 0.18;
-      const hlH = h * 0.58;
+      // Bias further down: band sits on the lower half of the (already tighter) text box
+      const topPad = h * 0.3;
+      const hlH = h * 0.48;
       rects.push({
         x,
         y: y + topPad,
         w,
-        h: Math.max(hlH, 0.04),
+        h: Math.max(hlH, 0.03),
       });
     }
     return rects;
@@ -399,12 +407,12 @@
       .filter((a) => (a.page || 1) === pageNum)
       .forEach((a) => {
         (a.rects || []).forEach((r) => {
-          // Legacy full-line rects: re-bias under glyphs (Edge/WPS marker)
+          // Legacy / full-line rects: push under glyphs (avoid high yellow bars)
           let ry = r.y;
           let rh = r.h;
-          if (rh > 0.72) {
-            ry = r.y + rh * 0.18;
-            rh = rh * 0.58;
+          if (rh > 0.45) {
+            ry = r.y + rh * 0.3;
+            rh = rh * 0.48;
           }
           const box = document.createElement("div");
           box.className = "pdf-hl";
@@ -412,7 +420,7 @@
           box.style.left = `${r.x * viewport.width}px`;
           box.style.top = `${ry * viewport.height}px`;
           box.style.width = `${r.w * viewport.width}px`;
-          box.style.height = `${rh * viewport.height}px`;
+          box.style.height = `${Math.max(rh * viewport.height, 3)}px`;
           box.style.background = a.color || HL_COLOR;
           box.style.pointerEvents = pickable ? "auto" : "none";
           box.title = a.text ? a.text.slice(0, 80) : "高亮";
