@@ -13,7 +13,7 @@
     }
   }
 
-  const HL_COLOR = "#fff59d";
+  const HL_COLOR = "#ffe566";
   const state = {
     path: null,
     name: "",
@@ -277,17 +277,18 @@
     canvas.style.height = `${viewport.height}px`;
     wrap.appendChild(canvas);
 
-    const layer = document.createElement("div");
-    layer.className = "pdf-text-layer";
-    layer.style.width = `${viewport.width}px`;
-    layer.style.height = `${viewport.height}px`;
-    wrap.appendChild(layer);
-
+    // Highlight UNDER text layer (Edge/WPS): canvas → annot → transparent text
     const annotLayer = document.createElement("div");
     annotLayer.className = "pdf-annot-layer";
     annotLayer.style.width = `${viewport.width}px`;
     annotLayer.style.height = `${viewport.height}px`;
     wrap.appendChild(annotLayer);
+
+    const layer = document.createElement("div");
+    layer.className = "pdf-text-layer";
+    layer.style.width = `${viewport.width}px`;
+    layer.style.height = `${viewport.height}px`;
+    wrap.appendChild(layer);
 
     const label = document.createElement("div");
     label.className = "pdf-page-label";
@@ -365,6 +366,32 @@
     toast(`已旋转 ${state.rotation}°`);
   }
 
+  /**
+   * Convert DOM selection client rects → highlight rects that sit under glyphs
+   * (lower band of the line box), like Edge/WPS marker under text.
+   */
+  function hlRectsFromClientRects(clientRects, wrapBox) {
+    const rects = [];
+    for (let i = 0; i < clientRects.length; i++) {
+      const cr = clientRects[i];
+      if (cr.width < 2 || cr.height < 2) continue;
+      const x = (cr.left - wrapBox.left) / wrapBox.width;
+      const y = (cr.top - wrapBox.top) / wrapBox.height;
+      const w = cr.width / wrapBox.width;
+      const h = cr.height / wrapBox.height;
+      // Bias downward: keep ~60% of line height on the lower part of the box
+      const topPad = h * 0.18;
+      const hlH = h * 0.58;
+      rects.push({
+        x,
+        y: y + topPad,
+        w,
+        h: Math.max(hlH, 0.04),
+      });
+    }
+    return rects;
+  }
+
   function drawAnnotationsForPage(layer, pageNum, viewport) {
     layer.innerHTML = "";
     const pickable = state.mode !== "highlight";
@@ -372,13 +399,20 @@
       .filter((a) => (a.page || 1) === pageNum)
       .forEach((a) => {
         (a.rects || []).forEach((r) => {
+          // Legacy full-line rects: re-bias under glyphs (Edge/WPS marker)
+          let ry = r.y;
+          let rh = r.h;
+          if (rh > 0.72) {
+            ry = r.y + rh * 0.18;
+            rh = rh * 0.58;
+          }
           const box = document.createElement("div");
           box.className = "pdf-hl";
           box.dataset.id = a.id;
           box.style.left = `${r.x * viewport.width}px`;
-          box.style.top = `${r.y * viewport.height}px`;
+          box.style.top = `${ry * viewport.height}px`;
           box.style.width = `${r.w * viewport.width}px`;
-          box.style.height = `${r.h * viewport.height}px`;
+          box.style.height = `${rh * viewport.height}px`;
           box.style.background = a.color || HL_COLOR;
           box.style.pointerEvents = pickable ? "auto" : "none";
           box.title = a.text ? a.text.slice(0, 80) : "高亮";
@@ -421,18 +455,7 @@
       const pageNum = Number(wrap.dataset.page || 1);
       const rectLayer = wrap.querySelector(".pdf-annot-layer");
       const wrapBox = wrap.getBoundingClientRect();
-      const rects = [];
-      const clientRects = range.getClientRects();
-      for (let i = 0; i < clientRects.length; i++) {
-        const cr = clientRects[i];
-        if (cr.width < 2 || cr.height < 2) continue;
-        rects.push({
-          x: (cr.left - wrapBox.left) / wrapBox.width,
-          y: (cr.top - wrapBox.top) / wrapBox.height,
-          w: cr.width / wrapBox.width,
-          h: cr.height / wrapBox.height,
-        });
-      }
+      const rects = hlRectsFromClientRects(range.getClientRects(), wrapBox);
       if (!rects.length) return;
       const ann = {
         type: "highlight",

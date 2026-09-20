@@ -2520,6 +2520,8 @@ body[data-theme="wallpaper"] #preview *::selection {
   background: #fff;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
   flex-shrink: 0;
+  /* Let highlight multiply against canvas, not an isolated layer */
+  isolation: auto;
 }
 
 .pdf-page.pending {
@@ -2538,12 +2540,52 @@ body[data-theme="wallpaper"] #preview *::selection {
 
 .pdf-page canvas {
   display: block;
+  position: relative;
+  z-index: 0;
 }
 
 /*
- * Text layer: keep transparent glyphs but DO NOT dim the layer (opacity on the
- * parent made the system blue selection look detached from the page).
+ * Highlight layer sits BETWEEN canvas and text layer.
+ * Edge/WPS style: yellow under glyphs, not a lid on top of type.
  */
+.pdf-annot-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.pdf-hl {
+  position: absolute;
+  /* Marker yellow — multiply keeps black glyph pixels black where supported */
+  background: #ffe566;
+  mix-blend-mode: multiply;
+  -webkit-mix-blend-mode: multiply;
+  opacity: 0.92;
+  border-radius: 1px;
+  pointer-events: none;
+}
+
+/* Fallback look when blend is weak: translucent warm marker, still under text layer */
+@supports not (mix-blend-mode: multiply) {
+  .pdf-hl {
+    background: rgba(255, 220, 50, 0.38);
+    mix-blend-mode: normal;
+  }
+}
+
+/* When highlight mode is OFF, existing marks can be picked / right-clicked */
+#pdf-scroll:not(.highlight-mode) .pdf-hl {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.pdf-hl.selected {
+  outline: 2px solid #3b82f6;
+  outline-offset: 1px;
+}
+
+/* Text layer on TOP — transparent glyphs for selection; canvas type shows through highlight */
 .pdf-text-layer {
   position: absolute;
   inset: 0;
@@ -2562,7 +2604,7 @@ body[data-theme="wallpaper"] #preview *::selection {
   cursor: text;
 }
 
-/* Soft amber selection — matches highlight color, no harsh system blue */
+/* Soft amber selection — matches highlight, no harsh system blue */
 .pdf-text-layer ::selection,
 .pdf-text-layer span::selection,
 .pdf-page ::selection {
@@ -2576,34 +2618,6 @@ body[data-theme="dark"] .pdf-text-layer span::selection,
 body[data-theme="gray"] .pdf-text-layer ::selection,
 body[data-theme="gray"] .pdf-text-layer span::selection {
   background: rgba(255, 214, 64, 0.35);
-}
-
-.pdf-annot-layer {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 3;
-}
-
-.pdf-hl {
-  position: absolute;
-  mix-blend-mode: multiply;
-  border-radius: 2px;
-  pointer-events: none;
-  opacity: 0.85;
-  background: #fff59d;
-}
-
-/* When highlight mode is OFF, existing marks can be picked / right-clicked */
-#pdf-scroll:not(.highlight-mode) .pdf-hl {
-  pointer-events: auto;
-  cursor: pointer;
-}
-
-.pdf-hl.selected {
-  outline: 2px solid #3b82f6;
-  outline-offset: 1px;
-  opacity: 0.95;
 }
 
 .pdf-page-label {
