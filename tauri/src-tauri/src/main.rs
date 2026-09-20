@@ -64,6 +64,7 @@ fn main() {
             win_api::stuart_add_annotation,
             win_api::stuart_delete_annotation,
             win_api::stuart_clear_annotations,
+            win_api::stuart_export_pdf_annotations,
             // AI / memory / tool surface (medium-term)
             ai_api::stuart_get_capabilities,
             ai_api::stuart_ai_home,

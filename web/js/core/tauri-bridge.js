@@ -55,6 +55,8 @@
     delete_annotation: (path, id) =>
       invoke("stuart_delete_annotation", { pdfPath: path, annId: id }),
     clear_annotations: (path) => invoke("stuart_clear_annotations", { pdfPath: path }),
+    export_pdf_annotations: (path, items) =>
+      invoke("stuart_export_pdf_annotations", { pdfPath: path, items }),
     // AI / memory / tool surface (medium-term)
     get_capabilities: () => invoke("stuart_get_capabilities"),
     ai_home: () => invoke("stuart_ai_home"),

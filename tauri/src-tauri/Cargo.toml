@@ -1,6 +1,6 @@
 [package]
 name = "stuartmd"
-version = "2.8.2"
+version = "2.9.0"
 description = "StuartMD desktop shell (Tauri)"
 authors = ["StuartMD"]
 edition = "2021"
@@ -17,6 +17,7 @@ serde_json = "1"
 base64 = "0.22"
 dirs = "5"
 sha1 = "0.10"
+lopdf = { version = "0.34", features = ["chrono"] }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"

@@ -2557,34 +2557,37 @@ body[data-theme="wallpaper"] #preview *::selection {
 
 .pdf-hl {
   position: absolute;
-  /* Soft marker yellow — translucent so canvas glyphs stay readable */
-  background: rgba(255, 232, 96, 0.38);
+  /* Full line-box band; translucent so glyphs stay readable */
+  background: rgba(255, 232, 96, 0.34);
   mix-blend-mode: normal;
-  -webkit-mix-blend-mode: normal;
   opacity: 1;
   border-radius: 1px;
   pointer-events: none;
-  box-shadow: inset 0 -0.5px 0 rgba(255, 200, 40, 0.25);
 }
 
-/* When blend is available, lightly multiply so white→yellow, black stays dark */
-@supports (mix-blend-mode: multiply) {
-  .pdf-hl {
-    background: #fff3a0;
-    mix-blend-mode: multiply;
-    -webkit-mix-blend-mode: multiply;
-    opacity: 0.55;
-  }
+.pdf-hl[data-color="green"] { background: rgba(120, 200, 130, 0.34); }
+.pdf-hl[data-color="blue"] { background: rgba(100, 170, 230, 0.32); }
+.pdf-hl[data-color="pink"] { background: rgba(240, 150, 180, 0.32); }
+.pdf-hl[data-color="orange"] { background: rgba(250, 180, 90, 0.34); }
+.pdf-hl[data-color="purple"] { background: rgba(180, 150, 230, 0.32); }
+.pdf-hl[data-color="gray"] { background: rgba(160, 160, 160, 0.28); }
+
+.pdf-hl.has-comment::after {
+  content: "💬";
+  position: absolute;
+  right: 0;
+  top: -12px;
+  font-size: 10px;
+  line-height: 1;
 }
 
-/* When highlight mode is OFF, existing marks can be picked / right-clicked */
 #pdf-scroll:not(.highlight-mode) .pdf-hl {
   pointer-events: auto;
   cursor: pointer;
 }
 
 .pdf-hl.selected {
-  outline: 2px solid #3b82f6;
+  outline: 2px solid #2563eb;
   outline-offset: 1px;
 }
 
@@ -2607,20 +2610,158 @@ body[data-theme="wallpaper"] #preview *::selection {
   cursor: text;
 }
 
-/* Soft amber selection — matches highlight, no harsh system blue */
+/* Selection is blue — must NOT look like highlighter yellow */
 .pdf-text-layer ::selection,
 .pdf-text-layer span::selection,
 .pdf-page ::selection {
-  background: rgba(255, 214, 64, 0.42);
+  background: rgba(96, 165, 250, 0.4);
   color: transparent;
   text-shadow: none;
 }
 
 body[data-theme="dark"] .pdf-text-layer ::selection,
-body[data-theme="dark"] .pdf-text-layer span::selection,
-body[data-theme="gray"] .pdf-text-layer ::selection,
 body[data-theme="gray"] .pdf-text-layer span::selection {
-  background: rgba(255, 214, 64, 0.35);
+  background: rgba(96, 165, 250, 0.48);
+}
+
+.pdf-color-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.pdf-color-dot {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: #ffe566;
+}
+
+.pdf-color-palette {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 50;
+  display: grid;
+  grid-template-columns: repeat(3, 22px);
+  gap: 6px;
+  padding: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.pdf-color-palette[hidden] { display: none !important; }
+
+.pdf-color-palette button {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+  padding: 0;
+}
+
+.pdf-color-palette button.active {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.pdf-annot-menu {
+  position: fixed;
+  z-index: 200;
+  min-width: 150px;
+  padding: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+  font-family: var(--font-ui);
+}
+
+.pdf-annot-menu[hidden] { display: none !important; }
+
+.pdf-annot-menu button {
+  display: block;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.pdf-annot-menu button:hover { background: var(--bg-hover); }
+
+.pdf-annot-menu button[data-annot-act="erase"]:hover { color: #dc2626; }
+
+.pdf-annot-colors {
+  display: flex;
+  gap: 6px;
+  padding: 6px 10px;
+  flex-wrap: wrap;
+}
+
+.pdf-annot-colors button {
+  width: 18px !important;
+  height: 18px !important;
+  padding: 0 !important;
+  border-radius: 50% !important;
+  border: 1px solid rgba(0, 0, 0, 0.12) !important;
+}
+
+.pdf-comment-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: rgba(0, 0, 0, 0.28);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pdf-comment-modal[hidden] { display: none !important; }
+
+.pdf-comment-card {
+  width: min(420px, 92vw);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.2);
+}
+
+.pdf-comment-title {
+  font-weight: 600;
+  margin-bottom: 10px;
+  font-family: var(--font-ui);
+}
+
+.pdf-comment-card textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 90px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+}
+
+.pdf-comment-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
 }
 
 .pdf-page-label {

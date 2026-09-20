@@ -287,17 +287,38 @@
               </button>
             </div>
             <div class="pdf-tb-right">
-              <button class="icon-btn sm" id="pdf-highlight" title="标黄（默认关闭）：开启后选中文字即可标黄" aria-label="标黄">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h4l10-10a2.8 2.8 0 0 0-4-4L4 16v4z"/><path d="M12 6l6 6"/></svg>
+              <div class="pdf-color-wrap">
+                <button class="icon-btn sm" id="pdf-highlight" title="标注（默认关闭）：选中文字后标注；点击切换开关" aria-label="标注">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h4l10-10a2.8 2.8 0 0 0-4-4L4 16v4z"/><path d="M12 6l6 6"/></svg>
+                </button>
+                <button class="icon-btn sm" id="pdf-hl-color" title="标注颜色" aria-label="标注颜色">
+                  <span class="pdf-color-dot" id="pdf-color-dot"></span>
+                </button>
+                <div id="pdf-color-palette" class="pdf-color-palette" hidden></div>
+              </div>
+              <button class="icon-btn sm" id="pdf-export-annots" title="将标注写入 PDF（WPS/Edge 兼容）" aria-label="写入PDF">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
               </button>
-              <button class="icon-btn sm" id="pdf-clear" title="清除全部高亮" aria-label="清除高亮">
+              <button class="icon-btn sm" id="pdf-clear" title="清除全部标注（需确认）" aria-label="清除标注">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M9 7V5h6v2M7 7l1 12h8l1-12"/></svg>
               </button>
             </div>
           </div>
           <div id="pdf-scroll" class="pane"></div>
           <div id="pdf-annot-menu" class="pdf-annot-menu" hidden>
-            <button type="button" id="pdf-annot-erase">擦除此高亮</button>
+            <button type="button" data-annot-act="comment">添加 / 编辑评论</button>
+            <div class="pdf-annot-colors" id="pdf-annot-colors"></div>
+            <button type="button" data-annot-act="erase">擦除此标注</button>
+          </div>
+          <div id="pdf-comment-modal" class="pdf-comment-modal" hidden>
+            <div class="pdf-comment-card">
+              <div class="pdf-comment-title">批注评论</div>
+              <textarea id="pdf-comment-input" rows="4" placeholder="输入评论内容（将写入 PDF 批注，便于与 WPS / Edge 互通）"></textarea>
+              <div class="pdf-comment-actions">
+                <button type="button" class="btn sm" id="pdf-comment-cancel">取消</button>
+                <button type="button" class="btn sm primary" id="pdf-comment-ok">确定</button>
+              </div>
+            </div>
           </div>
         </div>
       </section>

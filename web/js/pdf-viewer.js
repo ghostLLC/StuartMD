@@ -1,4 +1,4 @@
-/* StuartMD PDF viewer — pdf.js + lightweight highlight annotations */
+/* StuartMD PDF viewer — pdf.js + multi-color annotations + native PDF export */
 (function () {
   "use strict";
 
@@ -13,7 +13,20 @@
     }
   }
 
-  const HL_COLOR = "rgba(255, 232, 96, 0.38)";
+  /** Light highlighter colors — distinct from selection blue */
+  const PALETTE = [
+    { id: "yellow", label: "黄", css: "rgba(255,232,96,0.34)", hex: "#ffe566", pdf: [1.0, 0.91, 0.23] },
+    { id: "green", label: "绿", css: "rgba(120,200,130,0.34)", hex: "#78c882", pdf: [0.47, 0.78, 0.51] },
+    { id: "blue", label: "蓝", css: "rgba(100,170,230,0.32)", hex: "#64aae6", pdf: [0.39, 0.67, 0.9] },
+    { id: "pink", label: "粉", css: "rgba(240,150,180,0.32)", hex: "#f096b4", pdf: [0.94, 0.59, 0.71] },
+    { id: "orange", label: "橙", css: "rgba(250,180,90,0.34)", hex: "#fab45a", pdf: [0.98, 0.71, 0.35] },
+    { id: "purple", label: "紫", css: "rgba(180,150,230,0.32)", hex: "#b496e6", pdf: [0.71, 0.59, 0.9] },
+  ];
+
+  function colorMeta(id) {
+    return PALETTE.find((c) => c.id === id) || PALETTE[0];
+  }
+
   const state = {
     path: null,
     name: "",
@@ -22,13 +35,16 @@
     total: 1,
     scale: 1.2,
     rotation: 0,
-    // highlight OFF by default — erase via click/right-click on marks
     mode: "none", // highlight | none
     annotations: [],
     landscape: false,
     spread: false,
     selectedHlId: null,
+    hlColor: "yellow",
   };
+
+  /** Annotation undo/redo (PDF area only) */
+  const annotHist = { stack: [], i: -1, max: 80 };
 
   const el = () => ({
     area: document.getElementById("pdf-area"),
@@ -40,6 +56,10 @@
     btnHighlight: document.getElementById("pdf-highlight"),
     btnSpread: document.getElementById("pdf-spread"),
     annotMenu: document.getElementById("pdf-annot-menu"),
+    palette: document.getElementById("pdf-color-palette"),
+    colorDot: document.getElementById("pdf-color-dot"),
+    commentModal: document.getElementById("pdf-comment-modal"),
+    commentInput: document.getElementById("pdf-comment-input"),
   });
 
   function toast(msg) {
@@ -58,6 +78,55 @@
     return window.pywebview.api[name](...args);
   }
 
+  function cloneAnnots(list) {
+    return JSON.parse(JSON.stringify(list || []));
+  }
+
+  function resetAnnotHistory() {
+    annotHist.stack = [cloneAnnots(state.annotations)];
+    annotHist.i = 0;
+  }
+
+  function pushAnnotHistory() {
+    annotHist.stack = annotHist.stack.slice(0, annotHist.i + 1);
+    annotHist.stack.push(cloneAnnots(state.annotations));
+    if (annotHist.stack.length > annotHist.max) annotHist.stack.shift();
+    annotHist.i = annotHist.stack.length - 1;
+  }
+
+  async function applyAnnotSnapshot(list) {
+    state.annotations = cloneAnnots(list);
+    if (state.path) {
+      try {
+        await api("save_annotations", state.path, state.annotations);
+      } catch (_) {}
+    }
+    await refreshAnnots();
+  }
+
+  async function undoAnnot() {
+    if (!pdfActive()) return false;
+    if (annotHist.i <= 0) return false;
+    annotHist.i--;
+    await applyAnnotSnapshot(annotHist.stack[annotHist.i]);
+    toast("已撤销标注");
+    return true;
+  }
+
+  async function redoAnnot() {
+    if (!pdfActive()) return false;
+    if (annotHist.i >= annotHist.stack.length - 1) return false;
+    annotHist.i++;
+    await applyAnnotSnapshot(annotHist.stack[annotHist.i]);
+    toast("已重做标注");
+    return true;
+  }
+
+  function pdfActive() {
+    const e = el();
+    return !!(e.area && !e.area.hidden && state.doc);
+  }
+
   function hideAnnotMenu() {
     const m = el().annotMenu;
     if (m) m.hidden = true;
@@ -69,9 +138,26 @@
     const m = el().annotMenu;
     if (!m) return;
     state.selectedHlId = annId;
+    // fill recolor chips
+    const box = document.getElementById("pdf-annot-colors");
+    if (box) {
+      box.innerHTML = "";
+      PALETTE.forEach((c) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.title = c.label;
+        b.style.background = c.hex;
+        b.addEventListener("click", async (ev) => {
+          ev.stopPropagation();
+          await recolorAnnotation(annId, c.id);
+          hideAnnotMenu();
+        });
+        box.appendChild(b);
+      });
+    }
     m.hidden = false;
-    const w = m.offsetWidth || 130;
-    const h = m.offsetHeight || 40;
+    const w = m.offsetWidth || 150;
+    const h = m.offsetHeight || 80;
     m.style.left = Math.min(window.innerWidth - w - 8, Math.max(8, x)) + "px";
     m.style.top = Math.min(window.innerHeight - h - 8, Math.max(8, y)) + "px";
   }
@@ -82,14 +168,39 @@
     if (e.btnHighlight) {
       e.btnHighlight.classList.toggle("active", on);
       e.btnHighlight.title = on
-        ? "标黄中：选中文字即可标黄（点击关闭）"
-        : "标黄（默认关闭）：开启后选中文字即可标黄";
+        ? "标注中：选中文字即可标注（点击关闭）"
+        : "标注（默认关闭）：开启后选中文字标注；右上可选颜色";
     }
     if (e.scroll) e.scroll.classList.toggle("highlight-mode", on);
     if (e.btnSpread) {
       e.btnSpread.classList.toggle("active", !!state.spread);
       e.btnSpread.title = state.spread ? "单页显示" : "双页显示";
     }
+    if (e.colorDot) {
+      const c = colorMeta(state.hlColor);
+      e.colorDot.style.background = c.hex;
+    }
+  }
+
+  function renderPalette() {
+    const e = el();
+    if (!e.palette) return;
+    e.palette.innerHTML = "";
+    PALETTE.forEach((c) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.title = c.label;
+      b.style.background = c.hex;
+      b.className = c.id === state.hlColor ? "active" : "";
+      b.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        state.hlColor = c.id;
+        e.palette.hidden = true;
+        setModeUI();
+        toast(`标注颜色：${c.label}`);
+      });
+      e.palette.appendChild(b);
+    });
   }
 
   async function disposeDoc() {
@@ -105,6 +216,92 @@
       }
     } catch (_) {}
     state.doc = null;
+  }
+
+  /** Pull native PDF Highlight/Text annotations (Edge/WPS) into our model. */
+  async function loadNativePdfAnnotations() {
+    if (!state.doc || !state.path) return;
+    try {
+      const merged = [];
+      const maxPages = Math.min(state.total, 80);
+      for (let n = 1; n <= maxPages; n++) {
+        const page = await state.doc.getPage(n);
+        const vp = page.getViewport({ scale: 1, rotation: (page.rotate || 0) + state.rotation });
+        const H = vp.height;
+        const W = vp.width;
+        let raw = [];
+        try {
+          raw = await page.getAnnotations({ intent: "display" });
+        } catch (_) {
+          raw = [];
+        }
+        for (const a of raw || []) {
+          const sub = a.subtype || a.Subtype || "";
+          if (sub !== "Highlight" && sub !== "Text" && sub !== "Underline" && sub !== "StrikeOut") continue;
+          const comment = a.contentsObj?.str || a.contents || a.titleObj?.str || "";
+          const col = pdfColorToId(a.color);
+          if (sub === "Highlight" || sub === "Underline" || sub === "StrikeOut") {
+            const rects = quadToRects(a.quadPoints || a.quadpoints, W, H);
+            if (!rects.length) continue;
+            merged.push({
+              id: "pdf-native-" + n + "-" + (a.id || merged.length),
+              type: "highlight",
+              native: true,
+              page: n,
+              color: col,
+              text: String(comment || "").slice(0, 200),
+              comment: comment ? String(comment) : "",
+              rects,
+            });
+          }
+        }
+      }
+      // Keep sidecar items + native (native first so they show even without sidecar)
+      const sidecar = state.annotations.filter((a) => !a.native);
+      const nativeOnly = merged.filter((m) => !sidecar.some((s) => s.id === m.id));
+      state.annotations = [...nativeOnly, ...sidecar];
+    } catch (err) {
+      console.warn("native annot load", err);
+    }
+  }
+
+  function pdfColorToId(color) {
+    if (!color || !color.length) return "yellow";
+    const [r, g, b] = color;
+    // nearest palette
+    let best = PALETTE[0];
+    let bestD = Infinity;
+    PALETTE.forEach((c) => {
+      const [pr, pg, pb] = c.pdf;
+      const d = (r - pr) ** 2 + (g - pg) ** 2 + (b - pb) ** 2;
+      if (d < bestD) {
+        bestD = d;
+        best = c;
+      }
+    });
+    return best.id;
+  }
+
+  function quadToRects(quads, W, H) {
+    if (!quads || !quads.length) return [];
+    const rects = [];
+    // QuadPoints: 8 numbers per quad, PDF space y-up
+    for (let i = 0; i + 7 < quads.length; i += 8) {
+      const xs = [quads[i], quads[i + 2], quads[i + 4], quads[i + 6]];
+      const ys = [quads[i + 1], quads[i + 3], quads[i + 5], quads[i + 7]];
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+      if (W <= 0 || H <= 0) continue;
+      rects.push({
+        x: minX / W,
+        y: 1 - maxY / H,
+        w: (maxX - minX) / W,
+        h: (maxY - minY) / H,
+      });
+    }
+    return rects;
   }
 
   async function openPdf(payload) {
@@ -124,7 +321,6 @@
     state.page = 1;
     state.rotation = 0;
     state.scale = 1.2;
-    // Default: highlight tool off
     state.mode = "none";
     e.scroll.innerHTML = "";
     setModeUI();
@@ -142,7 +338,8 @@
       const p1 = await state.doc.getPage(1);
       const vp1 = p1.getViewport({ scale: 1, rotation: p1.rotate + state.rotation });
       state.landscape = vp1.width >= vp1.height;
-      // Smart initial fit: portrait → height, landscape → width
+      await loadNativePdfAnnotations();
+      resetAnnotHistory();
       if (state.landscape) await fitToWidth(false);
       else await fitScaleToHeight(false);
       await renderAll();
@@ -218,7 +415,6 @@
         wrap.dataset.painted = "";
         wrap.classList.add("pending");
         wrap.innerHTML = `<div class="pdf-page-placeholder">第 ${num} 页渲染失败</div>`;
-        console.error("PDF page render failed", num, err);
       }
     };
 
@@ -277,7 +473,6 @@
     canvas.style.height = `${viewport.height}px`;
     wrap.appendChild(canvas);
 
-    // Highlight UNDER text layer (Edge/WPS): canvas → annot → transparent text
     const annotLayer = document.createElement("div");
     annotLayer.className = "pdf-annot-layer";
     annotLayer.style.width = `${viewport.width}px`;
@@ -295,9 +490,7 @@
     label.textContent = String(num);
     wrap.appendChild(label);
 
-    if (!existingWrap) {
-      e.scroll.appendChild(wrap);
-    }
+    if (!existingWrap) e.scroll.appendChild(wrap);
 
     await page.render({ canvasContext: ctx, viewport, transform: [dpr, 0, 0, dpr, 0, 0] }).promise;
 
@@ -309,27 +502,26 @@
       const tx = window.pdfjsLib.Util.transform(viewport.transform, item.transform);
       const angle = Math.atan2(tx[1], tx[0]);
       const fontHeight = Math.hypot(tx[2], tx[3]);
-      // Prefer PDF text-space height → device px (aligns better with canvas glyphs)
       const fs =
         typeof item.height === "number" && item.height > 0
           ? item.height * vscale
           : fontHeight * 0.82;
-      // Baseline sits at tx[5]; glyph top ≈ baseline − ascent (not full em-box)
       const top = tx[5] - fs * 0.95;
-      const style = [
-        `left:${tx[4]}px`,
-        `top:${top}px`,
-        `font-size:${fs}px`,
-        `transform:rotate(${angle}rad)`,
-        `transform-origin:0 0`,
-      ].join(";");
       const span = document.createElement("span");
       span.textContent = item.str;
-      span.setAttribute("style", style);
+      span.setAttribute(
+        "style",
+        [
+          `left:${tx[4]}px`,
+          `top:${top}px`,
+          `font-size:${fs}px`,
+          `transform:rotate(${angle}rad)`,
+          `transform-origin:0 0`,
+        ].join(";")
+      );
       frag.appendChild(span);
     });
     layer.appendChild(frag);
-
     drawAnnotationsForPage(annotLayer, num, viewport);
   }
 
@@ -357,7 +549,6 @@
     if (reRender) await renderAll();
   }
 
-  /** Toolbar "适应" — height fit (single control). */
   async function fitView() {
     await fitScaleToHeight(true);
   }
@@ -374,27 +565,17 @@
     toast(`已旋转 ${state.rotation}°`);
   }
 
-  /**
-   * Convert DOM selection client rects → highlight rects that sit under glyphs
-   * (lower band of the line box), like Edge/WPS marker under text.
-   */
+  /** Full line-box rects (match top/bottom of selection). */
   function hlRectsFromClientRects(clientRects, wrapBox) {
     const rects = [];
     for (let i = 0; i < clientRects.length; i++) {
       const cr = clientRects[i];
       if (cr.width < 2 || cr.height < 2) continue;
-      const x = (cr.left - wrapBox.left) / wrapBox.width;
-      const y = (cr.top - wrapBox.top) / wrapBox.height;
-      const w = cr.width / wrapBox.width;
-      const h = cr.height / wrapBox.height;
-      // Bias further down: band sits on the lower half of the (already tighter) text box
-      const topPad = h * 0.3;
-      const hlH = h * 0.48;
       rects.push({
-        x,
-        y: y + topPad,
-        w,
-        h: Math.max(hlH, 0.03),
+        x: (cr.left - wrapBox.left) / wrapBox.width,
+        y: (cr.top - wrapBox.top) / wrapBox.height,
+        w: cr.width / wrapBox.width,
+        h: cr.height / wrapBox.height,
       });
     }
     return rects;
@@ -407,23 +588,17 @@
       .filter((a) => (a.page || 1) === pageNum)
       .forEach((a) => {
         (a.rects || []).forEach((r) => {
-          // Legacy / full-line rects: push under glyphs (avoid high yellow bars)
-          let ry = r.y;
-          let rh = r.h;
-          if (rh > 0.45) {
-            ry = r.y + rh * 0.3;
-            rh = rh * 0.48;
-          }
           const box = document.createElement("div");
-          box.className = "pdf-hl";
+          box.className = "pdf-hl" + (a.comment ? " has-comment" : "");
           box.dataset.id = a.id;
+          box.dataset.color = a.color || "yellow";
           box.style.left = `${r.x * viewport.width}px`;
-          box.style.top = `${ry * viewport.height}px`;
+          box.style.top = `${r.y * viewport.height}px`;
           box.style.width = `${r.w * viewport.width}px`;
-          box.style.height = `${Math.max(rh * viewport.height, 3)}px`;
-          box.style.background = a.color || HL_COLOR;
+          box.style.height = `${Math.max(r.h * viewport.height, 2)}px`;
+          box.style.background = colorMeta(a.color || state.hlColor).css;
           box.style.pointerEvents = pickable ? "auto" : "none";
-          box.title = a.text ? a.text.slice(0, 80) : "高亮";
+          box.title = a.comment || a.text || "标注";
           if (pickable) {
             box.addEventListener("click", (ev) => {
               ev.preventDefault();
@@ -443,6 +618,31 @@
           layer.appendChild(box);
         });
       });
+  }
+
+  function findAnnot(id) {
+    return state.annotations.find((a) => a.id === id);
+  }
+
+  async function persistAnnots() {
+    if (!state.path) return;
+    try {
+      const sidecar = state.annotations.filter((a) => !a.native);
+      await api("save_annotations", state.path, sidecar);
+    } catch (_) {}
+    pushAnnotHistory();
+  }
+
+  async function recolorAnnotation(id, colorId) {
+    const a = findAnnot(id);
+    if (!a) return;
+    a.color = colorId;
+    if (a.native) {
+      // native items are display-only unless exported — still recolor locally
+    }
+    await persistAnnots();
+    await refreshAnnots();
+    toast("已改标注颜色");
   }
 
   function bindHighlightLayer() {
@@ -465,9 +665,10 @@
       const wrapBox = wrap.getBoundingClientRect();
       const rects = hlRectsFromClientRects(range.getClientRects(), wrapBox);
       if (!rects.length) return;
+      const colorId = state.hlColor || "yellow";
       const ann = {
         type: "highlight",
-        color: HL_COLOR,
+        color: colorId,
         page: pageNum,
         text,
         rects,
@@ -479,19 +680,21 @@
           return;
         }
         state.annotations = await api("load_annotations", state.path);
+        // re-merge natives
+        await loadNativePdfAnnotations();
+        pushAnnotHistory();
         sel.removeAllRanges();
         const page = await state.doc.getPage(pageNum);
         const rotation = ((page.rotate || 0) + state.rotation) % 360;
         const viewport = page.getViewport({ scale: state.scale, rotation });
         drawAnnotationsForPage(rectLayer, pageNum, viewport);
-        toast("已标黄");
+        toast("已标注");
       } catch (_) {
-        toast("标黄失败");
+        toast("标注失败");
       }
     };
 
     e.scroll.oncontextmenu = (ev) => {
-      // Allow default menu outside annot; annot handler stops propagation
       if (ev.target.closest(".pdf-hl")) return;
       hideAnnotMenu();
     };
@@ -499,15 +702,26 @@
 
   async function eraseAnnotation(id) {
     try {
+      const a = findAnnot(id);
+      if (a && a.native) {
+        state.annotations = state.annotations.filter((x) => x.id !== id);
+        pushAnnotHistory();
+        await refreshAnnots();
+        hideAnnotMenu();
+        toast("已隐藏原生标注（导出前不会写回 PDF）");
+        return;
+      }
       const res = await api("delete_annotation", state.path, id);
       if (res?.error) {
         toast(res.error);
         return;
       }
       state.annotations = await api("load_annotations", state.path);
+      await loadNativePdfAnnotations();
+      pushAnnotHistory();
       await refreshAnnots();
       hideAnnotMenu();
-      toast("已擦除高亮");
+      toast("已擦除标注");
     } catch (_) {
       toast("擦除失败");
     }
@@ -529,19 +743,77 @@
 
   async function clearAll() {
     if (!state.path) return;
-    const ok = confirm("确定清除该 PDF 的全部高亮？\n此操作不可撤销。");
-    if (!ok) return;
-    const ok2 = confirm("再次确认：清除全部高亮？");
-    if (!ok2) return;
+    if (!confirm("确定清除该 PDF 的全部标注？\n此操作不可撤销（除非立刻 Ctrl+Z）。")) return;
+    if (!confirm("再次确认：清除全部标注？")) return;
     try {
       await api("clear_annotations", state.path);
-      state.annotations = [];
+      state.annotations = state.annotations.filter((a) => a.native);
+      pushAnnotHistory();
       await refreshAnnots();
       hideAnnotMenu();
-      toast("已清除全部高亮");
+      toast("已清除侧车标注");
     } catch (_) {
       toast("清除失败");
     }
+  }
+
+  /** Export sidecar annotations into the PDF as native Highlight + Text (WPS/Edge). */
+  async function exportAnnotsToPdf() {
+    if (!state.path) {
+      toast("请先打开 PDF");
+      return;
+    }
+    const items = state.annotations.filter((a) => !a.native);
+    if (!items.length) {
+      toast("没有可写入的标注");
+      return;
+    }
+    try {
+      const res = await api("export_pdf_annotations", state.path, items);
+      if (res?.error) {
+        toast(res.error);
+        return;
+      }
+      toast("已写入 PDF 原生批注（可用 WPS / Edge 打开查看）");
+      if (res.path && res.path !== state.path) {
+        toast("另存为：" + res.path);
+      }
+    } catch (err) {
+      toast("写入 PDF 失败：" + (err && err.message ? err.message : err));
+    }
+  }
+
+  // ---- Comment modal ----
+  let _commentTargetId = null;
+
+  function openCommentModal(id) {
+    const e = el();
+    _commentTargetId = id;
+    const a = findAnnot(id);
+    if (e.commentInput) e.commentInput.value = (a && (a.comment || a.text)) || "";
+    if (e.commentModal) e.commentModal.hidden = false;
+    e.commentInput?.focus();
+  }
+
+  function closeCommentModal() {
+    const e = el();
+    if (e.commentModal) e.commentModal.hidden = true;
+    _commentTargetId = null;
+  }
+
+  async function saveComment() {
+    const e = el();
+    const id = _commentTargetId;
+    const text = (e.commentInput && e.commentInput.value ? e.commentInput.value : "").trim();
+    closeCommentModal();
+    if (!id) return;
+    const a = findAnnot(id);
+    if (!a) return;
+    a.comment = text;
+    a.text = text || a.text;
+    await persistAnnots();
+    await refreshAnnots();
+    toast(text ? "评论已保存" : "评论已清空");
   }
 
   let zoomTimer = 0;
@@ -552,9 +824,7 @@
       await renderAll();
       return;
     }
-    zoomTimer = setTimeout(() => {
-      renderAll();
-    }, 140);
+    zoomTimer = setTimeout(() => renderAll(), 140);
   }
 
   function bindChrome() {
@@ -568,8 +838,9 @@
       if (state.page > 1) {
         state.page = Math.max(1, state.page - step);
         e.pageInput.value = String(state.page);
-        const p = e.scroll.querySelector(`.pdf-page[data-page="${state.page}"]`);
-        p?.scrollIntoView({ behavior: "smooth", block: "start" });
+        e.scroll
+          .querySelector(`.pdf-page[data-page="${state.page}"]`)
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
       }
     });
     on("pdf-next", async () => {
@@ -577,16 +848,18 @@
       if (state.page < state.total) {
         state.page = Math.min(state.total, state.page + step);
         e.pageInput.value = String(state.page);
-        const p = e.scroll.querySelector(`.pdf-page[data-page="${state.page}"]`);
-        p?.scrollIntoView({ behavior: "smooth", block: "start" });
+        e.scroll
+          .querySelector(`.pdf-page[data-page="${state.page}"]`)
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
       }
     });
     e.pageInput?.addEventListener("change", () => {
       const n = Number(e.pageInput.value || 1);
       state.page = Math.max(1, Math.min(state.total, n));
       e.pageInput.value = String(state.page);
-      const p = e.scroll.querySelector(`.pdf-page[data-page="${state.page}"]`);
-      p?.scrollIntoView({ behavior: "smooth", block: "start" });
+      e.scroll
+        .querySelector(`.pdf-page[data-page="${state.page}"]`)
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
     on("pdf-zoom-in", () => setZoom(state.scale + 0.15, true));
     on("pdf-zoom-out", () => setZoom(state.scale - 0.15, true));
@@ -595,7 +868,6 @@
     on("pdf-spread", async () => {
       state.spread = !state.spread;
       setModeUI();
-      // Re-fit so two pages fit the pane when spreading
       if (state.spread) await fitToWidth(true);
       else await fitScaleToHeight(true);
       toast(state.spread ? "双页显示" : "单页显示");
@@ -604,13 +876,18 @@
       state.mode = state.mode === "highlight" ? "none" : "highlight";
       setModeUI();
       hideAnnotMenu();
-      // Refresh pickability of existing marks
       refreshAnnots();
-      toast(state.mode === "highlight" ? "标黄已开启：选中文字即可标黄" : "标黄已关闭：可点选高亮后右键擦除");
+      toast(state.mode === "highlight" ? "标注已开启" : "标注已关闭：可点选后右键操作");
     });
+    on("pdf-hl-color", (ev) => {
+      ev.stopPropagation();
+      if (!e.palette) return;
+      e.palette.hidden = !e.palette.hidden;
+      if (!e.palette.hidden) renderPalette();
+    });
+    on("pdf-export-annots", () => exportAnnotsToPdf());
     on("pdf-clear", () => clearAll());
 
-    // Ctrl + wheel → zoom
     e.scroll?.addEventListener(
       "wheel",
       (ev) => {
@@ -623,20 +900,64 @@
       { passive: false }
     );
 
-    // Annot context menu
-    const menu = document.getElementById("pdf-annot-menu");
-    document.getElementById("pdf-annot-erase")?.addEventListener("click", async () => {
+    // Annot context menu actions
+    e.annotMenu?.addEventListener("click", async (ev) => {
+      const btn = ev.target.closest("[data-annot-act]");
+      if (!btn) return;
+      const act = btn.dataset.annotAct;
       const id = state.selectedHlId;
       if (!id) return;
-      await eraseAnnotation(id);
+      if (act === "erase") {
+        await eraseAnnotation(id);
+      } else if (act === "comment") {
+        openCommentModal(id);
+        hideAnnotMenu();
+      }
     });
+
+    document.getElementById("pdf-comment-ok")?.addEventListener("click", () => saveComment());
+    document.getElementById("pdf-comment-cancel")?.addEventListener("click", () => closeCommentModal());
+    e.commentModal?.addEventListener("click", (ev) => {
+      if (ev.target === e.commentModal) closeCommentModal();
+    });
+
     document.addEventListener("mousedown", (ev) => {
-      if (!menu || menu.hidden) return;
-      if (ev.target.closest("#pdf-annot-menu") || ev.target.closest(".pdf-hl")) return;
-      hideAnnotMenu();
+      if (e.palette && !e.palette.hidden && !ev.target.closest(".pdf-color-wrap")) {
+        e.palette.hidden = true;
+      }
+      const menu = e.annotMenu;
+      if (menu && !menu.hidden) {
+        if (ev.target.closest("#pdf-annot-menu") || ev.target.closest(".pdf-hl")) return;
+        hideAnnotMenu();
+      }
     });
     document.addEventListener("keydown", (ev) => {
-      if (ev.key === "Escape") hideAnnotMenu();
+      if (ev.key === "Escape") {
+        hideAnnotMenu();
+        closeCommentModal();
+        if (e.palette) e.palette.hidden = true;
+      }
+    });
+
+    // Annotation undo/redo when PDF is the active surface
+    window.addEventListener("keydown", (ev) => {
+      const mod = ev.ctrlKey || ev.metaKey;
+      if (!mod) return;
+      if (!pdfActive()) return;
+      const ae = document.activeElement;
+      const typing =
+        ae === document.getElementById("source") ||
+        ae === e.commentInput ||
+        (ae && (ae.isContentEditable || ae.closest?.(".md-block.editing")));
+      if (typing) return;
+      const k = ev.key.toLowerCase();
+      if (k === "z" && !ev.shiftKey) {
+        ev.preventDefault();
+        undoAnnot();
+      } else if ((k === "z" && ev.shiftKey) || k === "y") {
+        ev.preventDefault();
+        redoAnnot();
+      }
     });
 
     setModeUI();
@@ -646,6 +967,7 @@
     const e = el();
     e.area.hidden = true;
     hideAnnotMenu();
+    closeCommentModal();
     disposeDoc();
     state.path = null;
   }
@@ -656,6 +978,8 @@
     openPdf,
     hidePdf,
     renderAll,
+    undoAnnot,
+    redoAnnot,
     isActive: () => !el().area.hidden && !!state.doc,
   };
 })();
