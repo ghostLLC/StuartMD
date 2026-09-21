@@ -2567,16 +2567,10 @@ body[data-theme="wallpaper"] #preview *::selection {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: -1px;
-  height: 2.5px;
+  /* top/height set in JS for stable depth + thickness */
   border-radius: 1px;
   pointer-events: none;
-}
-
-.pdf-ann-line-strike {
-  bottom: auto;
-  top: 54%;
-  height: 2.5px;
+  box-sizing: border-box;
 }
 
 .pdf-hl.selected {
@@ -2922,6 +2916,45 @@ body[data-theme="gray"] .pdf-text-layer span::selection {
   gap: 8px;
   margin-top: 10px;
   padding: 0 10px;
+}
+
+/* App-level confirm — works in Tauri WebView where confirm() can no-op */
+.stuart-confirm {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.stuart-confirm[hidden] {
+  display: none !important;
+}
+
+.stuart-confirm-card {
+  width: min(400px, 92vw);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.22);
+  font-family: var(--font-ui);
+}
+
+.stuart-confirm-msg {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
+.stuart-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
 }
 
 .pdf-page-label {

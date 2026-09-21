@@ -463,6 +463,16 @@
   <script src="js/core/agent-api.js"></script>
   <script src="js/i18n.js"></script>
   <script src="js/app.js"></script>
+  <!-- Reliable confirm dialog for Tauri WebView (native confirm() may no-op) -->
+  <div id="stuart-confirm" class="stuart-confirm" hidden>
+    <div class="stuart-confirm-card" role="dialog" aria-modal="true">
+      <div class="stuart-confirm-msg" id="stuart-confirm-msg"></div>
+      <div class="stuart-confirm-actions">
+        <button type="button" class="btn sm" id="stuart-confirm-cancel">取消</button>
+        <button type="button" class="btn sm primary" id="stuart-confirm-ok">确定</button>
+      </div>
+    </div>
+  </div>
   <!-- Heavy libs: defer so first paint / boot path is not blocked -->
   <script src="libs/highlight.min.js" defer></script>
   <script src="libs/mermaid.min.js" defer></script>

@@ -288,7 +288,15 @@
       }
       const sidecar = state.annotations.filter((a) => !a.native);
       const nativeOnly = merged.filter((m) => !sidecar.some((s) => s.id === m.id));
-      state.annotations = [...nativeOnly, ...sidecar];
+      // Dedupe native ids (re-open / re-import can double-draw lines)
+      const seen = new Set();
+      const natives = [];
+      nativeOnly.forEach((m) => {
+        if (seen.has(m.id)) return;
+        seen.add(m.id);
+        natives.push(m);
+      });
+      state.annotations = [...natives, ...sidecar];
     } catch (err) {
       console.warn("native annot load", err);
     }
@@ -663,14 +671,18 @@
   const ANN = {
     highlightAlpha: 0.32,
     linePx: 2.5,
+    // Underline sits at a stable fraction of each line box (not raw bottom)
+    // so "depth" does not drift when client-rect heights vary
+    underlineTopRatio: 0.86,
     strikeTopPct: 54,
-    lineBottomPx: -1,
   };
 
   function drawAnnotationsForPage(layer, pageNum, viewport) {
+    layer.innerHTML = [];
     layer.innerHTML = "";
-    // Device-independent line thickness at CURRENT scale
-    const linePx = ANN.linePx;
+    // Quantize to device pixels → stable physical thickness
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    const linePx = Math.round(ANN.linePx * dpr) / dpr;
     state.annotations
       .filter((a) => (a.page || 1) === pageNum)
       .forEach((a) => {
@@ -683,7 +695,6 @@
           const top = r.y * viewport.height;
           const wPx = Math.max(r.w * viewport.width, 2);
           let hPx = Math.max(r.h * viewport.height, 2);
-          // Snap highlight height so line boxes don't look randomly fat/thin
           if (type === "highlight") {
             hPx = Math.max(8, Math.round(hPx));
           }
@@ -700,22 +711,23 @@
           hit.title = a.comment || a.text || "标注";
 
           if (type === "highlight") {
-            // Uniform alpha for all highlight colors
-            const [cr, cg, cb] = cm.rgb255 || hexToRgb(cm.hex);
+            const [cr, cg, cb] = hexToRgb(cm.hex);
             hit.style.background = `rgba(${cr},${cg},${cb},${ANN.highlightAlpha})`;
           } else if (type === "strike") {
             const bar = document.createElement("div");
             bar.className = "pdf-ann-line";
-            bar.style.top = `${ANN.strikeTopPct}%`;
-            bar.style.bottom = "auto";
+            // Center on glyph band, not on arbitrary client box
+            bar.style.top = `${hPx * 0.54}px`;
             bar.style.height = `${linePx}px`;
             bar.style.background = cm.line || "#e53935";
             hit.appendChild(bar);
           } else {
+            // underline / comment — same depth ratio + same thickness on every line
             const bar = document.createElement("div");
             bar.className = "pdf-ann-line";
+            const lineTop = hPx * ANN.underlineTopRatio;
+            bar.style.top = `${lineTop}px`;
             bar.style.height = `${linePx}px`;
-            bar.style.bottom = `${ANN.lineBottomPx}px`;
             bar.style.background =
               type === "comment" ? "#1e88e5" : cm.line || "#7cb518";
             hit.appendChild(bar);
@@ -960,11 +972,60 @@
     }
   }
 
+  /**
+   * Reliable confirm in Tauri WebView.
+   * Native confirm() often no-ops / never shows — use in-app modal.
+   */
+  function uiConfirm(message) {
+    return new Promise((resolve) => {
+      const modal = document.getElementById("stuart-confirm");
+      const msg = document.getElementById("stuart-confirm-msg");
+      const okBtn = document.getElementById("stuart-confirm-ok");
+      const cancelBtn = document.getElementById("stuart-confirm-cancel");
+      if (!modal || !okBtn || !cancelBtn) {
+        // Extreme fallback
+        resolve(window.confirm(message));
+        return;
+      }
+      if (msg) msg.textContent = String(message || "");
+      modal.hidden = false;
+      const cleanup = () => {
+        okBtn.onclick = null;
+        cancelBtn.onclick = null;
+        document.removeEventListener("keydown", onKey, true);
+      };
+      const finish = (val) => {
+        modal.hidden = true;
+        cleanup();
+        resolve(val);
+      };
+      const onKey = (ev) => {
+        if (ev.key === "Escape") {
+          ev.preventDefault();
+          finish(false);
+        } else if (ev.key === "Enter") {
+          ev.preventDefault();
+          finish(true);
+        }
+      };
+      okBtn.onclick = () => finish(true);
+      cancelBtn.onclick = () => finish(false);
+      document.addEventListener("keydown", onKey, true);
+      try {
+        okBtn.focus();
+      } catch (_) {}
+    });
+  }
+
   async function clearAll() {
     if (!state.path) return;
-    const ok1 = confirm("确定清除全部标注？\n（高光 / 下划线 / 删除线 / 评论）");
+    const ok1 = await uiConfirm(
+      "确定清除全部标注？\n（高光 / 下划线 / 删除线 / 评论）"
+    );
     if (!ok1) return;
-    const ok2 = confirm("请再次确认：清除全部标注？\n清除后可用 Ctrl+Z 撤销。");
+    const ok2 = await uiConfirm(
+      "请再次确认：清除全部标注？\n清除后可用 Ctrl+Z 撤销。"
+    );
     if (!ok2) return;
     try {
       await api("clear_annotations", state.path);
