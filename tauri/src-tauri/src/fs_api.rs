@@ -6,10 +6,10 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 const APP_ID: &str = "StuartMD";
-pub const VERSION: &str = "2.9.10";
+pub const VERSION: &str = "3.0.8";
 pub const PROG_ID: &str = "StuartMD.Markdown";
 pub const PROG_ID_PDF: &str = "StuartMD.PDF";
-pub const SETTINGS_SCHEMA: i64 = 3;
+pub const SETTINGS_SCHEMA: i64 = 4;
 const PDF_MAX: u64 = 40 * 1024 * 1024;
 pub const MD_EXTS: [&str; 5] = [".md", ".markdown", ".mdown", ".mkd", ".txt"];
 
@@ -96,6 +96,7 @@ pub fn default_settings() -> Value {
         "session": {"tabs": [], "active_path": ""},
         "last_open_files": [],
         "window_state": null,
+        "ai": crate::ai_chat::builtin_ai_defaults(),
     })
 }
 
@@ -141,6 +142,13 @@ pub fn migrate_settings(raw: Option<Value>) -> Value {
             if has_recent || has_folder {
                 obj.insert("sample_dismissed".into(), json!(true));
             }
+        }
+    }
+
+    if from_v < 4 {
+        if let Some(obj) = s.as_object_mut() {
+            obj.entry("ai".to_string())
+                .or_insert_with(crate::ai_chat::builtin_ai_defaults);
         }
     }
 

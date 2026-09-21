@@ -120,6 +120,38 @@
             <input type="file" id="music-file-input" accept="audio/*" hidden />
           </div>
         </div>
+        <div class="menu-wrap">
+          <button class="icon-btn" id="btn-ai-model" title="AI 模型与密钥" aria-haspopup="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9l4.2-1.8L12 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+              <path d="M18.5 14.5l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9.9-2.1z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+            </svg>
+          </button>
+          <div class="file-menu align-right ai-model-menu" id="ai-model-menu" hidden>
+            <div class="ai-mm-title">AI 模型</div>
+            <div class="ai-mm-row">
+              <label>服务商</label>
+              <select id="ai-mm-provider"></select>
+            </div>
+            <div class="ai-mm-row">
+              <label>模型 ID</label>
+              <input type="text" id="ai-mm-model" placeholder="模型 ID（可手动输入）" autocomplete="off" spellcheck="false" />
+            </div>
+            <div class="ai-mm-row">
+              <label>思考深度</label>
+              <div class="ai-mm-think" id="ai-mm-think">
+                <button type="button" data-think="fast">快速</button>
+                <button type="button" data-think="balanced">均衡</button>
+                <button type="button" data-think="deep">深入</button>
+              </div>
+            </div>
+            <div class="ai-mm-hint" id="ai-mm-status">讲解快捷键 Alt+E</div>
+            <div class="ai-mm-actions">
+              <button type="button" class="btn sm" id="ai-mm-settings">模型设置…</button>
+              <button type="button" class="btn sm primary" id="ai-mm-save">应用</button>
+            </div>
+          </div>
+        </div>
         <button class="icon-btn" id="btn-settings" title="设置">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="1.7"/>
@@ -250,8 +282,70 @@
           <button type="button" class="sel-caret" data-sel-menu="color" title="文字颜色">
             <span class="color-a">A</span><span class="caret">▾</span>
           </button>
+          <span class="sel-sep"></span>
+          <button type="button" data-sel="ai-explain" class="sel-ai" title="结合上下文 AI 讲解">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M12 3l1.6 3.7L17 8.3l-3.4 1.6L12 13.5l-1.6-3.6L7 8.3l3.4-1.6L12 3z"/>
+              <path d="M5 16h9M5 20h7" stroke-linecap="round"/>
+            </svg>
+            讲解
+          </button>
         </div>
         <div id="sel-dropdown" class="sel-dropdown" hidden></div>
+        <!-- AI explain floating panel (3.0.0) -->
+        <div id="ai-panel" class="ai-panel" hidden>
+          <div class="ai-panel-head" id="ai-panel-drag">
+            <div class="ai-panel-brand">
+              <span class="ai-panel-logo" aria-hidden="true">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 3l1.6 3.7L17 8.3l-3.4 1.6L12 13.5l-1.6-3.6L7 8.3l3.4-1.6L12 3z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+                  <path d="M5 16h9M5 20h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                </svg>
+              </span>
+              <span class="ai-panel-title">AI 讲解</span>
+              <span class="ai-panel-badge" id="ai-panel-badge">就绪</span>
+            </div>
+            <button type="button" class="ai-panel-x" id="ai-panel-close" title="关闭">×</button>
+          </div>
+          <div class="ai-panel-quote" id="ai-panel-quote" hidden></div>
+          <div class="ai-panel-meta" id="ai-panel-meta"></div>
+          <div class="ai-panel-body" id="ai-panel-body">
+            <div class="ai-panel-empty" id="ai-panel-empty">选中内容后，点击「讲解」或按快捷键。</div>
+            <div class="ai-chat" id="ai-chat"></div>
+            <div class="ai-panel-out" id="ai-panel-out"></div>
+            <div class="ai-thinking" id="ai-thinking" hidden>
+              <span class="ai-thinking-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span class="ai-thinking-text">正在思考…</span>
+            </div>
+          </div>
+          <div class="ai-panel-actions" id="ai-panel-actions">
+            <button type="button" class="btn sm" id="ai-panel-cancel">取消</button>
+            <button type="button" class="btn sm" id="ai-panel-copy">复制</button>
+            <button type="button" class="btn sm" id="ai-panel-remember">记入记忆</button>
+            <button type="button" class="btn sm" id="ai-panel-follow">追问</button>
+            <button type="button" class="btn sm primary" id="ai-panel-reask">再讲一次</button>
+          </div>
+          <div class="ai-panel-feedback" id="ai-panel-feedback" hidden>
+            <span class="ai-fb-label">这次回答长度</span>
+            <button type="button" class="ai-fb-btn" data-fb="short" title="太短：下次稍展开">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h10M4 12h7M4 17h12" stroke-linecap="round"/><path d="M17 14l3 3 3-3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              太短
+            </button>
+            <button type="button" class="ai-fb-btn" data-fb="ok" title="满意：保持当前长度">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 13l4 4L19 7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              满意
+            </button>
+            <button type="button" class="ai-fb-btn" data-fb="long" title="太长：下次更简短">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h12M4 17h8" stroke-linecap="round"/></svg>
+              太长
+            </button>
+          </div>
+          <div class="ai-panel-follow-row" id="ai-panel-follow-row" hidden>
+            <input type="text" id="ai-panel-follow-input" placeholder="继续追问…" />
+            <button type="button" class="btn sm primary" id="ai-panel-follow-send">发送</button>
+          </div>
+          <div class="ai-panel-resize" title="拖动调整大小" aria-hidden="true"></div>
+        </div>
 
         <div id="block-menu" class="block-menu" hidden></div>
         <!-- Preview context insert menu (Typora-like) -->
@@ -358,14 +452,22 @@
 
   <!-- Settings modal -->
   <div id="settings-modal" class="modal" hidden>
-    <div class="modal-card">
-      <div class="modal-head">
+    <div class="modal-card" id="settings-card">
+      <div class="modal-head" id="settings-drag">
         <h2>设置</h2>
-        <button class="icon-btn sm" id="btn-settings-close" title="关闭">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
-        </button>
+        <div class="modal-head-tools">
+          <div class="settings-zoom" title="界面缩放">
+            <button type="button" class="icon-btn sm" id="settings-zoom-out" title="缩小">−</button>
+            <span id="settings-zoom-label">100%</span>
+            <button type="button" class="icon-btn sm" id="settings-zoom-in" title="放大">＋</button>
+            <button type="button" class="btn sm" id="settings-zoom-reset" title="重置缩放与尺寸">重置</button>
+          </div>
+          <button class="icon-btn sm" id="btn-settings-close" title="关闭">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          </button>
+        </div>
       </div>
-      <div class="modal-body">
+      <div class="modal-body" id="settings-body">
         <section class="set-section">
           <h3>默认打开方式</h3>
           <p class="hint" id="assoc-status">正在检查关联状态…</p>
@@ -441,6 +543,88 @@
             <button class="btn new-doc-mode-pick" data-new-doc-mode="new_window">新建文档：新窗口</button>
           </div>
         </section>
+        <section class="set-section" id="set-ai-section">
+          <h3>AI 模型</h3>
+          <p class="hint small">选中文字后讲解；密钥仅保存在本机（DPAPI），不会写入文档或备份明文。</p>
+          <div class="row">
+            <label class="ai-set-label">启用 AI</label>
+            <button type="button" class="btn" id="ai-enabled">启用：开</button>
+          </div>
+          <div class="row">
+            <label class="ai-set-label">服务商</label>
+            <select id="ai-provider-select"></select>
+          </div>
+          <div class="row">
+            <label class="ai-set-label">模型 ID</label>
+            <input type="text" id="ai-model-input" placeholder="可手动输入，如 deepseek-chat" style="min-width:220px" autocomplete="off" spellcheck="false" />
+          </div>
+          <div class="row">
+            <label class="ai-set-label">API Base</label>
+            <input type="text" id="ai-base-input" placeholder="https://…" style="min-width:260px" />
+          </div>
+          <div class="row">
+            <label class="ai-set-label">API Key</label>
+            <input type="password" id="ai-key-input" placeholder="仅保存到本机" style="min-width:220px" autocomplete="off" />
+            <button type="button" class="btn" id="ai-key-save">保存密钥</button>
+            <button type="button" class="btn" id="ai-key-clear">清除</button>
+          </div>
+          <div class="row">
+            <label class="ai-set-label">思考深度</label>
+            <div class="ai-mm-think" id="ai-thinking-pick">
+              <button type="button" data-think="fast">快速</button>
+              <button type="button" data-think="balanced">均衡</button>
+              <button type="button" data-think="deep">深入</button>
+            </div>
+          </div>
+          <div class="row">
+            <label class="ai-set-label">讲解快捷键</label>
+            <input type="text" id="ai-shortcut-input" placeholder="Alt+E" style="min-width:140px" />
+            <button type="button" class="btn" id="ai-shortcut-record">录入</button>
+            <button type="button" class="btn" id="ai-shortcut-reset">默认 Alt+E</button>
+          </div>
+          <div class="row">
+            <label class="ai-set-label">上下文</label>
+            <button type="button" class="btn" id="ai-scope-btn">范围：邻近</button>
+          </div>
+          <div class="row">
+            <label class="ai-set-label">记忆</label>
+            <button type="button" class="btn" id="ai-memory-btn">默认学习</button>
+          </div>
+          <div class="ai-style-block">
+            <div class="ai-style-title">自定义风格</div>
+            <p class="hint small">控制 AI 首次回答的长度与语气；反馈后会在此自动写入轻量长度提示，可随时改。</p>
+            <div class="row">
+              <label class="ai-set-label">回答长度</label>
+              <div class="ai-mm-think" id="ai-length-pick">
+                <button type="button" data-length="brief">简短</button>
+                <button type="button" data-length="normal">适中</button>
+                <button type="button" data-length="detailed">详细</button>
+              </div>
+            </div>
+            <div class="row">
+              <label class="ai-set-label">对话语气</label>
+              <div class="ai-mm-think" id="ai-tone-pick">
+                <button type="button" data-tone="neutral">中性</button>
+                <button type="button" data-tone="friendly">亲切</button>
+                <button type="button" data-tone="professional">专业</button>
+                <button type="button" data-tone="academic">学术</button>
+              </div>
+            </div>
+            <div class="row" style="align-items:flex-start">
+              <label class="ai-set-label">风格说明</label>
+              <textarea id="ai-custom-style" rows="4" style="flex:1;min-width:240px" placeholder="例如：先一句话结论再展开；名词解释不超过五句；多用要点列表；避免空洞铺垫。"></textarea>
+            </div>
+            <div class="row" style="align-items:flex-start">
+              <label class="ai-set-label">长度提示</label>
+              <textarea id="ai-length-hint" rows="2" style="flex:1;min-width:240px" placeholder="由「太短 / 太长 / 满意」反馈自动维护，可手改；保持轻量。"></textarea>
+            </div>
+          </div>
+          <div class="row">
+            <button type="button" class="btn" id="ai-test-btn">测试连接</button>
+            <button type="button" class="btn primary" id="ai-apply-btn">应用 AI 设置</button>
+          </div>
+          <p class="hint small" id="ai-set-status">内置预设：DeepSeek / Qwen / Kimi / GLM</p>
+        </section>
         <section class="set-section">
           <h3>编辑</h3>
           <div class="row">
@@ -449,6 +633,7 @@
           <p class="hint small">开启后，已保存路径的文档会在停止输入约 1.5 秒后自动写入磁盘。</p>
         </section>
       </div>
+      <div class="settings-resize" id="settings-resize" title="拖动调整设置窗口大小"></div>
     </div>
   </div>
 
@@ -461,6 +646,9 @@
   <script src="js/core/settings-schema.js"></script>
   <script src="js/core/doc-stats.js"></script>
   <script src="js/core/agent-api.js"></script>
+  <script src="js/core/ai-context.js"></script>
+  <script src="js/core/ai-client.js"></script>
+  <script src="js/ui/ai-ui.js"></script>
   <script src="js/i18n.js"></script>
   <script src="js/app.js"></script>
   <!-- Reliable confirm dialog for Tauri WebView (native confirm() may no-op) -->

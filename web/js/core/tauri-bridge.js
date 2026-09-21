@@ -69,6 +69,23 @@
     search_md: (root, query, limit) =>
       invoke("stuart_search_md", { root, query, limit: limit == null ? null : limit }),
     workspace_files: (root) => invoke("stuart_workspace_files", { root }),
+    // AI 3.0.0
+    ai_get_config: () => invoke("stuart_ai_get_config"),
+    ai_save_config: (ai) => invoke("stuart_ai_save_config", { ai }),
+    ai_set_api_key: (providerId, apiKey) =>
+      invoke("stuart_ai_set_api_key", { providerId, apiKey }),
+    ai_clear_api_key: (providerId) => invoke("stuart_ai_clear_api_key", { providerId }),
+    ai_test_provider: (providerId) => invoke("stuart_ai_test_provider", { providerId }),
+    ai_chat_start: (requestId, providerId, model, messages, thinking, maxOutputTokens) =>
+      invoke("stuart_ai_chat_start", {
+        requestId,
+        providerId: providerId || null,
+        model: model || null,
+        messages,
+        thinking: thinking || null,
+        maxOutputTokens: maxOutputTokens == null ? null : maxOutputTokens,
+      }),
+    ai_chat_cancel: (requestId) => invoke("stuart_ai_chat_cancel", { requestId }),
 
     open_file_dialog: async () => {
       const dlg = dialogApi();

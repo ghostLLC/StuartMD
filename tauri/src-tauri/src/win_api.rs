@@ -497,16 +497,17 @@ pub fn stuart_clear_annotations(pdf_path: String) -> Value {
     stuart_save_annotations(pdf_path, json!([]))
 }
 
-/// Write sidecar annotations into the PDF as native /Highlight + /Text
-/// (readable by WPS, Edge, Acrobat). If the original is read-only, saves
-/// a sibling `<name>.annotated.pdf`.
+/// Write sidecar annotations into the PDF as native /Highlight + /Text.
+/// Edge/PDFium is strict: never decompress the whole file; encode non-ASCII
+/// Contents as UTF-16BE; validate the written file before replacing the original.
 #[tauri::command]
 pub fn stuart_export_pdf_annotations(pdf_path: String, items: Value) -> Value {
     use lopdf::dictionary;
     use lopdf::{Document, Object};
 
     fn real(v: f64) -> Object {
-        Object::Real(v as f32)
+        let x = if !v.is_finite() { 0.0 } else { v };
+        Object::Real(x as f32)
     }
     fn obj_num(o: &Object) -> Option<f64> {
         match o {
@@ -526,6 +527,47 @@ pub fn stuart_export_pdf_annotations(pdf_path: String, items: Value) -> Value {
             _ => [1.0, 0.91, 0.23],
         }
     }
+    /// PDF text string: ASCII → literal; otherwise UTF-16BE + BOM (Edge-safe).
+    fn pdf_text(s: &str) -> Object {
+        if s.is_ascii() {
+            Object::string_literal(s.as_bytes().to_vec())
+        } else {
+            let mut bytes = vec![0xFEu8, 0xFFu8];
+            for unit in s.encode_utf16() {
+                bytes.extend_from_slice(&unit.to_be_bytes());
+            }
+            Object::string_literal(bytes)
+        }
+    }
+    fn media_size(doc: &Document, page_id: (u32, u16)) -> (f64, f64) {
+        fn walk(doc: &Document, dict: &lopdf::Dictionary, depth: u8) -> Option<(f64, f64)> {
+            if depth > 8 {
+                return None;
+            }
+            if let Ok(Object::Array(mb)) = dict.get(b"MediaBox") {
+                let nums: Vec<f64> = mb.iter().filter_map(obj_num).collect();
+                if nums.len() >= 4 {
+                    let w = (nums[2] - nums[0]).abs();
+                    let h = (nums[3] - nums[1]).abs();
+                    if w > 1.0 && h > 1.0 && w.is_finite() && h.is_finite() {
+                        return Some((w, h));
+                    }
+                }
+            }
+            if let Ok(Object::Reference(pid)) = dict.get(b"Parent") {
+                if let Ok(Object::Dictionary(pd)) = doc.get_object(*pid) {
+                    return walk(doc, &pd, depth + 1);
+                }
+            }
+            None
+        }
+        if let Ok(Object::Dictionary(dict)) = doc.get_object(page_id) {
+            if let Some(sz) = walk(doc, &dict, 0) {
+                return sz;
+            }
+        }
+        (595.0, 842.0)
+    }
 
     let src = Path::new(&pdf_path);
     if !src.is_file() {
@@ -543,23 +585,16 @@ pub fn stuart_export_pdf_annotations(pdf_path: String, items: Value) -> Value {
         Ok(d) => d,
         Err(e) => return json!({"error": format!("打开 PDF 失败: {e}")}),
     };
-    let _ = doc.decompress();
+    // Encrypted PDFs cannot be safely rewritten here
+    if doc.trailer.get(b"Encrypt").is_ok() {
+        return json!({"error": "暂不支持加密 PDF 写入标注，请先解密"});
+    }
+    // Intentionally leave streams compressed — full-document decompression
+    // rewrites object streams and is rejected by Edge/PDFium.
 
     let pages = doc.get_pages();
     if pages.is_empty() {
         return json!({"error": "无法解析 PDF 页面"});
-    }
-
-    fn media_size(doc: &Document, page_id: (u32, u16)) -> (f64, f64) {
-        if let Ok(Object::Dictionary(dict)) = doc.get_object(page_id) {
-            if let Ok(Object::Array(mb)) = dict.get(b"MediaBox") {
-                let nums: Vec<f64> = mb.iter().filter_map(obj_num).collect();
-                if nums.len() >= 4 {
-                    return ((nums[2] - nums[0]).abs(), (nums[3] - nums[1]).abs());
-                }
-            }
-        }
-        (595.0, 842.0)
     }
 
     let mut created = 0usize;
@@ -568,7 +603,6 @@ pub fn stuart_export_pdf_annotations(pdf_path: String, items: Value) -> Value {
         let page_num = obj.get("page").and_then(|p| p.as_u64()).unwrap_or(1) as u32;
         let Some(&page_id) = pages.get(&page_num) else { continue };
         let (pw, ph) = media_size(&doc, page_id);
-        let kind = obj.get("type").and_then(|t| t.as_str()).unwrap_or("highlight");
         let comment = obj
             .get("comment")
             .and_then(|c| c.as_str())
@@ -603,6 +637,12 @@ pub fn stuart_export_pdf_annotations(pdf_path: String, items: Value) -> Value {
                 let y = r.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let w = r.get("w").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let h = r.get("h").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                if !x.is_finite() || !y.is_finite() || !w.is_finite() || !h.is_finite() {
+                    continue;
+                }
+                if w.abs() < 1e-4 && h.abs() < 1e-4 {
+                    continue;
+                }
                 let x0 = x * pw;
                 let x1 = (x + w) * pw;
                 let y_top = ph - y * ph;
@@ -613,6 +653,7 @@ pub fn stuart_export_pdf_annotations(pdf_path: String, items: Value) -> Value {
                 } else {
                     (y_top, y_bot)
                 };
+                // QuadPoints: ul, ur, ll, lr (Adobe common order)
                 let mut dict = dictionary! {
                     "Type" => "Annot",
                     "Subtype" => subtype_str,
@@ -625,10 +666,13 @@ pub fn stuart_export_pdf_annotations(pdf_path: String, items: Value) -> Value {
                     ]),
                     "C" => Object::Array(color_arr.clone()),
                     "CA" => Object::Real(ca),
+                    // Print flag; do not set Hidden/NoView
                     "F" => Object::Integer(4),
                 };
+                // Page back-ref (PDFium/Edge prefer this)
+                dict.set("P", Object::Reference(page_id));
                 if !comment.is_empty() {
-                    dict.set("Contents", Object::string_literal(comment.as_bytes()));
+                    dict.set("Contents", pdf_text(comment));
                 }
                 let id = doc.add_object(Object::Dictionary(dict));
                 new_refs.push(Object::Reference(id));
@@ -652,8 +696,10 @@ pub fn stuart_export_pdf_annotations(pdf_path: String, items: Value) -> Value {
                 .and_then(|r| r.as_object())
                 .and_then(|o| o.get("y").and_then(|v| v.as_f64()))
                 .unwrap_or(0.08);
-            let px = nx * pw + 2.0;
-            let py = ph - ny * ph - 18.0;
+            let nx = if nx.is_finite() { nx } else { 0.08 };
+            let ny = if ny.is_finite() { ny } else { 0.08 };
+            let px = (nx * pw + 2.0).clamp(0.0, (pw - 18.0).max(0.0));
+            let py = (ph - ny * ph - 18.0).clamp(0.0, (ph - 18.0).max(0.0));
             let dict = dictionary! {
                 "Type" => "Annot",
                 "Subtype" => "Text",
@@ -663,22 +709,23 @@ pub fn stuart_export_pdf_annotations(pdf_path: String, items: Value) -> Value {
                     real(px + 16.0),
                     real(py + 16.0),
                 ]),
-                "Contents" => Object::string_literal(comment.as_bytes()),
+                "Contents" => pdf_text(comment),
                 "Name" => "Comment",
                 "C" => Object::Array(color_arr.clone()),
                 "F" => Object::Integer(4),
+                "P" => Object::Reference(page_id),
+                "Open" => Object::Boolean(false),
             };
             let id = doc.add_object(Object::Dictionary(dict));
             new_refs.push(Object::Reference(id));
             created += 1;
-            let _ = kind; // comments always exported
         }
 
         if new_refs.is_empty() {
             continue;
         }
 
-        // Merge page /Annots
+        // Merge page /Annots (array or reference-to-array)
         let mut existing: Vec<Object> = Vec::new();
         if let Ok(Object::Dictionary(page_dict)) = doc.get_object(page_id) {
             if let Ok(annots) = page_dict.get(b"Annots") {
@@ -707,10 +754,25 @@ pub fn stuart_export_pdf_annotations(pdf_path: String, items: Value) -> Value {
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "out".into());
-    let tmp = src.with_extension("stuart-annot.tmp.pdf");
+    // Always write beside the original first — never clobber until validated
+    let tmp = src.with_file_name(format!("{stem}.stuart-annot.tmp.pdf"));
     if let Err(e) = doc.save(&tmp) {
         return json!({"error": format!("保存失败: {e}")});
     }
+    // Edge/PDFium-grade check: the written file must reload as a PDF
+    match Document::load(&tmp) {
+        Ok(check) => {
+            if check.get_pages().is_empty() {
+                let _ = fs::remove_file(&tmp);
+                return json!({"error": "写出的 PDF 无页面，已放弃覆盖原文件"});
+            }
+        }
+        Err(e) => {
+            let _ = fs::remove_file(&tmp);
+            return json!({"error": format!("写出的 PDF 校验失败（未覆盖原文件）: {e}")});
+        }
+    }
+
     // Prefer overwrite original; fall back to sibling annotated file
     let final_path = match fs::rename(&tmp, src) {
         Ok(()) => src.to_path_buf(),

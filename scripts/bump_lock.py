@@ -6,11 +6,13 @@ p = Path(
 )
 t = p.read_text(encoding="utf-8")
 t2, n = re.subn(
-    r'(name = "stuartmd"\nversion = ")2\.[0-9]+\.[0-9]+(")',
-    r"\g<1>2.9.10\g<2>",
+    r'(name = "stuartmd"\nversion = ")[^"]+(")',
+    r"\g<1>3.0.8\g<2>",
     t,
 )
 print("replacements", n)
 if n:
     p.write_text(t2, encoding="utf-8")
     print("updated")
+else:
+    print("pattern not found — check Cargo.lock")

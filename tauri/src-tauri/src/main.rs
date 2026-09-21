@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod ai_api;
+mod ai_chat;
 mod fs_api;
 mod win_api;
 
@@ -76,6 +77,14 @@ fn main() {
             ai_api::stuart_memory_delete,
             ai_api::stuart_search_md,
             ai_api::stuart_workspace_files,
+            // AI chat / explain (3.0.0)
+            ai_chat::stuart_ai_get_config,
+            ai_chat::stuart_ai_save_config,
+            ai_chat::stuart_ai_set_api_key,
+            ai_chat::stuart_ai_clear_api_key,
+            ai_chat::stuart_ai_test_provider,
+            ai_chat::stuart_ai_chat_start,
+            ai_chat::stuart_ai_chat_cancel,
         ])
         .setup(|app| {
             if let Some(w) = app.get_webview_window("main") {

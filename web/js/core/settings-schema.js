@@ -5,7 +5,74 @@
 (function (global) {
   "use strict";
 
-  const SCHEMA_VERSION = 3;
+  const SCHEMA_VERSION = 4;
+
+  function defaultAi() {
+    return {
+      enabled: true,
+      active_provider_id: "deepseek",
+      explain_shortcut: "Alt+E",
+      thinking: "balanced",
+      context_scope: "neighborhood",
+      context_max_chars: 8000,
+      max_output_tokens: 2048,
+      memory_mode: "always",
+      style: {
+        length: "normal",
+        tone: "neutral",
+        custom: "",
+        length_hint: "",
+        feedback: { short: 0, ok: 0, long: 0 },
+      },
+      providers: [
+        {
+          id: "deepseek",
+          label: "DeepSeek",
+          kind: "openai_compat",
+          base_url: "https://api.deepseek.com/v1",
+          model: "deepseek-chat",
+          enabled: true,
+          builtin: true,
+        },
+        {
+          id: "qwen",
+          label: "通义千问 Qwen",
+          kind: "openai_compat",
+          base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          model: "qwen-plus",
+          enabled: true,
+          builtin: true,
+        },
+        {
+          id: "kimi",
+          label: "Kimi (Moonshot)",
+          kind: "openai_compat",
+          base_url: "https://api.moonshot.cn/v1",
+          model: "moonshot-v1-8k",
+          enabled: true,
+          builtin: true,
+        },
+        {
+          id: "glm",
+          label: "智谱 GLM",
+          kind: "openai_compat",
+          base_url: "https://open.bigmodel.cn/api/paas/v4",
+          model: "glm-4-air",
+          enabled: true,
+          builtin: true,
+        },
+        {
+          id: "custom",
+          label: "自定义 OpenAI 兼容",
+          kind: "openai_compat",
+          base_url: "",
+          model: "",
+          enabled: false,
+          builtin: true,
+        },
+      ],
+    };
+  }
 
   const DEFAULTS = {
     schema_version: SCHEMA_VERSION,
@@ -28,6 +95,7 @@
     session: { tabs: [], active_path: "" },
     last_open_files: [],
     window_state: null,
+    ai: defaultAi(),
   };
 
   function migrate(raw) {
@@ -47,6 +115,13 @@
       const hasRecent = Array.isArray(s.recent) && s.recent.length > 0;
       const hasFolder = !!(s.last_folder && String(s.last_folder).length);
       s.sample_dismissed = hasRecent || hasFolder;
+    }
+    if (from < 4 || !s.ai || typeof s.ai !== "object") {
+      const base = defaultAi();
+      s.ai = Object.assign(base, s.ai && typeof s.ai === "object" ? s.ai : {});
+      if (!Array.isArray(s.ai.providers) || !s.ai.providers.length) {
+        s.ai.providers = base.providers;
+      }
     }
     if (!s.session || typeof s.session !== "object") {
       s.session = { tabs: [], active_path: "" };
@@ -68,12 +143,18 @@
     return m === "tab" || m === "new_window";
   }
 
+  function isValidMemoryMode(m) {
+    return m === "always" || m === "ask" || m === "off";
+  }
+
   global.StuartCore = global.StuartCore || {};
   global.StuartCore.settings = {
     SCHEMA_VERSION,
     DEFAULTS,
+    defaultAi,
     migrate,
     isValidOpenMode,
     isValidNewDocMode,
+    isValidMemoryMode,
   };
 })(typeof window !== "undefined" ? window : globalThis);

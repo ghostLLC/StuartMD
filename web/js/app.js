@@ -26,6 +26,19 @@
     isSampleDoc: false,
     sampleDismissed: false,
     workspaceRoot: "",
+    aiShortcut: "Alt+E",
+    aiConfig: null,
+    // Last non-empty text selection (survives accidental collapse / block-edit steal)
+    _selCache: null,
+  };
+
+  // AI panel local state (3.0.0)
+  const aiUI = {
+    lastQuote: "",
+    lastMeta: null,
+    lastMessages: [],
+    lastAnswer: "",
+    recordingShortcut: false,
   };
 
   // ---------- DOM ----------
@@ -378,6 +391,61 @@
     updateStats();
   }
 
+  function captureSelectionCache() {
+    try {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !sel.rangeCount) return state._selCache || null;
+      const text = String(sel.toString() || "");
+      if (!text.trim()) return state._selCache || null;
+      const inPreview = !!(
+        el.preview &&
+        (el.preview.contains(sel.anchorNode) ||
+          el.preview.contains(sel.focusNode) ||
+          (sel.anchorNode &&
+            sel.anchorNode.parentElement &&
+            el.preview.contains(sel.anchorNode.parentElement)))
+      );
+      const inSource = el.source === document.activeElement || (el.source && el.source.contains(sel.anchorNode));
+      let blockIndex = typeof state._activeBlockIndex === "number" ? state._activeBlockIndex : null;
+      try {
+        const b =
+          sel.anchorNode &&
+          (sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement)?.closest?.(".md-block");
+        if (b && b.dataset.index != null) blockIndex = Number(b.dataset.index);
+      } catch (_) {}
+      state._selCache = {
+        text,
+        inPreview: inPreview || inSource,
+        blockIndex,
+        at: Date.now(),
+      };
+      return state._selCache;
+    } catch (_) {
+      return state._selCache || null;
+    }
+  }
+
+  function getSelectionCache(maxAgeMs) {
+    const c = state._selCache;
+    if (!c || !c.text || !String(c.text).trim()) return null;
+    const max = maxAgeMs == null ? 120000 : maxAgeMs;
+    if (Date.now() - (c.at || 0) > max) return null;
+    return c;
+  }
+
+  function isSelToolbarVisible() {
+    const bar = document.getElementById("sel-toolbar");
+    return !!(bar && !bar.hidden);
+  }
+
+  function pointerNearSelToolbar(x, y, pad) {
+    const bar = document.getElementById("sel-toolbar");
+    if (!bar || bar.hidden) return false;
+    const r = bar.getBoundingClientRect();
+    const p = pad == null ? 28 : pad;
+    return x >= r.left - p && x <= r.right + p && y >= r.top - p && y <= r.bottom + p;
+  }
+
   function hideSelToolbar() {
     const bar = document.getElementById("sel-toolbar");
     if (bar) bar.hidden = true;
@@ -394,6 +462,7 @@
     if (!bar || !rect) return;
     hideBlockHandle();
     hideBlockMenu();
+    captureSelectionCache();
     bar.hidden = false;
     const w = bar.offsetWidth || 320;
     const h = bar.offsetHeight || 40;
@@ -638,6 +707,18 @@
     } else if (kind.startsWith("bg:")) {
       const c = kind.slice(3);
       wrapInlineMarkdown(`<mark style="background:${c}">`, "</mark>");
+    } else if (kind === "ai-explain") {
+      try {
+        if (window.StuartAIUI && typeof window.StuartAIUI.triggerExplain === "function") {
+          window.StuartAIUI.triggerExplain();
+        } else {
+          toast("AI 模块未加载，请重启应用");
+          console.error("StuartAIUI.triggerExplain missing");
+        }
+      } catch (err) {
+        console.error(err);
+        toast("讲解启动失败：" + (err && err.message ? err.message : err));
+      }
     }
   }
 
@@ -678,27 +759,70 @@
       });
     }
     document.addEventListener("mouseup", (e) => {
-      if (e.target.closest("#sel-toolbar") || e.target.closest("#sel-dropdown")) return;
-      const sel = window.getSelection();
-      if (!sel || sel.isCollapsed || !sel.toString().trim()) {
-        hideSelToolbar();
+      if (e.target.closest("#sel-toolbar") || e.target.closest("#sel-dropdown") || e.target.closest("#ai-panel")) {
         return;
       }
-      const inPreview = el.preview.contains(e.target) || el.preview.contains(sel.anchorNode);
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !sel.toString().trim()) {
+        // Keep toolbar + cache if user only drifted; hide bar when truly collapsed
+        if (!getSelectionCache(8000)) hideSelToolbar();
+        else if (!isSelToolbarVisible()) {
+          // leave hidden; cache still usable for AI
+        } else {
+          hideSelToolbar();
+        }
+        return;
+      }
+      const inPreview = el.preview.contains(e.target) || el.preview.contains(sel.anchorNode) || el.preview.contains(sel.focusNode);
       const inSource = el.source === document.activeElement;
       if (!inPreview && !inSource) {
+        captureSelectionCache();
+        // Do not clear cache; only hide chrome if far outside editor
         hideSelToolbar();
         return;
       }
       showSelToolbarNear(sel.getRangeAt(0).getBoundingClientRect());
     });
     document.addEventListener("mousedown", (e) => {
-      if (!e.target.closest("#sel-toolbar") && !e.target.closest("#sel-dropdown")) {
-        hideSelToolbar();
+      const inChrome =
+        e.target.closest("#sel-toolbar") ||
+        e.target.closest("#sel-dropdown") ||
+        e.target.closest("#ai-panel") ||
+        e.target.closest("#ai-model-menu") ||
+        e.target.closest("#settings-modal") ||
+        e.target.closest("#stuart-confirm") ||
+        e.target.closest("#block-handle") ||
+        e.target.closest("#block-menu");
+      if (inChrome) {
+        // keep selection + toolbar
+      } else {
+        const sel = window.getSelection();
+        const hasLiveSel = !!(sel && !sel.isCollapsed && String(sel.toString() || "").trim());
+        // Accidental click near the toolbar: keep selection instead of killing it
+        if (pointerNearSelToolbar(e.clientX, e.clientY, 36) && (hasLiveSel || getSelectionCache(15000))) {
+          e.preventDefault();
+        } else if (!hasLiveSel && getSelectionCache(15000) && isSelToolbarVisible()) {
+          // Click outside while bar still up but selection already gone — keep bar for explain
+          e.preventDefault();
+        } else if (!e.target.closest("#sel-toolbar") && !e.target.closest("#sel-dropdown")) {
+          hideSelToolbar();
+        }
       }
       if (!e.target.closest("#block-handle") && !e.target.closest("#block-menu")) {
         hideBlockMenu();
       }
+    });
+    // Keep cache fresh while user is selecting in the editor
+    document.addEventListener("selectionchange", () => {
+      try {
+        const sel = window.getSelection();
+        if (sel && !sel.isCollapsed && String(sel.toString() || "").trim()) {
+          const inEd =
+            (el.preview && (el.preview.contains(sel.anchorNode) || el.preview.contains(sel.focusNode))) ||
+            (el.source && (el.source === document.activeElement || el.source.contains(sel.anchorNode)));
+          if (inEd) captureSelectionCache();
+        }
+      } catch (_) {}
     });
   }
 
@@ -818,11 +942,6 @@
       h.classList.remove("visible");
       h.dataset.hover = "";
     }
-  }
-
-  function isSelToolbarVisible() {
-    const bar = document.getElementById("sel-toolbar");
-    return bar && !bar.hidden;
   }
 
   let _handleHideTimer = 0;
@@ -1157,6 +1276,25 @@
         return;
       }
       if (state.mode === "source") return;
+      // Never steal an active selection (or the AI selection bar) by entering block edit
+      try {
+        const selNow = window.getSelection();
+        const live =
+          selNow &&
+          !selNow.isCollapsed &&
+          String(selNow.toString() || "").trim().length > 0 &&
+          el.preview &&
+          (el.preview.contains(selNow.anchorNode) || el.preview.contains(selNow.focusNode));
+        if (live || isSelToolbarVisible()) {
+          clearTimeout(bindPreviewDelegates._clickTimer);
+          return;
+        }
+        // Drag-select just ended: click event fires on the block — do not edit for a moment
+        if (Date.now() - (state._selCache && state._selCache.at ? state._selCache.at : 0) < 600) {
+          clearTimeout(bindPreviewDelegates._clickTimer);
+          return;
+        }
+      } catch (_) {}
       const node = e.target.closest(".md-block");
       if (!node || node.classList.contains("editing")) return;
       if (e.detail > 1) return;
@@ -1164,13 +1302,28 @@
       bindPreviewDelegates._clickTimer = setTimeout(() => {
         if (!document.contains(node)) return;
         if (node.classList.contains("editing")) return;
-        // Code blocks: single-click → source edit
-        if (node.querySelector("pre")) {
-          enterBlockSourceEdit(node);
+        try {
+          const sel2 = window.getSelection();
+          if (
+            isSelToolbarVisible() ||
+            (sel2 &&
+              !sel2.isCollapsed &&
+              String(sel2.toString() || "").trim() &&
+              el.preview &&
+              el.preview.contains(sel2.anchorNode))
+          ) {
+            return;
+          }
+          if (Date.now() - (state._selCache && state._selCache.at ? state._selCache.at : 0) < 600) {
+            return;
+          }
+        } catch (_) {}
+        // Code / math / mermaid: single-click must NOT enter WYSIWYG edit.
+        // KaTeX DOM (MathML + HTML twins) gets destroyed by contenteditable + htmlToMarkdown.
+        // Double-click → source edit preserves $...$ / $$...$$.
+        if (node.querySelector("pre, .katex, .katex-display, .mermaid-diagram")) {
           return;
         }
-        // Mermaid / display math: no in-place edit on click (use double-click / menu)
-        if (node.querySelector(".mermaid-diagram, .katex-display")) return;
         enterBlockEdit(node);
       }, 200);
     });
@@ -1190,10 +1343,41 @@
     });
   }
 
+  /** Pull TeX source from a KaTeX-rendered node (never walk visual DOM). */
+  function extractKatexTex(node) {
+    if (!node) return "";
+    try {
+      const ann = node.querySelector?.("annotation[encoding='application/x-tex']");
+      if (ann && ann.textContent && ann.textContent.trim()) return ann.textContent.trim();
+    } catch (_) {}
+    let n = node;
+    for (let i = 0; i < 6 && n && n !== document.documentElement; i++) {
+      try {
+        const t = n.getAttribute?.("data-tex");
+        if (t && String(t).trim()) return String(t).trim();
+      } catch (_) {}
+      n = n.parentElement;
+    }
+    return "";
+  }
+
+  function katexMarkdownFromNode(node) {
+    const tex = extractKatexTex(node);
+    if (!tex) return "";
+    const display =
+      !!(node.classList && node.classList.contains("katex-display")) ||
+      !!node.closest?.(".katex-display");
+    return display ? `\n$$\n${tex}\n$$\n` : `$${tex}$`;
+  }
+
   function htmlToMarkdown(root) {
     const walk = (node) => {
       if (node.nodeType === Node.TEXT_NODE) return node.nodeValue || "";
       if (node.nodeType !== Node.ELEMENT_NODE) return "";
+      // KaTeX: emit original TeX once at the root — never recurse into MathML/HTML twins
+      if (node.classList && (node.classList.contains("katex") || node.classList.contains("katex-display"))) {
+        return katexMarkdownFromNode(node.classList.contains("katex-display") ? node : node);
+      }
       const tag = (node.tagName || "").toLowerCase();
       const kids = () => [...node.childNodes].map(walk).join("");
       switch (tag) {
@@ -1262,6 +1446,9 @@
         case "article":
           return kids();
         case "span":
+          if (node.classList?.contains("katex") || node.classList?.contains("katex-display")) {
+            return katexMarkdownFromNode(node);
+          }
           return kids();
         case "table": {
           const rows = [...node.querySelectorAll("tr")].map((tr) =>
@@ -1281,15 +1468,14 @@
         case "input":
           if (node.type === "checkbox") return node.checked ? "[x]" : "[ ]";
           return "";
-        case "katex":
-        case "math":
-          return node.getAttribute("data-tex") || node.textContent || "";
         default:
-          if (node.classList?.contains("katex") || node.closest?.(".katex")) {
-            const tex = node.closest("[data-tex]")?.getAttribute("data-tex");
-            if (tex) return tex;
-            const annotation = node.querySelector("annotation[encoding='application/x-tex']");
-            if (annotation) return annotation.textContent;
+          if (node.classList?.contains("katex") || node.classList?.contains("katex-display")) {
+            return katexMarkdownFromNode(node);
+          }
+          // Inside a KaTeX subtree without reaching root — do not dump visual text
+          if (node.closest?.(".katex")) {
+            const host = node.closest(".katex") || node.closest(".katex-display");
+            return host && host === node ? katexMarkdownFromNode(host) : "";
           }
           return kids();
       }
@@ -1467,6 +1653,11 @@
 
   function enterBlockEdit(node) {
     if (node.classList.contains("editing")) return;
+    // Math / diagram / code: WYSIWYG edit corrupts structure — use source editor
+    if (blockNeedsSourceEdit(node)) {
+      enterBlockSourceEdit(node);
+      return;
+    }
     // exit any other editing block first
     $$(".md-block.editing", el.preview).forEach((n) => {
       exitBlockEditVisual(n);
@@ -1495,8 +1686,12 @@
       if (done) return;
       done = true;
       clearDoc();
-      const mdText = htmlToMarkdown(node).trim();
+      let mdText = htmlToMarkdown(node).trim();
       const all = splitMarkdownBlocks(el.source.value || "");
+      const original = all[idx] || "";
+      const hadMath = /\$\$[\s\S]+\$|\$[^$\n]+\$/.test(original);
+      const hasMath = /\$\$[\s\S]+\$|\$[^$\n]+\$/.test(mdText);
+      if (hadMath && !hasMath) mdText = original;
       all[idx] = mdText || all[idx] || "";
       const joined = joinBlocks(all);
       el.source.value = joined;
@@ -3997,6 +4192,37 @@ ${previewHtml}
 
     // Keyboard shortcuts
     window.addEventListener("keydown", (e) => {
+      try {
+        if (window.StuartAIUI?.handleShortcutKeydown?.(e)) return;
+      } catch (_) {}
+      // Don't hijack typing in form fields (AI model/key/search inputs)
+      const typingEl = e.target;
+      const typingTag = typingEl && typingEl.tagName ? String(typingEl.tagName).toLowerCase() : "";
+      const isTypingField =
+        typingTag === "input" ||
+        typingTag === "textarea" ||
+        typingTag === "select" ||
+        (typingEl && typingEl.isContentEditable);
+      if (isTypingField && typingEl !== el.source && !typingEl.closest?.("#find-bar")) {
+        // Allow copy/paste/undo inside native inputs
+        const mk = e.ctrlKey || e.metaKey;
+        if (mk) {
+          const kk = e.key.toLowerCase();
+          if (kk === "c" || kk === "v" || kk === "x" || kk === "a" || kk === "z" || kk === "y") {
+            return;
+          }
+        }
+        if (e.key === "Escape") {
+          typingEl.blur && typingEl.blur();
+        }
+        if (!mk || (mk && !["z", "y", "s", "o", "n", "e", "f", "b"].includes(e.key.toLowerCase()))) {
+          // let the input handle normal keys; only block app single-letter binds
+          if (mk && ["s", "o", "n", "e", "f", "b"].includes(e.key.toLowerCase())) {
+            e.preventDefault();
+          }
+          return;
+        }
+      }
       const mod = e.ctrlKey || e.metaKey;
       if (!mod) {
         if (e.key === "Escape" && !el.findBar.hidden) closeFind();
@@ -4060,6 +4286,11 @@ ${previewHtml}
         e.preventDefault();
         openFind();
       } else if (k === "e") {
+        // Alt+E is AI explain (handled earlier); Ctrl+E remains export
+        if (e.altKey) {
+          // already returned via StuartAIUI
+          return;
+        }
         e.preventDefault();
         exportHtml();
       } else if (k === "1" && !e.shiftKey && !e.altKey) {
@@ -4546,12 +4777,157 @@ flowchart LR
 `;
 
   // ---------- Settings modal ----------
+  const SETTINGS_GEOM_KEY = "StuartMD-settings-ui";
+
+  function loadSettingsUi() {
+    try {
+      return JSON.parse(localStorage.getItem(SETTINGS_GEOM_KEY) || "null") || {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function saveSettingsUi(patch) {
+    const cur = loadSettingsUi();
+    const next = Object.assign({}, cur, patch || {});
+    try {
+      localStorage.setItem(SETTINGS_GEOM_KEY, JSON.stringify(next));
+    } catch (_) {}
+    return next;
+  }
+
+  function applySettingsZoom(z) {
+    const body = $("#settings-body");
+    const label = $("#settings-zoom-label");
+    const zoom = Math.min(1.6, Math.max(0.85, Number(z) || 1));
+    document.documentElement.style.setProperty("--settings-zoom", String(zoom));
+    if (body) body.style.zoom = String(zoom);
+    if (label) label.textContent = Math.round(zoom * 100) + "%";
+    saveSettingsUi({ zoom });
+  }
+
+  function applySettingsSize() {
+    const card = $("#settings-card");
+    if (!card) return;
+    const ui = loadSettingsUi();
+    if (ui.w > 0) card.style.width = Math.min(ui.w, window.innerWidth - 24) + "px";
+    if (ui.h > 0) card.style.height = Math.min(ui.h, window.innerHeight - 24) + "px";
+  }
+
+  function bindSettingsResize() {
+    const card = $("#settings-card");
+    const grip = $("#settings-resize");
+    const head = $("#settings-drag");
+    if (!card || card.dataset.resizeBound === "1") return;
+    card.dataset.resizeBound = "1";
+
+    let rz = null;
+    const onMove = (e) => {
+      if (!rz) return;
+      if (rz.mode === "size") {
+        const w = Math.min(window.innerWidth - 16, Math.max(480, rz.w + (e.clientX - rz.x)));
+        const h = Math.min(window.innerHeight - 16, Math.max(360, rz.h + (e.clientY - rz.y)));
+        card.style.width = w + "px";
+        card.style.height = h + "px";
+      }
+    };
+    const onUp = () => {
+      if (rz && rz.mode === "size") {
+        saveSettingsUi({ w: card.offsetWidth, h: card.offsetHeight });
+      }
+      rz = null;
+    };
+    grip?.addEventListener("mousedown", (e) => {
+      rz = { mode: "size", x: e.clientX, y: e.clientY, w: card.offsetWidth, h: card.offsetHeight };
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+
+    // Optional: drag header to move card within viewport
+    let mv = null;
+    head?.addEventListener("mousedown", (e) => {
+      if (e.target.closest("button, input, select, textarea, .settings-zoom")) return;
+      const r = card.getBoundingClientRect();
+      // modal is flex-centered; convert to explicit left/top once
+      if (!card.style.position || card.style.position === "relative") {
+        card.style.position = "fixed";
+        card.style.left = r.left + "px";
+        card.style.top = r.top + "px";
+        card.style.margin = "0";
+        card.style.zIndex = "101";
+        const modal = $("#settings-modal");
+        if (modal) {
+          modal.style.alignItems = "flex-start";
+          modal.style.justifyContent = "flex-start";
+          modal.style.padding = "0";
+        }
+      }
+      mv = { x: e.clientX - r.left, y: e.clientY - r.top };
+      e.preventDefault();
+    });
+    document.addEventListener("mousemove", (e) => {
+      if (!mv || !card) return;
+      const left = Math.min(Math.max(0, window.innerWidth - 80), Math.max(0, e.clientX - mv.x));
+      const top = Math.min(Math.max(0, window.innerHeight - 48), Math.max(0, e.clientY - mv.y));
+      card.style.left = left + "px";
+      card.style.top = top + "px";
+    });
+    document.addEventListener("mouseup", () => {
+      mv = null;
+    });
+
+    $("#settings-zoom-in")?.addEventListener("click", () => {
+      const cur = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--settings-zoom")) || 1;
+      applySettingsZoom(cur + 0.1);
+    });
+    $("#settings-zoom-out")?.addEventListener("click", () => {
+      const cur = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--settings-zoom")) || 1;
+      applySettingsZoom(cur - 0.1);
+    });
+    $("#settings-zoom-reset")?.addEventListener("click", () => {
+      card.style.width = "";
+      card.style.height = "";
+      card.style.position = "";
+      card.style.left = "";
+      card.style.top = "";
+      const modal = $("#settings-modal");
+      if (modal) {
+        modal.style.alignItems = "";
+        modal.style.justifyContent = "";
+        modal.style.padding = "";
+      }
+      applySettingsZoom(1);
+      saveSettingsUi({ w: 0, h: 0 });
+      toast("设置窗口已重置");
+    });
+
+    // Ctrl+wheel zoom on settings body
+    $("#settings-body")?.addEventListener(
+      "wheel",
+      (e) => {
+        if (!e.ctrlKey) return;
+        e.preventDefault();
+        const cur = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--settings-zoom")) || 1;
+        applySettingsZoom(cur + (e.deltaY < 0 ? 0.08 : -0.08));
+      },
+      { passive: false }
+    );
+  }
+
   function openSettingsModal() {
     $("#settings-modal").hidden = false;
+    bindSettingsResize();
+    applySettingsSize();
+    const ui = loadSettingsUi();
+    applySettingsZoom(ui.zoom || 1);
     refreshSettingsModal();
   }
 
   function closeSettingsModal() {
+    const card = $("#settings-card");
+    if (card) saveSettingsUi({ w: card.offsetWidth, h: card.offsetHeight });
     $("#settings-modal").hidden = true;
   }
 
@@ -4832,6 +5208,11 @@ flowchart LR
     } catch (err) {
       console.error(err);
     }
+    try {
+      window.StuartAIUI?.bindAll?.();
+    } catch (err) {
+      console.error(err);
+    }
     updateAutosaveStatus();
     renderTabs();
     updatePinUi();
@@ -4859,6 +5240,14 @@ flowchart LR
       } else {
         setContentWidth("default", false);
       }
+      if (s?.ai) {
+        state.aiConfig = s.ai;
+        state.aiShortcut = s.ai.explain_shortcut || "Alt+E";
+      }
+      try {
+        await window.StuartAI?.ensureConfig?.(true);
+        window.StuartAIUI?.refreshChrome?.();
+      } catch (_) {}
       if (s?.last_folder) {
         // Restore folder tree across versions if the path still exists
         try {
@@ -5069,20 +5458,46 @@ flowchart LR
     let text = "";
     let inPreview = false;
     try {
-      if (sel && !sel.isCollapsed && el.preview.contains(sel.anchorNode)) {
-        text = sel.toString();
-        inPreview = true;
+      if (sel && !sel.isCollapsed && sel.rangeCount) {
+        const raw = String(sel.toString() || "");
+        if (raw.trim()) {
+          const anchorOk =
+            !el.preview ||
+            el.preview.contains(sel.anchorNode) ||
+            el.preview.contains(sel.focusNode) ||
+            !!(sel.anchorNode && sel.anchorNode.parentElement && el.preview.contains(sel.anchorNode.parentElement));
+          const srcOk = ta && (ta === document.activeElement || ta.contains(sel.anchorNode));
+          if (anchorOk || srcOk || raw.trim().length > 0) {
+            text = raw;
+            inPreview = !!(el.preview && (el.preview.contains(sel.anchorNode) || el.preview.contains(sel.focusNode)));
+          }
+        }
       }
     } catch (_) {}
+    // Live selection lost (accidental click / block edit) → use snapshot from selection bar
+    const cache = getSelectionCache();
+    if (!text.trim() && cache && cache.text) {
+      text = cache.text;
+      inPreview = !!cache.inPreview;
+    }
     if (!text && ta && typeof ta.selectionStart === "number") {
       text = ta.value.slice(ta.selectionStart, ta.selectionEnd) || "";
     }
+    let blockIndex = typeof state._activeBlockIndex === "number" ? state._activeBlockIndex : null;
+    if (cache && typeof cache.blockIndex === "number") blockIndex = cache.blockIndex;
+    try {
+      if (sel && !sel.isCollapsed && sel.anchorNode) {
+        const b = (sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement)?.closest?.(".md-block");
+        if (b && b.dataset.index != null) blockIndex = Number(b.dataset.index);
+      }
+    } catch (_) {}
     return {
       text,
       inPreview,
       start: ta ? ta.selectionStart : null,
       end: ta ? ta.selectionEnd : null,
-      blockIndex: typeof state._activeBlockIndex === "number" ? state._activeBlockIndex : null,
+      blockIndex,
+      fromCache: !!(cache && !String(sel && !sel.isCollapsed ? sel.toString() : "").trim() && cache.text === text),
     };
   }
 
@@ -5153,6 +5568,8 @@ flowchart LR
     getOutline: getOutlineHost,
     getBlocks: getBlocksHost,
     getSelectionInfo: getSelectionInfoHost,
+    getSelectionCache: getSelectionCache,
+    captureSelectionCache: captureSelectionCache,
     insertTextAtSelection: insertTextAtSelectionHost,
     applyBlockActionAt: applyBlockActionHost,
     findInDocument: findInDocumentHost,

@@ -1,6 +1,6 @@
 [package]
 name = "stuartmd"
-version = "2.9.10"
+version = "3.0.8"
 description = "StuartMD desktop shell (Tauri)"
 authors = ["StuartMD"]
 edition = "2021"
@@ -18,9 +18,16 @@ base64 = "0.22"
 dirs = "5"
 sha1 = "0.10"
 lopdf = { version = "0.34", features = ["chrono"] }
+ureq = { version = "2.12", features = ["json"] }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"
+windows-sys = { version = "0.59", features = [
+  "Win32_Foundation",
+  "Win32_Security_Cryptography",
+  "Win32_System_Memory",
+  "Win32_System_LibraryLoader",
+] }
 
 [features]
 default = ["custom-protocol"]

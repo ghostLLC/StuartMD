@@ -75,7 +75,8 @@ pub fn stuart_get_capabilities() -> Value {
             "workspace_search": true,
             "plugins": true,
             "pdf_annotations": true,
-            "ai_chat": false,
+            "ai_chat": true,
+            "ai_explain": true,
             "ai_tools": true
         },
         "paths": {
