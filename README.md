@@ -2,7 +2,7 @@
 
 轻量 Markdown 阅读与编辑器（Windows 桌面应用）。风格简约，适合日常读文档、写笔记、批注 PDF。
 
-![version](https://img.shields.io/badge/version-2.9.8-blue)
+![version](https://img.shields.io/badge/version-2.9.9-blue)
 
 ## 功能
 
@@ -19,10 +19,10 @@
 
 | 资产 | 说明 |
 |------|------|
-| **`StuartMD-Setup-2.9.8.exe`** | Tauri 主版本（唯一维护线） |
+| **`StuartMD-Setup-2.9.9.exe`** | Tauri 主版本（唯一维护线） |
 
 - 默认安装：`%LOCALAPPDATA%\StuartMD`
-- 静默安装：`StuartMD-Setup-2.9.8.exe /S`
+- 静默安装：`StuartMD-Setup-2.9.9.exe /S`
 
 ## 开发
 

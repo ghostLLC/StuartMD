@@ -2957,6 +2957,22 @@ body[data-theme="gray"] .pdf-text-layer span::selection {
   margin-top: 14px;
 }
 
+.stuart-confirm-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--text-2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.stuart-confirm-check[hidden] {
+  display: none !important;
+}
+
 .pdf-page-label {
   position: absolute;
   right: 8px;

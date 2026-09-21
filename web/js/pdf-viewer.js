@@ -672,7 +672,9 @@
   const ANN = {
     highlightAlpha: 0.32,
     linePx: 2.5,
-    underlineTopRatio: 0.86,
+    // Underline sits BELOW the glyph band (user: still not low enough)
+    underlineBottomPad: 3,
+    underlineTopRatio: 0.93,
     strikeTopRatio: 0.54,
   };
 
@@ -688,9 +690,36 @@
   }
 
   /**
-   * Draw annotations on a canvas overlay (uniform stroke) + transparent hit DOM.
-   * Avoids stacked/div line thickness artifacts on multi-fragment selections.
+   * Union line segments by (color, snapped-y) then paint once —
+   * stacked overlapping fillRects were making some lines look thicker.
    */
+  function paintLineBands(ctx, segs, linePx) {
+    const groups = new Map();
+    segs.forEach((s) => {
+      // Snap to 0.5px so tiny y jitter does not create a second thick band
+      const y = Math.round(s.y * 2) / 2;
+      const key = `${s.color}|${y}`;
+      if (!groups.has(key)) groups.set(key, { y, color: s.color, iv: [] });
+      groups.get(key).iv.push([s.x, s.x + s.w]);
+    });
+    groups.forEach((g) => {
+      g.iv.sort((a, b) => a[0] - b[0]);
+      const merged = [];
+      g.iv.forEach(([a, b]) => {
+        const last = merged[merged.length - 1];
+        if (last && a <= last[1] + 0.75) {
+          last[1] = Math.max(last[1], b);
+        } else {
+          merged.push([a, b]);
+        }
+      });
+      ctx.fillStyle = g.color;
+      merged.forEach(([a, b]) => {
+        ctx.fillRect(a, g.y, Math.max(b - a, 1), linePx);
+      });
+    });
+  }
+
   function drawAnnotationsForPage(layer, pageNum, viewport) {
     layer.innerHTML = "";
     const W = viewport.width;
@@ -711,16 +740,17 @@
     const ctx = canvas.getContext("2d");
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    const linePx = ANN.linePx; // CSS px — identical on every fragment
+    const linePx = ANN.linePx;
     const items = state.annotations.filter((a) => (a.page || 1) === pageNum);
+    const lineSegs = [];
+    const fillRects = [];
 
     items.forEach((a) => {
       const type = a.type || "highlight";
       const defCol = TYPE_DEFAULT_COLOR[type] || "yellow";
       const colorId = a.color || defCol;
       const cm = colorMeta(colorId);
-      const lineHex =
-        type === "comment" ? "#1e88e5" : cm.line || "#7cb518";
+      const lineHex = type === "comment" ? "#1e88e5" : cm.line || "#7cb518";
 
       (a.rects || []).forEach((r) => {
         const x = r.x * W;
@@ -729,18 +759,26 @@
         const h = Math.max(r.h * H, 2);
 
         if (type === "highlight") {
-          ctx.fillStyle = rgbaFromHex(cm.hex, ANN.highlightAlpha);
-          ctx.fillRect(x, y, w, Math.round(h));
+          fillRects.push({
+            x,
+            y,
+            w,
+            h: Math.round(h),
+            color: rgbaFromHex(cm.hex, ANN.highlightAlpha),
+          });
         } else if (type === "strike") {
-          ctx.fillStyle = lineHex;
-          ctx.fillRect(x, y + h * ANN.strikeTopRatio, w, linePx);
+          lineSegs.push({
+            x,
+            y: y + h * ANN.strikeTopRatio,
+            w,
+            color: lineHex,
+          });
         } else {
-          // underline / comment
-          ctx.fillStyle = lineHex;
-          ctx.fillRect(x, y + h * ANN.underlineTopRatio, w, linePx);
+          // underline / comment — clearly under glyphs
+          const lineY = y + h * ANN.underlineTopRatio + ANN.underlineBottomPad;
+          lineSegs.push({ x, y: lineY, w, color: lineHex });
         }
 
-        // Transparent hit area for click / hover
         const hit = document.createElement("div");
         hit.className = "pdf-hl pdf-ann-hit";
         hit.dataset.id = a.id;
@@ -756,6 +794,26 @@
       });
     });
 
+    // Highlights: union by color+rect to avoid stacked alpha
+    const fillGroups = new Map();
+    fillRects.forEach((f) => {
+      const key = `${f.color}|${Math.round(f.y)}|${Math.round(f.h)}`;
+      if (!fillGroups.has(key)) fillGroups.set(key, { ...f, parts: [] });
+      fillGroups.get(key).parts.push([f.x, f.x + f.w]);
+    });
+    fillGroups.forEach((g) => {
+      g.parts.sort((a, b) => a[0] - b[0]);
+      const merged = [];
+      g.parts.forEach(([a, b]) => {
+        const last = merged[merged.length - 1];
+        if (last && a <= last[1] + 0.75) last[1] = Math.max(last[1], b);
+        else merged.push([a, b]);
+      });
+      ctx.fillStyle = g.color;
+      merged.forEach(([a, b]) => ctx.fillRect(a, g.y, Math.max(b - a, 1), g.h));
+    });
+
+    paintLineBands(ctx, lineSegs, linePx);
     layer.appendChild(canvas);
   }
 
@@ -990,18 +1048,26 @@
    * Reliable confirm in Tauri WebView.
    * Native confirm() often no-ops / never shows — use in-app modal.
    */
-  function uiConfirm(message) {
+  /**
+   * @param {string} message
+   * @param {{checkLabel?: string, checkDefault?: boolean}} [opts]
+   * @returns {Promise<boolean|{ok:boolean, checked:boolean}>}
+   */
+  function uiConfirm(message, opts) {
     return new Promise((resolve) => {
       const modal = document.getElementById("stuart-confirm");
       const msg = document.getElementById("stuart-confirm-msg");
       const card = modal && modal.querySelector(".stuart-confirm-card");
       const okBtn = document.getElementById("stuart-confirm-ok");
       const cancelBtn = document.getElementById("stuart-confirm-cancel");
+      const checkWrap = document.getElementById("stuart-confirm-check-wrap");
+      const check = document.getElementById("stuart-confirm-check");
+      const checkLabel = document.getElementById("stuart-confirm-check-label");
+      const wantCheck = !!(opts && opts.checkLabel);
       if (!modal || !okBtn || !cancelBtn) {
         resolve(window.confirm(message));
         return;
       }
-      // Inline layout — works even if CSS file lags behind
       modal.setAttribute(
         "style",
         "position:fixed;left:0;top:0;right:0;bottom:0;z-index:400;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.38);margin:0;padding:0;"
@@ -1016,6 +1082,16 @@
         msg.textContent = String(message || "");
         msg.setAttribute("style", "font-size:14px;line-height:1.55;white-space:pre-wrap;");
       }
+      if (checkWrap && check && checkLabel) {
+        if (wantCheck) {
+          checkWrap.hidden = false;
+          checkLabel.textContent = opts.checkLabel || "";
+          check.checked = !!opts.checkDefault;
+        } else {
+          checkWrap.hidden = true;
+          check.checked = false;
+        }
+      }
       modal.hidden = false;
       const finish = (val) => {
         modal.hidden = true;
@@ -1027,14 +1103,18 @@
       const onKey = (ev) => {
         if (ev.key === "Escape") {
           ev.preventDefault();
-          finish(false);
+          finish(wantCheck ? { ok: false, checked: false } : false);
         } else if (ev.key === "Enter") {
           ev.preventDefault();
-          finish(true);
+          finish(
+            wantCheck ? { ok: true, checked: !!(check && check.checked) } : true
+          );
         }
       };
-      okBtn.onclick = () => finish(true);
-      cancelBtn.onclick = () => finish(false);
+      okBtn.onclick = () =>
+        finish(wantCheck ? { ok: true, checked: !!(check && check.checked) } : true);
+      cancelBtn.onclick = () =>
+        finish(wantCheck ? { ok: false, checked: false } : false);
       document.addEventListener("keydown", onKey, true);
       try {
         okBtn.focus();
@@ -1044,17 +1124,24 @@
 
   async function clearAll() {
     if (!state.path) return;
-    const ok = await uiConfirm(
-      "确定清除全部标注？\n（高光 / 下划线 / 删除线 / 评论）\n清除后可用 Ctrl+Z 撤销。"
+    const res = await uiConfirm(
+      "确定清除标注？\n默认只清除高光 / 下划线 / 删除线，保留评论。\n清除后可用 Ctrl+Z 撤销。",
+      { checkLabel: "同时清除评论", checkDefault: false }
     );
+    const ok = res && typeof res === "object" ? !!res.ok : !!res;
+    const alsoComments = res && typeof res === "object" ? !!res.checked : false;
     if (!ok) return;
     try {
       await api("clear_annotations", state.path);
-      state.annotations = state.annotations.filter((a) => a.native);
+      state.annotations = state.annotations.filter((a) => {
+        if (a.native) return true;
+        if (!alsoComments && a.type === "comment") return true;
+        return false;
+      });
       pushAnnotHistory();
       await refreshAnnots();
       hideAnnotMenu();
-      toast("已清除全部标注");
+      toast(alsoComments ? "已清除全部标注（含评论）" : "已清除标注（保留评论）");
     } catch (_) {
       toast("清除失败");
     }
