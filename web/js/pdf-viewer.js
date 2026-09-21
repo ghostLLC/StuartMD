@@ -672,10 +672,13 @@
   const ANN = {
     highlightAlpha: 0.32,
     linePx: 2.5,
-    // Underline sits BELOW the glyph band (user: still not low enough)
     underlineBottomPad: 3,
     underlineTopRatio: 0.93,
     strikeTopRatio: 0.54,
+    // Comment = underline geometry, only color differs
+    underlineLine: "#7cb518",
+    commentLine: "#1e88e5",
+    strikeLine: "#e53935",
   };
 
   function hexToRgb(hex) {
@@ -750,7 +753,6 @@
       const defCol = TYPE_DEFAULT_COLOR[type] || "yellow";
       const colorId = a.color || defCol;
       const cm = colorMeta(colorId);
-      const lineHex = type === "comment" ? "#1e88e5" : cm.line || "#7cb518";
 
       (a.rects || []).forEach((r) => {
         const x = r.x * W;
@@ -767,16 +769,18 @@
             color: rgbaFromHex(cm.hex, ANN.highlightAlpha),
           });
         } else if (type === "strike") {
+          const lineY = Math.round(y + h * ANN.strikeTopRatio);
           lineSegs.push({
             x,
-            y: y + h * ANN.strikeTopRatio,
+            y: lineY,
             w,
-            color: lineHex,
+            color: ANN.strikeLine,
           });
         } else {
-          // underline / comment — clearly under glyphs
-          const lineY = y + h * ANN.underlineTopRatio + ANN.underlineBottomPad;
-          lineSegs.push({ x, y: lineY, w, color: lineHex });
+          // underline === comment geometry (pixel-snapped, same linePx)
+          const lineY = Math.round(y + h * ANN.underlineTopRatio + ANN.underlineBottomPad);
+          const color = type === "comment" ? ANN.commentLine : ANN.underlineLine;
+          lineSegs.push({ x, y: lineY, w, color });
         }
 
         const hit = document.createElement("div");
