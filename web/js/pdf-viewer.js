@@ -15,12 +15,20 @@
 
   const PALETTE = [
     { id: "yellow", label: "黄", css: "rgba(255,232,96,0.34)", hex: "#ffe566", pdf: [1.0, 0.91, 0.23], line: "#d4a800" },
-    { id: "green", label: "绿", css: "rgba(120,200,130,0.34)", hex: "#78c882", pdf: [0.47, 0.78, 0.51], line: "#3d9a4f" },
-    { id: "blue", label: "蓝", css: "rgba(100,170,230,0.32)", hex: "#64aae6", pdf: [0.39, 0.67, 0.9], line: "#2b7fd4" },
-    { id: "pink", label: "粉", css: "rgba(240,150,180,0.32)", hex: "#f096b4", pdf: [0.94, 0.59, 0.71], line: "#d4568a" },
-    { id: "orange", label: "橙", css: "rgba(250,180,90,0.34)", hex: "#fab45a", pdf: [0.98, 0.71, 0.35], line: "#d4862b" },
-    { id: "purple", label: "紫", css: "rgba(180,150,230,0.32)", hex: "#b496e6", pdf: [0.71, 0.59, 0.9], line: "#7a4fd4" },
+    { id: "lime", label: "黄绿", css: "rgba(163,210,80,0.32)", hex: "#a3d250", pdf: [0.64, 0.82, 0.31], line: "#7cb518" },
+    { id: "red", label: "红", css: "rgba(255,80,90,0.22)", hex: "#ff505a", pdf: [1.0, 0.31, 0.35], line: "#e53935" },
+    { id: "blue", label: "蓝", css: "rgba(100,170,230,0.28)", hex: "#64aae6", pdf: [0.39, 0.67, 0.9], line: "#1e88e5" },
+    { id: "green", label: "绿", css: "rgba(120,200,130,0.32)", hex: "#78c882", pdf: [0.47, 0.78, 0.51], line: "#3d9a4f" },
+    { id: "pink", label: "粉", css: "rgba(240,150,180,0.30)", hex: "#f096b4", pdf: [0.94, 0.59, 0.71], line: "#d4568a" },
   ];
+
+  /** Per-type default colors (user spec) */
+  const TYPE_DEFAULT_COLOR = {
+    highlight: "yellow", // 淡黄
+    underline: "lime", // 黄绿
+    strike: "red", // 鲜红
+    comment: "blue", // 蓝下划线
+  };
 
   function colorMeta(id) {
     return PALETTE.find((c) => c.id === id) || PALETTE[0];
@@ -604,18 +612,57 @@
   }
 
   function hlRectsFromClientRects(clientRects, wrapBox) {
-    const rects = [];
+    // px-space list for merging
+    const raw = [];
     for (let i = 0; i < clientRects.length; i++) {
       const cr = clientRects[i];
-      if (cr.width < 2 || cr.height < 2) continue;
-      rects.push({
-        x: (cr.left - wrapBox.left) / wrapBox.width,
-        y: (cr.top - wrapBox.top) / wrapBox.height,
-        w: cr.width / wrapBox.width,
-        h: cr.height / wrapBox.height,
+      if (cr.width < 1 && cr.height < 1) continue;
+      raw.push({
+        x: cr.left - wrapBox.left,
+        y: cr.top - wrapBox.top,
+        w: cr.width,
+        h: cr.height,
       });
     }
-    return rects;
+    if (!raw.length) return [];
+    raw.sort((a, b) => {
+      const dy = a.y + a.h / 2 - (b.y + b.h / 2);
+      if (Math.abs(dy) > 3) return dy;
+      return a.x - b.x;
+    });
+
+    // Merge on same visual line when gap is small (spaces / word breaks)
+    const merged = [];
+    raw.forEach((r) => {
+      const last = merged[merged.length - 1];
+      if (!last) {
+        merged.push({ ...r });
+        return;
+      }
+      const sameLine =
+        Math.abs(r.y + r.h / 2 - (last.y + last.h / 2)) < Math.max(r.h, last.h) * 0.6;
+      const gap = r.x - (last.x + last.w);
+      const maxGap = Math.max(14, Math.min(last.h, r.h) * 0.85);
+      if (sameLine && gap < maxGap && gap > -Math.max(last.w, r.w)) {
+        const x1 = Math.max(last.x + last.w, r.x + r.w);
+        const y1 = Math.max(last.y + last.h, r.y + r.h);
+        last.x = Math.min(last.x, r.x);
+        last.y = Math.min(last.y, r.y);
+        last.w = x1 - last.x;
+        last.h = y1 - last.y;
+      } else {
+        merged.push({ ...r });
+      }
+    });
+
+    // Slight horizontal pad so word gaps look continuous
+    const pad = 2;
+    return merged.map((r) => ({
+      x: Math.max(0, r.x - pad) / wrapBox.width,
+      y: r.y / wrapBox.height,
+      w: (r.w + pad * 2) / wrapBox.width,
+      h: r.h / wrapBox.height,
+    }));
   }
 
   function drawAnnotationsForPage(layer, pageNum, viewport) {
@@ -624,26 +671,47 @@
       .filter((a) => (a.page || 1) === pageNum)
       .forEach((a) => {
         const type = a.type || "highlight";
+        const defCol = TYPE_DEFAULT_COLOR[type] || "yellow";
+        const colorId = a.color || defCol;
+        const cm = colorMeta(colorId);
         (a.rects || []).forEach((r) => {
           const box = document.createElement("div");
-          box.className = "pdf-hl" + (a.comment ? " has-comment" : "");
+          box.className = "pdf-hl";
           box.dataset.id = a.id;
           box.dataset.type = type;
-          box.dataset.color = a.color || "yellow";
-          const cm = colorMeta(a.color || state.hlColor);
-          box.style.left = `${r.x * viewport.width}px`;
-          box.style.top = `${r.y * viewport.height}px`;
-          box.style.width = `${r.w * viewport.width}px`;
+          box.dataset.color = colorId;
+          const left = r.x * viewport.width;
+          const top = r.y * viewport.height;
+          const wPx = r.w * viewport.width;
           const hPx = Math.max(r.h * viewport.height, 2);
-          box.style.height = `${hPx}px`;
-          if (type === "underline" || type === "comment") {
+          box.style.left = `${left}px`;
+          box.style.width = `${wPx}px`;
+
+          if (type === "underline") {
+            // Line sits slightly below the box bottom so it clears glyphs
+            box.style.top = `${top}px`;
+            box.style.height = `${hPx + 5}px`;
             box.style.background = "transparent";
-            box.style.borderBottom = `2px solid ${type === "comment" ? "#3b82f6" : cm.line}`;
-            box.style.height = `${Math.max(hPx * 0.85, 3)}px`;
+            box.style.borderBottom = "none";
+            box.style.setProperty("--ann-line", cm.line || "#7cb518");
+            box.classList.add("pdf-ann-underline");
           } else if (type === "strike") {
+            box.style.top = `${top}px`;
+            box.style.height = `${hPx}px`;
             box.style.background = "transparent";
-            box.style.setProperty("--pdf-ann-color", cm.line);
+            box.style.setProperty("--ann-line", cm.line || "#e53935");
+            box.classList.add("pdf-ann-strike");
+          } else if (type === "comment") {
+            box.style.top = `${top}px`;
+            box.style.height = `${hPx + 5}px`;
+            box.style.background = "transparent";
+            box.style.borderBottom = "none";
+            box.style.setProperty("--ann-line", cm.line || "#1e88e5");
+            box.classList.add("pdf-ann-underline", "pdf-ann-comment");
+            box.classList.add("has-comment");
           } else {
+            box.style.top = `${top}px`;
+            box.style.height = `${hPx}px`;
             box.style.background = cm.css;
           }
           box.style.pointerEvents = "auto";
@@ -654,14 +722,21 @@
       });
   }
 
+  function selectAnnotVisual(id) {
+    document
+      .querySelectorAll(".pdf-hl.selected, .pdf-cm.selected")
+      .forEach((n) => n.classList.remove("selected"));
+    // Select every fragment of the same annotation
+    document.querySelectorAll(`.pdf-hl[data-id="${CSS.escape(String(id))}"]`).forEach((n) => {
+      n.classList.add("selected");
+    });
+  }
+
   function bindAnnotEl(node, id) {
     node.addEventListener("click", (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
-      document
-        .querySelectorAll(".pdf-hl.selected, .pdf-cm.selected")
-        .forEach((n) => n.classList.remove("selected"));
-      node.classList.add("selected");
+      selectAnnotVisual(id);
       state.selectedHlId = id;
       const r = node.getBoundingClientRect();
       showAnnotMenu(ev.clientX || r.left, ev.clientY || r.bottom, id);
@@ -669,10 +744,7 @@
     node.addEventListener("contextmenu", (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
-      document
-        .querySelectorAll(".pdf-hl.selected, .pdf-cm.selected")
-        .forEach((n) => n.classList.remove("selected"));
-      node.classList.add("selected");
+      selectAnnotVisual(id);
       showAnnotMenu(ev.clientX, ev.clientY, id);
     });
   }
@@ -728,9 +800,10 @@
       toast("请先选中 PDF 文字");
       return;
     }
+    const defCol = TYPE_DEFAULT_COLOR[type] || state.hlColor || "yellow";
     const ann = {
       type,
-      color: colorId || state.hlColor || "yellow",
+      color: colorId || defCol,
       page: ctx.page,
       text: ctx.text,
       comment: commentText || "",
@@ -981,7 +1054,7 @@
         toast("评论内容为空");
         return;
       }
-      await addAnnotFromSelection("comment", state.hlColor, text);
+      await addAnnotFromSelection("comment", TYPE_DEFAULT_COLOR.comment, text);
       closeCommentPanel();
       const sel = window.getSelection();
       try {
@@ -1124,10 +1197,10 @@
           sel.removeAllRanges();
         } catch (_) {}
       } else if (act === "underline") {
-        await addAnnotFromSelection("underline", state.hlColor);
+        await addAnnotFromSelection("underline", TYPE_DEFAULT_COLOR.underline);
         hideAnnotBar();
       } else if (act === "strike") {
-        await addAnnotFromSelection("strike", state.hlColor);
+        await addAnnotFromSelection("strike", TYPE_DEFAULT_COLOR.strike);
         hideAnnotBar();
       } else if (act === "comment") {
         openCommentPanel(null, br.left, br.top + 8);

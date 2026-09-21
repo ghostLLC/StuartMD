@@ -2554,45 +2554,52 @@ body[data-theme="wallpaper"] #preview *::selection {
   pointer-events: none;
 }
 
-.pdf-hl[data-type="underline"] {
-  background: transparent;
-  border-bottom: 2px solid var(--pdf-ann-color, #3b82f6);
-  border-radius: 0;
+/* Underline: thicker, sits below glyphs (clear of descenders) */
+.pdf-hl.pdf-ann-underline {
+  background: transparent !important;
+  border-bottom: none !important;
 }
 
-.pdf-hl[data-type="strike"] {
-  background: transparent;
-  border-radius: 0;
-}
-
-.pdf-hl[data-type="strike"]::before {
+.pdf-hl.pdf-ann-underline::after {
   content: "";
   position: absolute;
   left: 0;
   right: 0;
-  top: 50%;
-  border-top: 2px solid var(--pdf-ann-color, #ef4444);
+  bottom: 0;
+  height: 2.8px;
+  border-radius: 1px;
+  background: var(--ann-line, #7cb518);
 }
 
-.pdf-hl[data-type="comment"] {
-  background: transparent;
-  border-bottom: 2px solid #3b82f6;
-  border-radius: 0;
+/* Comment: blue underline + tip on hover */
+.pdf-hl.pdf-ann-comment::after {
+  background: var(--ann-line, #1e88e5);
+  height: 2.5px;
 }
 
-.pdf-hl[data-color="green"] { background: rgba(120, 200, 130, 0.34); }
-.pdf-hl[data-color="blue"] { background: rgba(100, 170, 230, 0.32); }
-.pdf-hl[data-color="pink"] { background: rgba(240, 150, 180, 0.32); }
-.pdf-hl[data-color="orange"] { background: rgba(250, 180, 90, 0.34); }
-.pdf-hl[data-color="purple"] { background: rgba(180, 150, 230, 0.32); }
-.pdf-hl[data-color="gray"] { background: rgba(160, 160, 160, 0.28); }
+/* Strike: thicker, optically centered on the glyph band */
+.pdf-hl.pdf-ann-strike {
+  background: transparent !important;
+}
 
-.pdf-hl[data-type="underline"][data-color="green"] { background: transparent; border-bottom-color: #3d9a4f; }
-.pdf-hl[data-type="underline"][data-color="blue"] { background: transparent; border-bottom-color: #2b7fd4; }
-.pdf-hl[data-type="underline"][data-color="pink"] { background: transparent; border-bottom-color: #d4568a; }
-.pdf-hl[data-type="underline"][data-color="orange"] { background: transparent; border-bottom-color: #d4862b; }
-.pdf-hl[data-type="underline"][data-color="purple"] { background: transparent; border-bottom-color: #7a4fd4; }
-.pdf-hl[data-type="underline"][data-color="gray"] { background: transparent; border-bottom-color: #666; }
+.pdf-hl.pdf-ann-strike::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  /* Slightly below geometric center → looks centered on text */
+  top: 54%;
+  height: 2.8px;
+  border-radius: 1px;
+  background: var(--ann-line, #e53935);
+}
+
+.pdf-hl[data-color="yellow"] { background: rgba(255,232,96,0.34); }
+.pdf-hl[data-color="lime"] { background: rgba(163,210,80,0.32); }
+.pdf-hl[data-color="red"] { background: rgba(255,80,90,0.22); }
+.pdf-hl[data-color="blue"] { background: rgba(100,170,230,0.28); }
+.pdf-hl[data-color="green"] { background: rgba(120,200,130,0.34); }
+.pdf-hl[data-color="pink"] { background: rgba(240,150,180,0.32); }
 
 .pdf-hl.selected {
   outline: 2px solid #2563eb;
