@@ -2547,64 +2547,50 @@ body[data-theme="wallpaper"] #preview *::selection {
 /* Visual highlight bands (interaction rules defined later with layer order) */
 .pdf-hl {
   position: absolute;
-  background: rgba(255, 232, 96, 0.34);
-  mix-blend-mode: normal;
-  opacity: 1;
+  pointer-events: none;
+}
+
+/* Clickable hit area — no fill unless highlight */
+.pdf-hl.pdf-ann-hit {
+  pointer-events: auto;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+}
+
+.pdf-hl[data-type="highlight"].pdf-ann-hit {
+  border-radius: 1px;
+}
+
+/* Fixed-width visual line — never scales with number of line fragments */
+.pdf-ann-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2.5px;
   border-radius: 1px;
   pointer-events: none;
 }
 
-/* Underline: thicker, sits below glyphs (clear of descenders) */
-.pdf-hl.pdf-ann-underline {
-  background: transparent !important;
-  border-bottom: none !important;
-}
-
-.pdf-hl.pdf-ann-underline::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 2.8px;
-  border-radius: 1px;
-  background: var(--ann-line, #7cb518);
-}
-
-/* Comment: blue underline + tip on hover */
-.pdf-hl.pdf-ann-comment::after {
-  background: var(--ann-line, #1e88e5);
+.pdf-ann-line-strike {
+  bottom: auto;
+  top: 54%;
   height: 2.5px;
 }
-
-/* Strike: thicker, optically centered on the glyph band */
-.pdf-hl.pdf-ann-strike {
-  background: transparent !important;
-}
-
-.pdf-hl.pdf-ann-strike::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  /* Slightly below geometric center → looks centered on text */
-  top: 54%;
-  height: 2.8px;
-  border-radius: 1px;
-  background: var(--ann-line, #e53935);
-}
-
-.pdf-hl[data-color="yellow"] { background: rgba(255,232,96,0.34); }
-.pdf-hl[data-color="lime"] { background: rgba(163,210,80,0.32); }
-.pdf-hl[data-color="red"] { background: rgba(255,80,90,0.22); }
-.pdf-hl[data-color="blue"] { background: rgba(100,170,230,0.28); }
-.pdf-hl[data-color="green"] { background: rgba(120,200,130,0.34); }
-.pdf-hl[data-color="pink"] { background: rgba(240,150,180,0.32); }
 
 .pdf-hl.selected {
   outline: 2px solid #2563eb;
   outline-offset: 1px;
 }
+
+/* Highlight fills */
+.pdf-hl[data-type="highlight"][data-color="yellow"] { background: rgba(255,232,96,0.34); }
+.pdf-hl[data-type="highlight"][data-color="lime"] { background: rgba(163,210,80,0.32); }
+.pdf-hl[data-type="highlight"][data-color="red"] { background: rgba(255,80,90,0.22); }
+.pdf-hl[data-type="highlight"][data-color="blue"] { background: rgba(100,170,230,0.28); }
+.pdf-hl[data-type="highlight"][data-color="green"] { background: rgba(120,200,130,0.34); }
+.pdf-hl[data-type="highlight"][data-color="pink"] { background: rgba(240,150,180,0.32); }
 
 /* Selection mini toolbar near mouse after selecting PDF text */
 .pdf-annot-bar {

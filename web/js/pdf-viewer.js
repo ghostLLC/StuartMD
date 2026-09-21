@@ -631,7 +631,7 @@
       return a.x - b.x;
     });
 
-    // Merge on same visual line when gap is small (spaces / word breaks)
+    // Merge ONLY on the same visual line (never combine multi-line into one box)
     const merged = [];
     raw.forEach((r) => {
       const last = merged[merged.length - 1];
@@ -639,11 +639,12 @@
         merged.push({ ...r });
         return;
       }
-      const sameLine =
-        Math.abs(r.y + r.h / 2 - (last.y + last.h / 2)) < Math.max(r.h, last.h) * 0.6;
+      const dy = Math.abs(r.y + r.h / 2 - (last.y + last.h / 2));
+      const minH = Math.min(r.h, last.h) || 8;
+      const sameLine = dy < minH * 0.28;
       const gap = r.x - (last.x + last.w);
-      const maxGap = Math.max(14, Math.min(last.h, r.h) * 0.85);
-      if (sameLine && gap < maxGap && gap > -Math.max(last.w, r.w)) {
+      const maxGap = Math.max(14, minH * 0.85);
+      if (sameLine && gap < maxGap && gap > -Math.max(last.w, r.w) * 0.5) {
         const x1 = Math.max(last.x + last.w, r.x + r.w);
         const y1 = Math.max(last.y + last.h, r.y + r.h);
         last.x = Math.min(last.x, r.x);
@@ -675,49 +676,42 @@
         const colorId = a.color || defCol;
         const cm = colorMeta(colorId);
         (a.rects || []).forEach((r) => {
-          const box = document.createElement("div");
-          box.className = "pdf-hl";
-          box.dataset.id = a.id;
-          box.dataset.type = type;
-          box.dataset.color = colorId;
           const left = r.x * viewport.width;
           const top = r.y * viewport.height;
-          const wPx = r.w * viewport.width;
+          const wPx = Math.max(r.w * viewport.width, 2);
           const hPx = Math.max(r.h * viewport.height, 2);
-          box.style.left = `${left}px`;
-          box.style.width = `${wPx}px`;
 
-          if (type === "underline") {
-            // Line sits slightly below the box bottom so it clears glyphs
-            box.style.top = `${top}px`;
-            box.style.height = `${hPx + 5}px`;
-            box.style.background = "transparent";
-            box.style.borderBottom = "none";
-            box.style.setProperty("--ann-line", cm.line || "#7cb518");
-            box.classList.add("pdf-ann-underline");
+          // Invisible hit area (same for all types) — click selects whole annot
+          const hit = document.createElement("div");
+          hit.className = "pdf-hl pdf-ann-hit";
+          hit.dataset.id = a.id;
+          hit.dataset.type = type;
+          hit.dataset.color = colorId;
+          hit.style.left = `${left}px`;
+          hit.style.top = `${top}px`;
+          hit.style.width = `${wPx}px`;
+          hit.style.height = `${hPx}px`;
+          hit.title = a.comment || a.text || "标注";
+
+          if (type === "highlight") {
+            hit.style.background = cm.css;
           } else if (type === "strike") {
-            box.style.top = `${top}px`;
-            box.style.height = `${hPx}px`;
-            box.style.background = "transparent";
-            box.style.setProperty("--ann-line", cm.line || "#e53935");
-            box.classList.add("pdf-ann-strike");
-          } else if (type === "comment") {
-            box.style.top = `${top}px`;
-            box.style.height = `${hPx + 5}px`;
-            box.style.background = "transparent";
-            box.style.borderBottom = "none";
-            box.style.setProperty("--ann-line", cm.line || "#1e88e5");
-            box.classList.add("pdf-ann-underline", "pdf-ann-comment");
-            box.classList.add("has-comment");
+            const bar = document.createElement("div");
+            bar.className = "pdf-ann-line pdf-ann-line-strike";
+            bar.style.background = cm.line || "#e53935";
+            hit.appendChild(bar);
           } else {
-            box.style.top = `${top}px`;
-            box.style.height = `${hPx}px`;
-            box.style.background = cm.css;
+            // underline / comment — fixed 2.5px under each LINE fragment
+            const bar = document.createElement("div");
+            bar.className = "pdf-ann-line";
+            const lineColor =
+              type === "comment" ? "#1e88e5" : cm.line || "#7cb518";
+            bar.style.background = lineColor;
+            hit.appendChild(bar);
           }
-          box.style.pointerEvents = "auto";
-          box.title = a.comment || a.text || "标注";
-          bindAnnotEl(box, a.id);
-          layer.appendChild(box);
+
+          bindAnnotEl(hit, a.id);
+          layer.appendChild(hit);
         });
       });
   }
