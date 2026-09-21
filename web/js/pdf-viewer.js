@@ -415,6 +415,7 @@
     const e = el();
     if (!e.scroll) return;
     e.scroll.style.zoom = "";
+    e.scroll.style.transform = "";
     e.scroll.classList.remove("pdf-zooming");
   }
 
@@ -667,82 +668,95 @@
     }));
   }
 
-  /** Visual constants — keep every annot type consistent across pages/zoom */
+  /** Visual constants — canvas lines are always the same device-pixel width */
   const ANN = {
     highlightAlpha: 0.32,
     linePx: 2.5,
-    // Underline sits at a stable fraction of each line box (not raw bottom)
-    // so "depth" does not drift when client-rect heights vary
     underlineTopRatio: 0.86,
-    strikeTopPct: 54,
+    strikeTopRatio: 0.54,
   };
-
-  function drawAnnotationsForPage(layer, pageNum, viewport) {
-    layer.innerHTML = [];
-    layer.innerHTML = "";
-    // Quantize to device pixels → stable physical thickness
-    const dpr = Math.min(window.devicePixelRatio || 1, 3);
-    const linePx = Math.round(ANN.linePx * dpr) / dpr;
-    state.annotations
-      .filter((a) => (a.page || 1) === pageNum)
-      .forEach((a) => {
-        const type = a.type || "highlight";
-        const defCol = TYPE_DEFAULT_COLOR[type] || "yellow";
-        const colorId = a.color || defCol;
-        const cm = colorMeta(colorId);
-        (a.rects || []).forEach((r) => {
-          const left = r.x * viewport.width;
-          const top = r.y * viewport.height;
-          const wPx = Math.max(r.w * viewport.width, 2);
-          let hPx = Math.max(r.h * viewport.height, 2);
-          if (type === "highlight") {
-            hPx = Math.max(8, Math.round(hPx));
-          }
-
-          const hit = document.createElement("div");
-          hit.className = "pdf-hl pdf-ann-hit";
-          hit.dataset.id = a.id;
-          hit.dataset.type = type;
-          hit.dataset.color = colorId;
-          hit.style.left = `${left}px`;
-          hit.style.top = `${top}px`;
-          hit.style.width = `${wPx}px`;
-          hit.style.height = `${hPx}px`;
-          hit.title = a.comment || a.text || "标注";
-
-          if (type === "highlight") {
-            const [cr, cg, cb] = hexToRgb(cm.hex);
-            hit.style.background = `rgba(${cr},${cg},${cb},${ANN.highlightAlpha})`;
-          } else if (type === "strike") {
-            const bar = document.createElement("div");
-            bar.className = "pdf-ann-line";
-            // Center on glyph band, not on arbitrary client box
-            bar.style.top = `${hPx * 0.54}px`;
-            bar.style.height = `${linePx}px`;
-            bar.style.background = cm.line || "#e53935";
-            hit.appendChild(bar);
-          } else {
-            // underline / comment — same depth ratio + same thickness on every line
-            const bar = document.createElement("div");
-            bar.className = "pdf-ann-line";
-            const lineTop = hPx * ANN.underlineTopRatio;
-            bar.style.top = `${lineTop}px`;
-            bar.style.height = `${linePx}px`;
-            bar.style.background =
-              type === "comment" ? "#1e88e5" : cm.line || "#7cb518";
-            hit.appendChild(bar);
-          }
-
-          bindAnnotEl(hit, a.id);
-          layer.appendChild(hit);
-        });
-      });
-  }
 
   function hexToRgb(hex) {
     const h = (hex || "#ffe566").replace("#", "");
     const n = parseInt(h.length === 3 ? h.replace(/./g, "$&$&") : h, 16);
     return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+
+  function rgbaFromHex(hex, a) {
+    const [r, g, b] = hexToRgb(hex);
+    return `rgba(${r},${g},${b},${a})`;
+  }
+
+  /**
+   * Draw annotations on a canvas overlay (uniform stroke) + transparent hit DOM.
+   * Avoids stacked/div line thickness artifacts on multi-fragment selections.
+   */
+  function drawAnnotationsForPage(layer, pageNum, viewport) {
+    layer.innerHTML = "";
+    const W = viewport.width;
+    const H = viewport.height;
+    if (!W || !H) return;
+
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    const canvas = document.createElement("canvas");
+    canvas.className = "pdf-ann-canvas";
+    canvas.width = Math.max(1, Math.floor(W * dpr));
+    canvas.height = Math.max(1, Math.floor(H * dpr));
+    canvas.style.width = `${W}px`;
+    canvas.style.height = `${H}px`;
+    canvas.style.position = "absolute";
+    canvas.style.left = "0";
+    canvas.style.top = "0";
+    canvas.style.pointerEvents = "none";
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const linePx = ANN.linePx; // CSS px — identical on every fragment
+    const items = state.annotations.filter((a) => (a.page || 1) === pageNum);
+
+    items.forEach((a) => {
+      const type = a.type || "highlight";
+      const defCol = TYPE_DEFAULT_COLOR[type] || "yellow";
+      const colorId = a.color || defCol;
+      const cm = colorMeta(colorId);
+      const lineHex =
+        type === "comment" ? "#1e88e5" : cm.line || "#7cb518";
+
+      (a.rects || []).forEach((r) => {
+        const x = r.x * W;
+        const y = r.y * H;
+        const w = Math.max(r.w * W, 1);
+        const h = Math.max(r.h * H, 2);
+
+        if (type === "highlight") {
+          ctx.fillStyle = rgbaFromHex(cm.hex, ANN.highlightAlpha);
+          ctx.fillRect(x, y, w, Math.round(h));
+        } else if (type === "strike") {
+          ctx.fillStyle = lineHex;
+          ctx.fillRect(x, y + h * ANN.strikeTopRatio, w, linePx);
+        } else {
+          // underline / comment
+          ctx.fillStyle = lineHex;
+          ctx.fillRect(x, y + h * ANN.underlineTopRatio, w, linePx);
+        }
+
+        // Transparent hit area for click / hover
+        const hit = document.createElement("div");
+        hit.className = "pdf-hl pdf-ann-hit";
+        hit.dataset.id = a.id;
+        hit.dataset.type = type;
+        hit.dataset.color = colorId;
+        hit.style.left = `${x}px`;
+        hit.style.top = `${y}px`;
+        hit.style.width = `${w}px`;
+        hit.style.height = `${h}px`;
+        hit.title = a.comment || a.text || "标注";
+        bindAnnotEl(hit, a.id);
+        layer.appendChild(hit);
+      });
+    });
+
+    layer.appendChild(canvas);
   }
 
   function selectAnnotVisual(id) {
@@ -980,23 +994,34 @@
     return new Promise((resolve) => {
       const modal = document.getElementById("stuart-confirm");
       const msg = document.getElementById("stuart-confirm-msg");
+      const card = modal && modal.querySelector(".stuart-confirm-card");
       const okBtn = document.getElementById("stuart-confirm-ok");
       const cancelBtn = document.getElementById("stuart-confirm-cancel");
       if (!modal || !okBtn || !cancelBtn) {
-        // Extreme fallback
         resolve(window.confirm(message));
         return;
       }
-      if (msg) msg.textContent = String(message || "");
+      // Inline layout — works even if CSS file lags behind
+      modal.setAttribute(
+        "style",
+        "position:fixed;left:0;top:0;right:0;bottom:0;z-index:400;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.38);margin:0;padding:0;"
+      );
+      if (card) {
+        card.setAttribute(
+          "style",
+          "width:min(400px,92vw);background:#fff;color:#222;border-radius:12px;padding:16px 18px;box-shadow:0 16px 48px rgba(0,0,0,.25);font-family:system-ui,sans-serif;"
+        );
+      }
+      if (msg) {
+        msg.textContent = String(message || "");
+        msg.setAttribute("style", "font-size:14px;line-height:1.55;white-space:pre-wrap;");
+      }
       modal.hidden = false;
-      const cleanup = () => {
+      const finish = (val) => {
+        modal.hidden = true;
         okBtn.onclick = null;
         cancelBtn.onclick = null;
         document.removeEventListener("keydown", onKey, true);
-      };
-      const finish = (val) => {
-        modal.hidden = true;
-        cleanup();
         resolve(val);
       };
       const onKey = (ev) => {
@@ -1019,14 +1044,10 @@
 
   async function clearAll() {
     if (!state.path) return;
-    const ok1 = await uiConfirm(
-      "确定清除全部标注？\n（高光 / 下划线 / 删除线 / 评论）"
+    const ok = await uiConfirm(
+      "确定清除全部标注？\n（高光 / 下划线 / 删除线 / 评论）\n清除后可用 Ctrl+Z 撤销。"
     );
-    if (!ok1) return;
-    const ok2 = await uiConfirm(
-      "请再次确认：清除全部标注？\n清除后可用 Ctrl+Z 撤销。"
-    );
-    if (!ok2) return;
+    if (!ok) return;
     try {
       await api("clear_annotations", state.path);
       state.annotations = state.annotations.filter((a) => a.native);
