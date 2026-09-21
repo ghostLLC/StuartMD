@@ -2471,10 +2471,15 @@
           tabs,
           active_path: state.path || "",
         },
+        last_open_files: tabs,
         last_folder: state.folder || "",
         sample_dismissed: !!state.sampleDismissed,
       })
       .catch(() => {});
+    // Remember windowed / fullscreen + geometry
+    try {
+      window.pywebview.api.capture_window?.()?.catch?.(() => {});
+    } catch (_) {}
   }
 
   function hideBootSplash() {
@@ -4884,8 +4889,14 @@ flowchart LR
         await applySettings(s);
         const info = await window.pywebview.api.get_app_info();
         state.appInfo = info;
-        // Association + plugins: non-critical, do not block boot path
         state.sampleDismissed = !!(s && s.sample_dismissed);
+
+        // Restore window geometry / fullscreen from last session
+        try {
+          await window.pywebview.api.apply_window_state?.();
+        } catch (_) {}
+
+        // Association + plugins: non-critical, do not block boot path
         setTimeout(() => {
           try {
             window.pywebview.api.register_file_association?.()?.catch?.(() => {});
@@ -4918,8 +4929,19 @@ flowchart LR
             persistSession();
           }
         } else {
+          // Cold start without CLI file → last session files first
           const session = (s && s.session) || { tabs: [], active_path: "" };
-          const restored = await restoreSessionTabs(session);
+          const lastFiles = Array.isArray(s && s.last_open_files) ? s.last_open_files : [];
+          const tabPaths = (session.tabs && session.tabs.length ? session.tabs : lastFiles).filter(
+            Boolean
+          );
+          let restored = false;
+          if (tabPaths.length) {
+            restored = await restoreSessionTabs({
+              tabs: tabPaths,
+              active_path: session.active_path || "",
+            });
+          }
           if (!restored) {
             if (!state.sampleDismissed) {
               const ok = await openSampleDirect();

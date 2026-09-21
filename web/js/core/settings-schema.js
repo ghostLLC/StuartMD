@@ -26,6 +26,8 @@
     // Session restore: first launch opens sample; after sample closed → home
     sample_dismissed: false,
     session: { tabs: [], active_path: "" },
+    last_open_files: [],
+    window_state: null,
   };
 
   function migrate(raw) {

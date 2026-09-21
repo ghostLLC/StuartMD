@@ -6,9 +6,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::fs_api::{
-    data_dir, exe_dir, load_json, load_settings_migrated, path_to_file_uri, save_json,
-    settings_path, wallpapers_dir, PROG_ID, PROG_ID_PDF, VERSION,
+    data_dir, exe_dir, load_json, load_settings_migrated, load_settings_migrated as load_set,
+    path_to_file_uri, save_json, settings_path, wallpapers_dir, PROG_ID, PROG_ID_PDF, VERSION,
 };
+use tauri::{Manager, PhysicalPosition, PhysicalSize};
 
 pub fn open_path_os(p: &Path) -> bool {
     #[cfg(target_os = "windows")]
@@ -727,6 +728,65 @@ pub fn stuart_export_pdf_annotations(pdf_path: String, items: Value) -> Value {
         "created": created,
         "path": final_path.to_string_lossy()
     })
+}
+
+#[tauri::command]
+pub fn stuart_capture_window(app: tauri::AppHandle) -> Value {
+    let Some(w) = app.get_webview_window("main") else {
+        return json!({"error": "no window"});
+    };
+    let pos = w.outer_position().unwrap_or(tauri::PhysicalPosition::new(0, 0));
+    let size = w.outer_size().unwrap_or(tauri::PhysicalSize::new(0, 0));
+    let maximized = w.is_maximized().unwrap_or(false);
+    let fullscreen = w.is_fullscreen().unwrap_or(false);
+    let mut s = load_settings_migrated();
+    if let Some(obj) = s.as_object_mut() {
+        obj.insert(
+            "window_state".into(),
+            json!({
+                "x": pos.x,
+                "y": pos.y,
+                "width": size.width,
+                "height": size.height,
+                "maximized": maximized,
+                "fullscreen": fullscreen,
+            }),
+        );
+    }
+    let _ = save_json(&settings_path(), &s);
+    json!({"ok": true})
+}
+
+#[tauri::command]
+pub fn stuart_apply_window_state(app: tauri::AppHandle) -> Value {
+    let s = load_settings_migrated();
+    let Some(ws) = s.get("window_state") else {
+        return json!({"ok": false, "reason": "none"});
+    };
+    let Some(w) = app.get_webview_window("main") else {
+        return json!({"ok": false});
+    };
+    let fullscreen = ws.get("fullscreen").and_then(|v| v.as_bool()).unwrap_or(false);
+    let maximized = ws.get("maximized").and_then(|v| v.as_bool()).unwrap_or(false);
+    if fullscreen {
+        let _ = w.set_fullscreen(true);
+        return json!({"ok": true, "mode": "fullscreen"});
+    }
+    if maximized {
+        let _ = w.maximize();
+        return json!({"ok": true, "mode": "maximized"});
+    }
+    let x = ws.get("x").and_then(|v| v.as_i64()).unwrap_or(-1);
+    let y = ws.get("y").and_then(|v| v.as_i64()).unwrap_or(-1);
+    let width = ws.get("width").and_then(|v| v.as_u64()).unwrap_or(0);
+    let height = ws.get("height").and_then(|v| v.as_u64()).unwrap_or(0);
+    if width >= 480 && height >= 360 && x > -20000 && y > -20000 {
+        let _ = w.unmaximize();
+        let _ = w.set_position(PhysicalPosition::new(x as i32, y as i32));
+        let _ = w.set_size(PhysicalSize::new(width as u32, height as u32));
+        return json!({"ok": true, "mode": "normal"});
+    }
+    json!({"ok": false, "reason": "invalid geometry"})
 }
 
 fn uuid_like() -> u128 {

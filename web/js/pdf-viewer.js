@@ -393,28 +393,21 @@
     return wrap;
   }
 
-  function clearLiveZoom() {
-    const e = el();
-    if (!e.scroll) return;
-    e.scroll.classList.remove("pdf-zooming");
-    e.scroll.querySelectorAll(".pdf-page").forEach((p) => {
-      p.style.transform = "";
-      p.style.transformOrigin = "";
-    });
-  }
-
-  /** Scale painted pages in-place so Ctrl+wheel does not blank the view. */
+  /** Scale page+canvas+annot together via CSS zoom (Chromium/WebView2) — Edge-like. */
   function applyLiveZoom() {
     const e = el();
     if (!e.scroll || !state.baseScale || state.baseScale <= 0) return;
     const ratio = state.scale / state.baseScale;
     e.scroll.classList.add("pdf-zooming");
-    e.scroll.querySelectorAll(".pdf-page").forEach((p) => {
-      if (p.dataset.painted === "1") {
-        p.style.transform = `scale(${ratio})`;
-        p.style.transformOrigin = "top center";
-      }
-    });
+    // zoom affects layout box too → paper grows with content (no tear)
+    e.scroll.style.zoom = String(Math.max(0.2, Math.min(5, ratio)));
+  }
+
+  function clearLiveZoom() {
+    const e = el();
+    if (!e.scroll) return;
+    e.scroll.style.zoom = "";
+    e.scroll.classList.remove("pdf-zooming");
   }
 
   async function renderAll() {
@@ -666,8 +659,18 @@
     }));
   }
 
+  /** Visual constants — keep every annot type consistent across pages/zoom */
+  const ANN = {
+    highlightAlpha: 0.32,
+    linePx: 2.5,
+    strikeTopPct: 54,
+    lineBottomPx: -1,
+  };
+
   function drawAnnotationsForPage(layer, pageNum, viewport) {
     layer.innerHTML = "";
+    // Device-independent line thickness at CURRENT scale
+    const linePx = ANN.linePx;
     state.annotations
       .filter((a) => (a.page || 1) === pageNum)
       .forEach((a) => {
@@ -679,9 +682,12 @@
           const left = r.x * viewport.width;
           const top = r.y * viewport.height;
           const wPx = Math.max(r.w * viewport.width, 2);
-          const hPx = Math.max(r.h * viewport.height, 2);
+          let hPx = Math.max(r.h * viewport.height, 2);
+          // Snap highlight height so line boxes don't look randomly fat/thin
+          if (type === "highlight") {
+            hPx = Math.max(8, Math.round(hPx));
+          }
 
-          // Invisible hit area (same for all types) — click selects whole annot
           const hit = document.createElement("div");
           hit.className = "pdf-hl pdf-ann-hit";
           hit.dataset.id = a.id;
@@ -694,19 +700,24 @@
           hit.title = a.comment || a.text || "标注";
 
           if (type === "highlight") {
-            hit.style.background = cm.css;
+            // Uniform alpha for all highlight colors
+            const [cr, cg, cb] = cm.rgb255 || hexToRgb(cm.hex);
+            hit.style.background = `rgba(${cr},${cg},${cb},${ANN.highlightAlpha})`;
           } else if (type === "strike") {
             const bar = document.createElement("div");
-            bar.className = "pdf-ann-line pdf-ann-line-strike";
+            bar.className = "pdf-ann-line";
+            bar.style.top = `${ANN.strikeTopPct}%`;
+            bar.style.bottom = "auto";
+            bar.style.height = `${linePx}px`;
             bar.style.background = cm.line || "#e53935";
             hit.appendChild(bar);
           } else {
-            // underline / comment — fixed 2.5px under each LINE fragment
             const bar = document.createElement("div");
             bar.className = "pdf-ann-line";
-            const lineColor =
+            bar.style.height = `${linePx}px`;
+            bar.style.bottom = `${ANN.lineBottomPx}px`;
+            bar.style.background =
               type === "comment" ? "#1e88e5" : cm.line || "#7cb518";
-            bar.style.background = lineColor;
             hit.appendChild(bar);
           }
 
@@ -714,6 +725,12 @@
           layer.appendChild(hit);
         });
       });
+  }
+
+  function hexToRgb(hex) {
+    const h = (hex || "#ffe566").replace("#", "");
+    const n = parseInt(h.length === 3 ? h.replace(/./g, "$&$&") : h, 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
   }
 
   function selectAnnotVisual(id) {
@@ -945,15 +962,17 @@
 
   async function clearAll() {
     if (!state.path) return;
-    if (!confirm("确定清除该 PDF 的全部标注？\n可用 Ctrl+Z 立刻撤销。")) return;
-    if (!confirm("再次确认：清除全部标注？")) return;
+    const ok1 = confirm("确定清除全部标注？\n（高光 / 下划线 / 删除线 / 评论）");
+    if (!ok1) return;
+    const ok2 = confirm("请再次确认：清除全部标注？\n清除后可用 Ctrl+Z 撤销。");
+    if (!ok2) return;
     try {
       await api("clear_annotations", state.path);
       state.annotations = state.annotations.filter((a) => a.native);
       pushAnnotHistory();
       await refreshAnnots();
       hideAnnotMenu();
-      toast("已清除侧车标注");
+      toast("已清除全部标注");
     } catch (_) {
       toast("清除失败");
     }
@@ -1111,14 +1130,18 @@
     state.scale = Math.max(0.35, Math.min(4, scale));
     clearTimeout(zoomTimer);
     if (immediate) {
+      clearLiveZoom();
+      state.baseScale = state.scale;
       await renderAll();
       return;
     }
-    // Live scale first — avoid blank/thin placeholders while Ctrl+wheel
     applyLiveZoom();
+    // Longer settle after wheel burst → fewer full re-renders, smoother feel
     zoomTimer = setTimeout(async () => {
+      clearLiveZoom();
+      state.baseScale = state.scale;
       await renderAll();
-    }, 200);
+    }, 320);
   }
 
   function bindChrome() {
@@ -1208,8 +1231,8 @@
         if (!ev.ctrlKey && !ev.metaKey) return;
         if (!state.doc) return;
         ev.preventDefault();
-        const dir = ev.deltaY > 0 ? -0.1 : 0.1;
-        setZoom(state.scale + dir, false);
+        const dir = ev.deltaY > 0 ? -0.08 : 0.08;
+        setZoom(state.scale * (ev.deltaY > 0 ? 0.92 : 1.08), false);
       },
       { passive: false }
     );

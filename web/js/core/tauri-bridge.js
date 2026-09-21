@@ -57,6 +57,8 @@
     clear_annotations: (path) => invoke("stuart_clear_annotations", { pdfPath: path }),
     export_pdf_annotations: (path, items) =>
       invoke("stuart_export_pdf_annotations", { pdfPath: path, items }),
+    capture_window: () => invoke("stuart_capture_window"),
+    apply_window_state: () => invoke("stuart_apply_window_state"),
     // AI / memory / tool surface (medium-term)
     get_capabilities: () => invoke("stuart_get_capabilities"),
     ai_home: () => invoke("stuart_ai_home"),
