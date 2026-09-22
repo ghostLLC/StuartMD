@@ -46,10 +46,17 @@ changelog = read("CHANGELOG.md")
 sample = read("samples/欢迎使用 StuartMD.md")
 
 # Version sync
-check('"3.1.0"' in cargo and "3.1.0" in cargo, "Cargo.toml 3.1.0")
-check('name = "stuartmd"' in lock and "3.1.0" in lock, "Cargo.lock stuartmd 3.1.0")
-check('"version": "3.1.0"' in conf, "tauri.conf.json 3.1.0")
-check('VERSION: &str = "3.1.0"' in fs, "fs_api VERSION 3.1.0")
+check('"3.1.1"' in cargo and "3.1.1" in cargo, "Cargo.toml 3.1.1")
+check('name = "stuartmd"' in lock and "3.1.1" in lock, "Cargo.lock stuartmd 3.1.1")
+check('"version": "3.1.1"' in conf, "tauri.conf.json 3.1.1")
+check('VERSION: &str = "3.1.1"' in fs, "fs_api VERSION 3.1.1")
+win = read("tauri/src-tauri/src/win_api.rs")
+check("file-md.ico" in win and "file-pdf.ico" in win, "distinct file icons in registry")
+check("file-md.ico" in conf and "file-pdf.ico" in conf, "icons bundled as resources")
+from pathlib import Path as _P
+_a = ROOT / "assets"
+check((_a / "file-md.ico").is_file() and (_a / "file-pdf.ico").is_file(), "icon files exist")
+check("3.1.1" in changelog and "文件图标" in changelog, "CHANGELOG 3.1.1 icons")
 pdfjs = read("web/js/pdf-viewer.js")
 check("getAiContext" in pdfjs and "getSelection" in pdfjs, "PDF AI selection bridge")
 check('data-pa="ai-explain"' in html, "PDF annot bar explain button")

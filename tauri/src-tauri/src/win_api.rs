@@ -178,7 +178,21 @@ pub fn stuart_register_file_association() -> Value {
         let exe = std::env::current_exe().unwrap_or_else(|_| exe_dir().join("stuartmd.exe"));
         let exe_s = exe.to_string_lossy().to_string();
         let cmd = format!("\"{}\" \"%1\"", exe_s);
-        let icon = format!("{},0", exe_s);
+        let icon_app = format!("{},0", exe_s);
+        // Distinct file-type icons shipped beside the exe (resources)
+        let icon_dir = exe.parent().map(|p| p.to_path_buf()).unwrap_or_else(exe_dir);
+        let icon_md_path = icon_dir.join("file-md.ico");
+        let icon_pdf_path = icon_dir.join("file-pdf.ico");
+        let icon_md = if icon_md_path.is_file() {
+            icon_md_path.to_string_lossy().to_string()
+        } else {
+            icon_app.clone()
+        };
+        let icon_pdf = if icon_pdf_path.is_file() {
+            icon_pdf_path.to_string_lossy().to_string()
+        } else {
+            icon_app.clone()
+        };
 
         // Markdown: claim as primary handler for md-like types
         for ext in [".md", ".markdown", ".mdown", ".mkd"] {
@@ -195,7 +209,7 @@ pub fn stuart_register_file_association() -> Value {
             let _ = k.0.set_value("", &"Markdown 文档 (StuartMD)");
         }
         if let Ok(k) = hkcu.create_subkey(format!(r"Software\Classes\{}\DefaultIcon", PROG_ID)) {
-            let _ = k.0.set_value("", &icon.as_str());
+            let _ = k.0.set_value("", &icon_md.as_str());
         }
         if let Ok(k) =
             hkcu.create_subkey(format!(r"Software\Classes\{}\shell\open\command", PROG_ID))
@@ -208,7 +222,7 @@ pub fn stuart_register_file_association() -> Value {
             let _ = k.0.set_value("", &"PDF 文档 (StuartMD)");
         }
         if let Ok(k) = hkcu.create_subkey(format!(r"Software\Classes\{}\DefaultIcon", PROG_ID_PDF)) {
-            let _ = k.0.set_value("", &icon.as_str());
+            let _ = k.0.set_value("", &icon_pdf.as_str());
         }
         if let Ok(k) = hkcu
             .create_subkey(format!(r"Software\Classes\{}\shell\open\command", PROG_ID_PDF))
@@ -225,7 +239,7 @@ pub fn stuart_register_file_association() -> Value {
             let _ = k.0.set_value("", &"StuartMD");
         }
         if let Ok(k) = hkcu.create_subkey(format!(r"{}\DefaultIcon", app_key)) {
-            let _ = k.0.set_value("", &icon.as_str());
+            let _ = k.0.set_value("", &icon_app.as_str());
         }
         if let Ok(k) = hkcu.create_subkey(format!(r"{}\shell\open\command", app_key)) {
             let _ = k.0.set_value("", &cmd.as_str());
