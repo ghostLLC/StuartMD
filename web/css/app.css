@@ -3261,11 +3261,11 @@ body[data-theme="wallpaper"] {
   color: var(--text-2);
 }
 .ai-panel-body {
-  flex: 1;
+  flex: 1 1 auto;
   overflow: auto;
   margin: 8px 12px;
   min-height: 120px;
-  max-height: 280px;
+  /* no max-height — panel body must grow with resize or the bottom goes blank */
   font-size: 13px;
   line-height: 1.65;
   color: var(--text);
@@ -3788,4 +3788,27 @@ body.ai-shortcut-recording #ai-shortcut-input {
 .pdf-annot-bar button.pdf-ai-btn {
   min-width: 52px;
   justify-content: center;
+}
+
+/* AI panel resize layout fix 3.1.8 — body fills panel; no max-height gap */
+.ai-panel {
+  box-sizing: border-box;
+  display: flex !important;
+  flex-direction: column;
+  overflow: hidden;
+  resize: both;
+}
+.ai-panel-body {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow: auto;
+}
+.ai-panel-head,
+.ai-panel-quote,
+.ai-panel-meta,
+.ai-panel-actions,
+.ai-panel-feedback,
+.ai-panel-follow-row {
+  flex: 0 0 auto;
 }
