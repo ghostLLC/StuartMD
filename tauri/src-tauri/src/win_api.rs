@@ -238,8 +238,34 @@ pub fn stuart_register_file_association() -> Value {
         }
         // Explorer uses .pdf DefaultIcon / default ProgId icon (often MSEdgePDF).
         // Write extension-level DefaultIcon so the distinct StuartMD PDF type icon shows.
+        // Windows often binds .pdf to ProgId "PDF" (created by installer).
+        // Paint type icons on every known PDF ProgId so Explorer does not
+        // fall back to stuartmd.exe,0 (application icon).
+        for pdf_prog in ["PDF", "pdffile", "StuartMD.PDF"] {
+            if let Ok(k) = hkcu.create_subkey(format!(r"Software\Classes\{}\DefaultIcon", pdf_prog)) {
+                let _ = k.0.set_value("", &icon_pdf.as_str());
+            }
+        }
+        // Windows often binds .pdf to ProgId "PDF" (created by installer).
+        // Paint type icons on every known PDF ProgId so Explorer does not
+        // fall back to stuartmd.exe,0 (application icon).
+        for pdf_prog in ["PDF", "pdffile", "StuartMD.PDF"] {
+            if let Ok(k) = hkcu.create_subkey(format!(r"Software\Classes\{}\DefaultIcon", pdf_prog)) {
+                let _ = k.0.set_value("", &icon_pdf.as_str());
+            }
+        }
         if let Ok(k) = hkcu.create_subkey(r"Software\Classes\.pdf\DefaultIcon") {
             let _ = k.0.set_value("", &icon_pdf.as_str());
+        }
+        if hkcu.open_subkey("Software\\Classes\\MSEdgePDF").is_ok() {
+            if let Ok(k) = hkcu.create_subkey(r"Software\Classes\MSEdgePDF\DefaultIcon") {
+                let _ = k.0.set_value("", &icon_pdf.as_str());
+            }
+        }
+        if hkcu.open_subkey("Software\\Classes\\MSEdgePDF").is_ok() {
+            if let Ok(k) = hkcu.create_subkey(r"Software\Classes\MSEdgePDF\DefaultIcon") {
+                let _ = k.0.set_value("", &icon_pdf.as_str());
+            }
         }
 
         // Applications\<exe> — classic "Open with" list entry (md + pdf)

@@ -2,6 +2,14 @@
 
 本文件记录 StuartMD 的版本变更，便于开发与发布对照。
 
+## [3.1.3] - 2026-09-21
+
+### 修复：PDF 仍显示应用图标；MD 角标过小
+- **根因**：`.pdf` 默认 ProgId 是 **`PDF`**（安装器创建），其 `DefaultIcon` 为 `stuartmd.exe,0`，资源管理器回退到应用图标
+- 现对 **`PDF` / `pdffile` / `StuartMD.PDF` / `.pdf\DefaultIcon`** 统一写入 `file-pdf.ico,0`
+- **MD / PDF 图标重绘**：大号加粗角标（文件夹 16–32px 可辨认），色块底 + 白字
+- 覆盖 `MSEdgePDF` 图标仅当该 ProgId 已存在（不凭空创建）
+
 ## [3.1.2] - 2026-09-21
 
 ### 修复：PDF 文件图标

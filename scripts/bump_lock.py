@@ -7,7 +7,7 @@ p = Path(
 t = p.read_text(encoding="utf-8")
 t2, n = re.subn(
     r'(name = "stuartmd"\r?\nversion = ")[^"]+(")',
-    r"\g<1>3.1.2\g<2>",
+    r"\g<1>3.1.3\g<2>",
     t,
     count=1,
 )
