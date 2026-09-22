@@ -110,9 +110,13 @@
   }
 
   function scrollPanelBottom() {
+    // Do not auto-scroll: panel is small; user scrolls while reading streams.
+  }
+
+  function scrollPanelTop() {
     try {
       const body = $("#ai-panel-body");
-      if (body) body.scrollTop = body.scrollHeight;
+      if (body) body.scrollTop = 0;
     } catch (_) {}
   }
 
@@ -232,6 +236,7 @@
     uiState.chat = [];
     if (quote) pushChat("user", quote);
     renderChat();
+    scrollPanelTop();
   }
 
   function getShortcut() {
