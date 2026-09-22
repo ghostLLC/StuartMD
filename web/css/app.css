@@ -3778,3 +3778,14 @@ body.ai-shortcut-recording #ai-shortcut-input {
   background: var(--border);
   margin: 0 4px;
 }
+
+/* AI buttons: single-line label (was wrapping as 讲/解 on PDF bar) */
+.sel-toolbar button.sel-ai,
+.pdf-annot-bar button.pdf-ai-btn {
+  white-space: nowrap;
+  flex: none;
+}
+.pdf-annot-bar button.pdf-ai-btn {
+  min-width: 52px;
+  justify-content: center;
+}

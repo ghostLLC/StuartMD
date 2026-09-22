@@ -1,8 +1,8 @@
 # StuartMD
 
-轻量 **Markdown / PDF** 阅读与编辑器（Windows 桌面）。风格简约，适合读文档、写笔记、批注 PDF，并内置 **选区 AI 讲解**。
+轻量 **Markdown / PDF** 阅读与编辑器（Windows 桌面）。风格简约，适合读文档、写笔记、批注 PDF，并内置 **选区 AI 问答**。
 
-![version](https://img.shields.io/badge/version-3.1.5-blue)
+![version](https://img.shields.io/badge/version-3.1.6-blue)
 
 **下载：** [GitHub Releases](https://github.com/ghostLLC/StuartMD/releases) · 最新安装包 `StuartMD-Setup-3.1.3.exe`
 
@@ -25,7 +25,7 @@
 - 选中文字 → 标注条「**讲解**」或 `Alt+E`，结合本页与邻页文本讲解
 - 批注侧车存在 AppData，不直接改原文件（导出时才写入）
 
-### AI 讲解（3.0.x / 3.1.x）
+### AI 问答（3.0.x / 3.1.x）
 - 选中文字 → 浮动栏「**讲解**」或 **Alt+E**（可自定义）；**Markdown 与 PDF 均支持**
 - **只讲解、不改写**文档；结合章节 / 邻近块等上下文
 - 讲解面板：聊天记录、追问、复制、记入记忆、再讲一次
@@ -61,7 +61,7 @@ StuartMD-Setup-3.1.3.exe /S
 | `Ctrl+B` | 侧栏（编辑器内为加粗） |
 | `Ctrl+1/2/3` | 阅读 / 分栏 / 源码 |
 | `Ctrl+E` / `Ctrl+P` | 导出 HTML / 打印 |
-| **`Alt+E`** | AI 讲解（可自定义） |
+| **`Alt+E`** | AI 问答（可自定义） |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | 撤销 |
 | `Ctrl+Y` | 重做 |
 

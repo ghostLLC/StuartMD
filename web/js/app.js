@@ -734,7 +734,7 @@
         }
       } catch (err) {
         console.error(err);
-        toast("讲解启动失败：" + (err && err.message ? err.message : err));
+        toast("问答启动失败：" + (err && err.message ? err.message : err));
       }
     }
   }

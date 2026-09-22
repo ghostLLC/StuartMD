@@ -145,7 +145,7 @@
                 <button type="button" data-think="deep">深入</button>
               </div>
             </div>
-            <div class="ai-mm-hint" id="ai-mm-status">讲解快捷键 Alt+E</div>
+            <div class="ai-mm-hint" id="ai-mm-status">问答快捷键 Alt+E</div>
             <div class="ai-mm-actions">
               <button type="button" class="btn sm" id="ai-mm-settings">模型设置…</button>
               <button type="button" class="btn sm primary" id="ai-mm-save">应用</button>
@@ -283,12 +283,12 @@
             <span class="color-a">A</span><span class="caret">▾</span>
           </button>
           <span class="sel-sep"></span>
-          <button type="button" data-sel="ai-explain" class="sel-ai" title="结合上下文 AI 讲解">
+          <button type="button" data-sel="ai-explain" class="sel-ai" title="结合上下文 AI 问答">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
               <path d="M12 3l1.6 3.7L17 8.3l-3.4 1.6L12 13.5l-1.6-3.6L7 8.3l3.4-1.6L12 3z" stroke-linejoin="round"/>
               <path d="M5 16h9M5 20h7" stroke-linecap="round"/>
             </svg>
-            讲解
+            问答
           </button>
         </div>
         <div id="sel-dropdown" class="sel-dropdown" hidden></div>
@@ -302,7 +302,7 @@
                   <path d="M5 16h9M5 20h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
                 </svg>
               </span>
-              <span class="ai-panel-title">AI 讲解</span>
+              <span class="ai-panel-title">AI 问答</span>
               <span class="ai-panel-badge" id="ai-panel-badge">就绪</span>
             </div>
             <button type="button" class="ai-panel-x" id="ai-panel-close" title="关闭">×</button>
@@ -310,7 +310,7 @@
           <div class="ai-panel-quote" id="ai-panel-quote" hidden></div>
           <div class="ai-panel-meta" id="ai-panel-meta"></div>
           <div class="ai-panel-body" id="ai-panel-body">
-            <div class="ai-panel-empty" id="ai-panel-empty">选中内容后，点击「讲解」或按快捷键。</div>
+            <div class="ai-panel-empty" id="ai-panel-empty">选中内容后，点击「问答」或按快捷键。</div>
             <div class="ai-chat" id="ai-chat"></div>
             <div class="ai-panel-out" id="ai-panel-out"></div>
             <div class="ai-thinking" id="ai-thinking" hidden>
@@ -411,12 +411,12 @@
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 5h14v10H8l-3 3V5z"/></svg>
             </button>
             <span class="pdf-annot-sep"></span>
-            <button type="button" data-pa="ai-explain" class="pdf-ai-btn" title="结合上下文 AI 讲解">
+            <button type="button" data-pa="ai-explain" class="pdf-ai-btn" title="结合上下文 AI 问答">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                 <path d="M12 3l1.6 3.7L17 8.3l-3.4 1.6L12 13.5l-1.6-3.6L7 8.3l3.4-1.6L12 3z" stroke-linejoin="round"/>
                 <path d="M5 16h9M5 20h7" stroke-linecap="round"/>
               </svg>
-              讲解
+              问答
             </button>
           </div>
           <!-- Hover tip for comments (follows mouse) -->
@@ -553,7 +553,7 @@
         </section>
         <section class="set-section" id="set-ai-section">
           <h3>AI 模型</h3>
-          <p class="hint small">选中文字后讲解；密钥仅保存在本机（DPAPI），不会写入文档或备份明文。</p>
+          <p class="hint small">选中文字后问答；密钥仅保存在本机（DPAPI），不会写入文档或备份明文。</p>
           <div class="row">
             <label class="ai-set-label">启用 AI</label>
             <button type="button" class="btn" id="ai-enabled">启用：开</button>
@@ -585,7 +585,7 @@
             </div>
           </div>
           <div class="row">
-            <label class="ai-set-label">讲解快捷键</label>
+            <label class="ai-set-label">问答快捷键</label>
             <input type="text" id="ai-shortcut-input" placeholder="Alt+E" style="min-width:140px" />
             <button type="button" class="btn" id="ai-shortcut-record">录入</button>
             <button type="button" class="btn" id="ai-shortcut-reset">默认 Alt+E</button>

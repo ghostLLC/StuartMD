@@ -46,11 +46,11 @@ changelog = read("CHANGELOG.md")
 sample = read("samples/欢迎使用 StuartMD.md")
 
 # Version sync
-check('"3.1.5"' in cargo and "3.1.5" in cargo, "Cargo.toml 3.1.5")
-check('name = "stuartmd"' in lock and "3.1.5" in lock, "Cargo.lock stuartmd 3.1.5")
-check('"version": "3.1.5"' in conf, "tauri.conf.json 3.1.5")
-check('VERSION: &str = "3.1.5"' in fs, "fs_api VERSION 3.1.5")
-check("3.1.5" in changelog and "设计" in changelog, "CHANGELOG 3.1.5")
+check('"3.1.6"' in cargo and "3.1.6" in cargo, "Cargo.toml 3.1.6")
+check('name = "stuartmd"' in lock and "3.1.6" in lock, "Cargo.lock stuartmd 3.1.6")
+check('"version": "3.1.6"' in conf, "tauri.conf.json 3.1.6")
+check('VERSION: &str = "3.1.6"' in fs, "fs_api VERSION 3.1.6")
+check("3.1.6" in changelog and "设计" in changelog, "CHANGELOG 3.1.6")
 win_early = read("tauri/src-tauri/src/win_api.rs")
 check('"PDF"' in win_early and "pdffile" in win_early, "PDF ProgId icon set")
 check("3.1.3" in changelog and "应用图标" in changelog, "CHANGELOG 3.1.3")
@@ -178,3 +178,6 @@ if ok:
     sys.exit(0)
 print("SELFTEST 3.0.0 FAIL")
 sys.exit(1)
+
+check("nowrap" in css, "AI button nowrap")
+check("AI 问答" in html, "panel title 问答")

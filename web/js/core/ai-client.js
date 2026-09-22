@@ -297,7 +297,7 @@
     }
 
     if (!built.quote || !String(built.quote).trim()) {
-      return { error: "请先选中要讲解的内容" };
+      return { error: "请先选中要问答的内容" };
     }
 
     const style = getStyle(cfg);

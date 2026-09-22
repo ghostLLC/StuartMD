@@ -95,7 +95,7 @@
     }
     return {
       kind: "other",
-      title: "讲解未完成",
+      title: "问答未完成",
       detail: s || "请稍后重试。",
       action: "retry",
     };
@@ -405,7 +405,7 @@
     const st = $("#ai-mm-status");
     if (st) {
       const keyOk = provider && provider.key_set;
-      st.textContent = `${getShortcut()} 讲解 · ${provider ? provider.label || provider.id : "未配置"}${keyOk ? "" : " · 请配置 API Key"}`;
+      st.textContent = `${getShortcut()} 问答 · ${provider ? provider.label || provider.id : "未配置"}${keyOk ? "" : " · 请配置 API Key"}`;
     }
     fillProviders($("#ai-provider-select"), cfg, provider && provider.id);
     const smi = $("#ai-model-input");
@@ -862,12 +862,12 @@
     p.copy?.addEventListener("click", () => {
       const text = uiState.lastAnswer || "";
       if (!text) {
-        toast("暂无讲解内容");
+        toast("暂无问答内容");
         return;
       }
       try {
         navigator.clipboard?.writeText(text);
-        toast("已复制讲解");
+        toast("已复制问答");
       } catch (_) {
         toast("复制失败");
       }
@@ -883,7 +883,7 @@
     p.reask?.addEventListener("click", () => triggerExplain({ reposition: false }));
     p.follow?.addEventListener("click", () => {
       if (!uiState.lastMessages || !uiState.lastMessages.length) {
-        toast("请先进行一次讲解");
+        toast("请先进行一次问答");
         return;
       }
       p.followRow.hidden = !p.followRow.hidden;
@@ -964,7 +964,7 @@
       return;
     }
     if (!uiState.lastMessages || !uiState.lastMessages.length) {
-      toast("请先进行一次讲解，再追问");
+      toast("请先进行一次问答，再追问");
       return;
     }
     openPanel(); // keep position — no reposition
@@ -1076,7 +1076,7 @@
       const quote = typeof picked === "string" ? picked : picked.text;
       const pdfMode = isPdfDoc() || (picked && picked.inPdf);
       if (!quote) {
-        toast("请先选中要讲解的内容");
+        toast("请先选中要问答的内容");
         return;
       }
       openPanel({ reposition: o.reposition !== false && !uiState.userMoved });
@@ -1099,7 +1099,7 @@
       setThinking(true, "正在思考…");
       const badge = $("#ai-panel-badge");
       if (badge) {
-        badge.textContent = "讲解中";
+        badge.textContent = "问答中";
         badge.dataset.state = "busy";
       }
       uiState.lastQuote = quote;
@@ -1175,7 +1175,7 @@
               quote,
               uiState.lastAnswer
             );
-            if (mm && mm.ask) pushChat("system", "讲解完成。可点「记入记忆」保存偏好（记忆策略：询问）。");
+            if (mm && mm.ask) pushChat("system", "问答完成。可点「记入记忆」保存偏好（记忆策略：询问）。");
             else if (mm && mm.ok && mm.mode === "always") pushChat("system", "已按「默认学习」记录本次活动。");
           } catch (_) {}
           if (uiState.isFirstAnswer) {
