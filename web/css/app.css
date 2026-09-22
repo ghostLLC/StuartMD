@@ -3762,3 +3762,19 @@ body.ai-shortcut-recording #ai-shortcut-input {
 }
 .ai-panel-out[hidden] { display: none !important; }
 .ai-panel { z-index: 360; }
+
+/* PDF annot bar AI button */
+.pdf-annot-bar button.pdf-ai-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #6d28d9;
+  font-weight: 650;
+}
+.pdf-annot-sep {
+  display: inline-block;
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  margin: 0 4px;
+}

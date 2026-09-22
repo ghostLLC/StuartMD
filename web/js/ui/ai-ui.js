@@ -1020,17 +1020,41 @@
   function resolveSelectedQuote() {
     const host = global.StuartMD;
     let text = "";
+    let page = null;
+    let inPdf = false;
     try {
       const info = host && host.getSelectionInfo && host.getSelectionInfo();
       text = String((info && info.text) || "").trim();
+      if (info && info.inPdf) {
+        inPdf = true;
+        page = info.page != null ? info.page : null;
+      }
     } catch (_) {}
     if (!text) {
       try {
         const cache = host && host.getSelectionCache && host.getSelectionCache();
         text = String((cache && cache.text) || "").trim();
+        if (cache && cache.inPdf) {
+          inPdf = true;
+          page = cache.page != null ? cache.page : page;
+        }
       } catch (_) {}
     }
-    return text;
+    return { text, page, inPdf };
+  }
+
+  function isPdfDoc() {
+    try {
+      if (global.StuartMDPdf && global.StuartMDPdf.isActive && global.StuartMDPdf.isActive()) {
+        return true;
+      }
+    } catch (_) {}
+    try {
+      const d = global.StuartMD && global.StuartMD.getDocument && global.StuartMD.getDocument();
+      return !!(d && d.kind === "pdf");
+    } catch (_) {
+      return false;
+    }
   }
 
   async function triggerExplain(opts) {
@@ -1045,8 +1069,12 @@
         toast("AI 模块未加载（StuartAI/StuartAIContext）");
         return;
       }
-      try { global.StuartMD?.captureSelectionCache?.(); } catch (_) {}
-      const quote = resolveSelectedQuote();
+      try {
+        global.StuartMD?.captureSelectionCache?.();
+      } catch (_) {}
+      const picked = resolveSelectedQuote();
+      const quote = typeof picked === "string" ? picked : picked.text;
+      const pdfMode = isPdfDoc() || (picked && picked.inPdf);
       if (!quote) {
         toast("请先选中要讲解的内容");
         return;
@@ -1070,68 +1098,104 @@
       pushChat("ai", "", { streaming: true });
       setThinking(true, "正在思考…");
       const badge = $("#ai-panel-badge");
-      if (badge) { badge.textContent = "讲解中"; badge.dataset.state = "busy"; }
+      if (badge) {
+        badge.textContent = "讲解中";
+        badge.dataset.state = "busy";
+      }
       uiState.lastQuote = quote;
       uiState.lastAnswer = "";
       uiState.lastMessages = [];
       uiState.isFirstAnswer = true;
       setFeedbackVisible(false);
-      const res = await AI.explain(
-        { kind: "markdown", quote },
-        {
-          onDelta: (full) => {
-            setThinking(false);
-            uiState.lastAnswer = full;
-            updateStreamingChat(full);
-          },
-          onDone: async (payload) => {
-            const text = payload && payload.text != null ? payload.text : uiState.lastAnswer;
-            uiState.lastAnswer = text || "";
-            const err = payload && payload.error && !text ? payload.error : null;
-            finishStreamingChat(uiState.lastAnswer, err);
-            const badge2 = $("#ai-panel-badge");
-            if (badge2) {
-              badge2.textContent = err ? "失败" : "完成";
-              badge2.dataset.state = err ? "err" : "ok";
-            }
-            if (err) {
-              const info = classifyAiError(err);
-              toast(info.title);
-              if (info.action === "open_settings") openSettingsFocus();
-              return;
-            }
-            const built = C.buildMarkdownExplain(global.StuartMD, {
+
+      let explainInput = { kind: "markdown", quote };
+      let builtForHistory = null;
+      if (pdfMode) {
+        let pdfCtx = { quote, page: (picked && picked.page) || null, name: "PDF", pageText: "", neighborText: "" };
+        try {
+          if (global.StuartMDPdf?.getAiContext) {
+            pdfCtx = Object.assign(pdfCtx, await global.StuartMDPdf.getAiContext());
+            pdfCtx.quote = quote || pdfCtx.quote;
+          }
+        } catch (_) {}
+        explainInput = {
+          kind: "pdf",
+          quote,
+          page: pdfCtx.page,
+          pageText: pdfCtx.pageText || "",
+          neighborText: pdfCtx.neighborText || "",
+          name: pdfCtx.name || "PDF",
+        };
+        const stylePdf = AI.getStyle ? AI.getStyle() : {};
+        builtForHistory = C.buildPdfExplain(explainInput, {
+          maxChars: cfg.context_max_chars || C.DEFAULT_MAX,
+          scope: cfg.context_scope,
+          memoryProfile: "",
+        });
+        void stylePdf;
+      } else {
+        builtForHistory = C.buildMarkdownExplain(global.StuartMD, {
+          quote,
+          scope: (cfg && cfg.context_scope) || "neighborhood",
+          maxChars: (cfg && cfg.context_max_chars) || 8000,
+        });
+      }
+
+      const res = await AI.explain(explainInput, {
+        onDelta: (full) => {
+          setThinking(false);
+          uiState.lastAnswer = full;
+          updateStreamingChat(full);
+        },
+        onDone: async (payload) => {
+          const text = payload && payload.text != null ? payload.text : uiState.lastAnswer;
+          uiState.lastAnswer = text || "";
+          const err = payload && payload.error && !text ? payload.error : null;
+          finishStreamingChat(uiState.lastAnswer, err);
+          const badge2 = $("#ai-panel-badge");
+          if (badge2) {
+            badge2.textContent = err ? "失败" : "完成";
+            badge2.dataset.state = err ? "err" : "ok";
+          }
+          if (err) {
+            const info = classifyAiError(err);
+            toast(info.title);
+            if (info.action === "open_settings") openSettingsFocus();
+            return;
+          }
+          const styleNow = AI.getStyle ? AI.getStyle() : {};
+          uiState.lastMessages = [
+            { role: "system", content: C.systemPrompt(styleNow) },
+            { role: "user", content: (builtForHistory && builtForHistory.promptUser) || quote },
+            { role: "assistant", content: uiState.lastAnswer },
+          ];
+          try {
+            const mm = await AI.handleMemoryAfterExplain(
+              (builtForHistory && builtForHistory.meta) || { name: pdfMode ? "PDF" : "Markdown" },
               quote,
-              scope: (cfg && cfg.context_scope) || "neighborhood",
-              maxChars: (cfg && cfg.context_max_chars) || 8000,
-            });
-            uiState.lastMeta = built.meta;
-            const styleNow = AI.getStyle ? AI.getStyle() : {};
-            uiState.lastMessages = [
-              { role: "system", content: C.systemPrompt(styleNow) },
-              { role: "user", content: built.promptUser },
-              { role: "assistant", content: uiState.lastAnswer },
-            ];
-            try {
-              const mm = await AI.handleMemoryAfterExplain(built.meta, quote, uiState.lastAnswer);
-              if (mm && mm.ask) pushChat("system", "讲解完成。可点「记入记忆」保存偏好（记忆策略：询问）。");
-              else if (mm && mm.ok && mm.mode === "always") pushChat("system", "已按「默认学习」记录本次活动。");
-            } catch (_) {}
-            if (uiState.isFirstAnswer) {
-              setFeedbackVisible(true);
-              uiState.isFirstAnswer = false;
-            }
-          },
-        }
-      );
+              uiState.lastAnswer
+            );
+            if (mm && mm.ask) pushChat("system", "讲解完成。可点「记入记忆」保存偏好（记忆策略：询问）。");
+            else if (mm && mm.ok && mm.mode === "always") pushChat("system", "已按「默认学习」记录本次活动。");
+          } catch (_) {}
+          if (uiState.isFirstAnswer) {
+            setFeedbackVisible(true);
+            uiState.isFirstAnswer = false;
+          }
+        },
+      });
       if (res && res.error) {
         setThinking(false);
         finishStreamingChat("", res.error);
         const badge3 = $("#ai-panel-badge");
-        if (badge3) { badge3.textContent = "失败"; badge3.dataset.state = "err"; }
+        if (badge3) {
+          badge3.textContent = "失败";
+          badge3.dataset.state = "err";
+        }
       } else if (res && res.meta && p.meta) {
         uiState.lastMeta = res.meta;
-        p.meta.textContent = `${(provider && provider.label) || ""} · ${res.meta.heading || ""} · ${getShortcut()}`;
+        const label = res.meta.page != null ? `P${res.meta.page}` : res.meta.heading || "";
+        p.meta.textContent = `${(provider && provider.label) || ""} · ${label} · ${getShortcut()}`;
       }
     } catch (err) {
       console.error("triggerExplain failed", err);

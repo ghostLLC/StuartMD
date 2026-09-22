@@ -2,9 +2,9 @@
 
 轻量 **Markdown / PDF** 阅读与编辑器（Windows 桌面）。风格简约，适合读文档、写笔记、批注 PDF，并内置 **选区 AI 讲解**。
 
-![version](https://img.shields.io/badge/version-3.0.8-blue)
+![version](https://img.shields.io/badge/version-3.1.0-blue)
 
-**下载：** [GitHub Releases](https://github.com/ghostLLC/StuartMD/releases) · 最新安装包 `StuartMD-Setup-3.0.8.exe`
+**下载：** [GitHub Releases](https://github.com/ghostLLC/StuartMD/releases) · 最新安装包 `StuartMD-Setup-3.1.0.exe`
 
 ## 功能概览
 
@@ -22,11 +22,11 @@
 - 竖版 / 横版阅读，缩放、适应高度、旋转、双页
 - 标注：**高光 / 下划线 / 删除线 / 评论**（选区小工具条）
 - 评论浮窗可拖动；清除标注默认保留评论
-- 可将标注**写入 PDF**（兼容 Edge / WPS；写出后校验，避免损坏原文件）
+- 选中文字 → 标注条「**讲解**」或 `Alt+E`，结合本页与邻页文本讲解
 - 批注侧车存在 AppData，不直接改原文件（导出时才写入）
 
-### AI 讲解（3.0.x）
-- 选中文字 → 浮动栏「**讲解**」或 **Alt+E**（可自定义）
+### AI 讲解（3.0.x / 3.1.x）
+- 选中文字 → 浮动栏「**讲解**」或 **Alt+E**（可自定义）；**Markdown 与 PDF 均支持**
 - **只讲解、不改写**文档；结合章节 / 邻近块等上下文
 - 讲解面板：聊天记录、追问、复制、记入记忆、再讲一次
 - 等待时有思考动画；首次回答可反馈 **太短 / 满意 / 太长**
@@ -41,14 +41,14 @@
 
 ## 快速开始
 
-1. 安装 `StuartMD-Setup-3.0.8.exe`（默认 `%LOCALAPPDATA%\StuartMD`）
+1. 安装 `StuartMD-Setup-3.1.0.exe`（默认 `%LOCALAPPDATA%\StuartMD`）
 2. 打开示例或任意 `.md` / `.pdf`
-3. 使用 AI：右上角 **模型** → 配置 API Key → 选中文字 → **讲解**
+3. 使用 AI：右上角 **模型** → 配置 API Key → 在 Markdown 或 **PDF** 中选中文字 → **讲解**
 
 静默安装：
 
 ```text
-StuartMD-Setup-3.0.8.exe /S
+StuartMD-Setup-3.1.0.exe /S
 ```
 
 ## 快捷键（常用）

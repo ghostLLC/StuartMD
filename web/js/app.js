@@ -393,6 +393,23 @@
 
   function captureSelectionCache() {
     try {
+      // PDF selection snapshot
+      try {
+        if (window.StuartMDPdf && window.StuartMDPdf.isActive && window.StuartMDPdf.isActive()) {
+          const ps = window.StuartMDPdf.getSelection && window.StuartMDPdf.getSelection();
+          if (ps && ps.text && String(ps.text).trim()) {
+            state._selCache = {
+              text: String(ps.text),
+              inPreview: false,
+              inPdf: true,
+              page: ps.page,
+              blockIndex: null,
+              at: Date.now(),
+            };
+            return state._selCache;
+          }
+        }
+      } catch (_) {}
       const sel = window.getSelection();
       if (!sel || sel.isCollapsed || !sel.rangeCount) return state._selCache || null;
       const text = String(sel.toString() || "");
@@ -5453,6 +5470,35 @@ flowchart LR
   }
 
   function getSelectionInfoHost() {
+    // PDF viewer path first
+    try {
+      if (window.StuartMDPdf && window.StuartMDPdf.isActive && window.StuartMDPdf.isActive()) {
+        const ps = window.StuartMDPdf.getSelection && window.StuartMDPdf.getSelection();
+        if (ps && ps.text) {
+          return {
+            text: ps.text,
+            inPreview: false,
+            inPdf: true,
+            page: ps.page,
+            start: null,
+            end: null,
+            blockIndex: null,
+          };
+        }
+        const cachePdf = getSelectionCache();
+        if (cachePdf && cachePdf.text) {
+          return {
+            text: cachePdf.text,
+            inPreview: false,
+            inPdf: true,
+            page: cachePdf.page || null,
+            start: null,
+            end: null,
+            blockIndex: null,
+          };
+        }
+      }
+    } catch (_) {}
     const ta = el.source;
     const sel = window.getSelection();
     let text = "";

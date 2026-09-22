@@ -49,6 +49,8 @@
     selectedHlId: null,
     hlColor: "yellow",
     _pendingSel: null,
+    _pageText: {},
+    _pageTextBusy: {},
   };
 
   const annotHist = { stack: [], i: -1, max: 80 };
@@ -553,6 +555,15 @@
     await page.render({ canvasContext: ctx, viewport, transform: [dpr, 0, 0, dpr, 0, 0] }).promise;
 
     const textContent = await page.getTextContent();
+    // Cache plain page text for AI explain (selection + page neighborhood)
+    try {
+      const plain = (textContent.items || [])
+        .map((it) => (it && it.str) || "")
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (plain) state._pageText[num] = plain;
+    } catch (_) {}
     const frag = document.createDocumentFragment();
     const vscale = viewport.scale || 1;
     textContent.items.forEach((item) => {
@@ -890,7 +901,78 @@
       clientX: ev ? ev.clientX : null,
       clientY: ev ? ev.clientY : null,
     };
+    // Mirror into host selection cache so AI can read after chrome steals focus
+    try {
+      window.StuartMD?.captureSelectionCache?.();
+    } catch (_) {}
     return true;
+  }
+
+  async function loadPageText(pageNum) {
+    const n = Number(pageNum) || 1;
+    if (state._pageText[n]) return state._pageText[n];
+    if (!state.doc || state._pageTextBusy[n]) return state._pageText[n] || "";
+    state._pageTextBusy[n] = true;
+    try {
+      const page = await state.doc.getPage(n);
+      const tc = await page.getTextContent();
+      const plain = (tc.items || [])
+        .map((it) => (it && it.str) || "")
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (plain) state._pageText[n] = plain;
+    } catch (_) {}
+    state._pageTextBusy[n] = false;
+    return state._pageText[n] || "";
+  }
+
+  function getSelection() {
+    const ctx = state._pendingSel;
+    if (ctx && ctx.text) {
+      return {
+        text: ctx.text,
+        page: ctx.page,
+        rects: ctx.rects || [],
+        fromPdf: true,
+      };
+    }
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed && sel.toString().trim()) {
+      const wrap =
+        sel.anchorNode &&
+        (sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement)?.closest?.(
+          ".pdf-page"
+        );
+      return {
+        text: sel.toString().trim(),
+        page: wrap ? Number(wrap.dataset.page || state.page) : state.page,
+        rects: [],
+        fromPdf: !!(el().scroll && sel.anchorNode && el().scroll.contains(sel.anchorNode)),
+      };
+    }
+    return null;
+  }
+
+  async function getAiContext() {
+    const sel = getSelection();
+    const page = (sel && sel.page) || state.page || 1;
+    const pageText = await loadPageText(page);
+    const prev = page > 1 ? await loadPageText(page - 1) : "";
+    const next = page < state.total ? await loadPageText(page + 1) : "";
+    const neighborText = [prev ? `【P${page - 1}】\n${prev}` : "", next ? `【P${page + 1}】\n${next}` : ""]
+      .filter(Boolean)
+      .join("\n\n");
+    return {
+      kind: "pdf",
+      name: state.path ? String(state.path).split(/[\\/]/).pop() : "PDF",
+      path: state.path || "",
+      quote: sel ? sel.text : "",
+      page,
+      pageText: pageText ? `【P${page}】\n${pageText}` : "",
+      neighborText,
+      total: state.total,
+    };
   }
 
   async function addAnnotFromSelection(type, colorId, commentText) {
@@ -1395,6 +1477,19 @@
       } else if (act === "comment") {
         openCommentPanel(null, br.left, br.top + 8);
         hideAnnotBar();
+      } else if (act === "ai-explain") {
+        hideAnnotBar();
+        try {
+          window.StuartMD?.captureSelectionCache?.();
+        } catch (_) {}
+        if (window.StuartAIUI?.triggerExplain) {
+          window.StuartAIUI.triggerExplain({ reposition: true }).catch((err) => {
+            console.error(err);
+            toast(String(err && err.message ? err.message : err));
+          });
+        } else {
+          toast("AI 模块未加载");
+        }
       }
     });
 
@@ -1498,5 +1593,8 @@
     undoAnnot,
     redoAnnot,
     isActive: () => !el().area.hidden && !!state.doc,
+    getSelection,
+    getAiContext,
+    loadPageText,
   };
 })();
