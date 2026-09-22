@@ -2,7 +2,7 @@
 
 轻量 **Markdown / PDF** 阅读与编辑器（Windows 桌面）。风格简约，适合读文档、写笔记、批注 PDF，并内置 **选区 AI 问答**。
 
-![version](https://img.shields.io/badge/version-3.1.6-blue)
+![version](https://img.shields.io/badge/version-3.1.7-blue)
 
 **下载：** [GitHub Releases](https://github.com/ghostLLC/StuartMD/releases) · 最新安装包 `StuartMD-Setup-3.1.3.exe`
 
