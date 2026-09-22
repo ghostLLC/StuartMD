@@ -184,12 +184,12 @@ pub fn stuart_register_file_association() -> Value {
         let icon_md_path = icon_dir.join("file-md.ico");
         let icon_pdf_path = icon_dir.join("file-pdf.ico");
         let icon_md = if icon_md_path.is_file() {
-            icon_md_path.to_string_lossy().to_string()
+            format!("{},0", icon_md_path.to_string_lossy())
         } else {
             icon_app.clone()
         };
         let icon_pdf = if icon_pdf_path.is_file() {
-            icon_pdf_path.to_string_lossy().to_string()
+            format!("{},0", icon_pdf_path.to_string_lossy())
         } else {
             icon_app.clone()
         };
@@ -198,6 +198,10 @@ pub fn stuart_register_file_association() -> Value {
         for ext in [".md", ".markdown", ".mdown", ".mkd"] {
             if let Ok(k) = hkcu.create_subkey(format!(r"Software\Classes\{}", ext)) {
                 let _ = k.0.set_value("", &PROG_ID);
+            }
+            // Extension-level DefaultIcon — Explorer sometimes ignores ProgId icon
+            if let Ok(k) = hkcu.create_subkey(format!(r"Software\Classes\{}\DefaultIcon", ext)) {
+                let _ = k.0.set_value("", &icon_md.as_str());
             }
         }
         // Optional: also appear under .txt Open-with without stealing default
@@ -229,8 +233,13 @@ pub fn stuart_register_file_association() -> Value {
         {
             let _ = k.0.set_value("", &cmd.as_str());
         }
-        if let Ok((k, _)) = hkcu.create_subkey(r"Software\Classes\.pdf\OpenWithProgids") {
-            let _ = k.set_value(PROG_ID_PDF, &"");
+        if let Ok(k) = hkcu.create_subkey(r"Software\Classes\.pdf\OpenWithProgids") {
+            let _ = k.0.set_value(PROG_ID_PDF, &"");
+        }
+        // Explorer uses .pdf DefaultIcon / default ProgId icon (often MSEdgePDF).
+        // Write extension-level DefaultIcon so the distinct StuartMD PDF type icon shows.
+        if let Ok(k) = hkcu.create_subkey(r"Software\Classes\.pdf\DefaultIcon") {
+            let _ = k.0.set_value("", &icon_pdf.as_str());
         }
 
         // Applications\<exe> — classic "Open with" list entry (md + pdf)
@@ -263,6 +272,18 @@ pub fn stuart_register_file_association() -> Value {
         // Do NOT spawn cmd/ie4uinit here — it flashes a console window on every boot.
         // Registry writes are enough for Explorer "Open with" after a refresh.
 
+        {
+            use windows_sys::Win32::UI::Shell::{SHChangeNotify, SHCNF_IDLIST};
+            const SHCNE_ASSOCCHANGED: i32 = 0x0800_0000u32 as i32;
+            unsafe {
+                SHChangeNotify(
+                    SHCNE_ASSOCCHANGED,
+                    SHCNF_IDLIST,
+                    std::ptr::null(),
+                    std::ptr::null(),
+                );
+            }
+        }
         return json!({"ok": true, "command": cmd, "pdf": true, "md": true});
     }
     #[cfg(not(target_os = "windows"))]

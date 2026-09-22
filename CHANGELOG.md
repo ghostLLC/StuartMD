@@ -2,6 +2,14 @@
 
 本文件记录 StuartMD 的版本变更，便于开发与发布对照。
 
+## [3.1.2] - 2026-09-21
+
+### 修复：PDF 文件图标
+- **根因**：资源管理器绘制 `.pdf` 跟随默认程序（常见 MSEdgePDF）图标，而非 StuartMD.PDF 的 DefaultIcon
+- 写入 `Software\Classes\.pdf\DefaultIcon` → `file-pdf.ico,0`
+- ICO 改为经典多尺寸 BMP 帧，避免 shell 加载失败回退为 stuartmd.exe 图标
+- DefaultIcon 统一带 `,0`；注册后刷新关联（SHChangeNotify）
+
 ## [3.1.1] - 2026-09-21
 
 ### 图标
