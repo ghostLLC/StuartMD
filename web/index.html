@@ -9,6 +9,9 @@
   <link rel="stylesheet" href="libs/github.min.css" id="hl-light" />
   <link rel="stylesheet" href="libs/github-dark.min.css" id="hl-dark" disabled />
   <link rel="stylesheet" href="css/app.css" />
+  <link rel="stylesheet" href="css/inspiration-sidebar.css" />
+  <link rel="stylesheet" href="css/diff-modal.css" />
+  <link rel="stylesheet" href="css/margin-notes.css" />
 </head>
 <body data-theme="light">
   <div id="boot-splash" class="boot-splash" aria-hidden="true"></div>
@@ -121,6 +124,11 @@
             <input type="file" id="music-file-input" accept="audio/*" hidden />
           </div>
         </div>
+        <button class="icon-btn" id="btn-inspiration" title="灵感与伴读 (Inspiration Companion)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7zM9 21a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-1H9v1z" fill="currentColor"/>
+          </svg>
+        </button>
         <div class="menu-wrap">
           <button class="icon-btn" id="btn-ai-model" title="AI 模型与密钥" aria-haspopup="true">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -656,6 +664,11 @@
   <script src="js/core/ai-context.js"></script>
   <script src="js/core/ai-client.js"></script>
   <script src="js/ui/ai-ui.js"></script>
+  <script src="js/ui/companion-renderer.js"></script>
+  <script src="js/ui/flash-anchors.js"></script>
+  <script src="js/ui/diff-modal.js"></script>
+  <script src="js/ui/margin-notes.js"></script>
+  <script src="js/ui/inspiration-sidebar.js"></script>
   <script src="js/i18n.js"></script>
   <script src="js/app.js"></script>
   <!-- Reliable confirm dialog for Tauri WebView (native confirm() may no-op) -->

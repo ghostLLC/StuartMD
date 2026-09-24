@@ -86,6 +86,44 @@
         maxOutputTokens: maxOutputTokens == null ? null : maxOutputTokens,
       }),
     ai_chat_cancel: (requestId) => invoke("stuart_ai_chat_cancel", { requestId }),
+    // StuartMD RAG Knowledge Engine (M1 + M2)
+    rag_set_workspace: (workspaceRoot) => invoke("stuart_rag_set_workspace", { workspaceRoot }),
+    rag_query: (query, topK) => invoke("stuart_rag_query", { query, topK }),
+    rag_get_status: () => invoke("stuart_rag_get_status"),
+    rag_sync_workspace: () => invoke("stuart_rag_sync_workspace"),
+    rag_cancel_sync: () => invoke("stuart_rag_cancel_sync"),
+    // StuartMD Diff Gatekeeper (M4)
+    companion_preview_diff: (originalPath, proposedContent, currentRev) =>
+      invoke("stuart_companion_preview_diff", { originalPath, proposedContent, currentRev }),
+    companion_apply_diff: (originalPath, finalContent, expectedRev, expectedHash) =>
+      invoke("stuart_companion_apply_diff", { originalPath, finalContent, expectedRev, expectedHash }),
+    companion_save_note: (originalPath, noteContent, customSuffix) =>
+      invoke("stuart_companion_save_note", { originalPath, noteContent, customSuffix: customSuffix || null }),
+    // StuartMD Context Pyramid & Budgeting Engine (M3)
+    context_assemble: (pyramid, contextLimit, reserveOutput) =>
+      invoke("stuart_context_assemble", {
+        pyramid,
+        contextLimit: contextLimit == null ? null : contextLimit,
+        reserveOutput: reserveOutput == null ? null : reserveOutput,
+      }),
+    // StuartMD Organic Memory & Chat Archive (M5)
+    session_create: (title, workspaceRoot) =>
+      invoke("stuart_session_create", { title, workspaceRoot: workspaceRoot || null }),
+    session_list: () => invoke("stuart_session_list"),
+    session_get_messages: (sessionId) => invoke("stuart_session_get_messages", { sessionId }),
+    session_add_message: (msg) => invoke("stuart_session_add_message", { msg }),
+    session_delete: (sessionId) => invoke("stuart_session_delete", { sessionId }),
+    session_search: (query, limit) => invoke("stuart_session_search", { query, limit: limit || 20 }),
+    organic_memory_upsert: (item) => invoke("stuart_organic_memory_upsert", { item }),
+    organic_memory_list: (tier) => invoke("stuart_organic_memory_list", { tier: tier == null ? null : tier }),
+    organic_memory_evolve: () => invoke("stuart_organic_memory_evolve"),
+    // Event listener helper
+    listen_event: (event, handler) => {
+      if (window.__TAURI__?.event?.listen) {
+        return window.__TAURI__.event.listen(event, handler);
+      }
+      return Promise.resolve(() => {});
+    },
 
     open_file_dialog: async () => {
       const dlg = dialogApi();

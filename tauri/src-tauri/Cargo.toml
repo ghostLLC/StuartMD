@@ -1,6 +1,6 @@
 [package]
 name = "stuartmd"
-version = "3.2.0"
+version = "3.3.0"
 description = "StuartMD desktop shell (Tauri)"
 authors = ["StuartMD"]
 edition = "2021"
@@ -21,6 +21,17 @@ lopdf = { version = "0.34", features = ["chrono"] }
 ureq = { version = "2.12", features = ["json"] }
 url = "2"
 zeroize = { version = "1", features = ["derive"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.25"
+sqlite-vec = "0.1"
+fastembed = "4"
+tokio = { version = "1", features = ["sync", "rt", "macros", "time"] }
+thiserror = "1"
+log = "0.4"
+urlencoding = "2.1"
+similar = { version = "2.6", features = ["inline"] }
+regex = "1.10"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"
@@ -29,6 +40,7 @@ windows-sys = { version = "0.59", features = [
   "Win32_Security_Cryptography",
   "Win32_System_Memory",
   "Win32_System_LibraryLoader",
+  "Win32_System_Threading",
   "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",
   "Win32_Storage_FileSystem",

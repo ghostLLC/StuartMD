@@ -9,7 +9,7 @@ use std::sync::OnceLock;
 use tauri::ipc::Response;
 
 const APP_ID: &str = "StuartMD";
-pub const VERSION: &str = "3.2.0";
+pub const VERSION: &str = "3.3.0";
 pub const PROG_ID: &str = "StuartMD.Markdown";
 pub const PROG_ID_PDF: &str = "StuartMD.PDF";
 pub const SETTINGS_SCHEMA: i64 = 4;

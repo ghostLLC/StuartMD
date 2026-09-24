@@ -5,6 +5,11 @@ mod ai_api;
 mod ai_chat;
 mod fs_api;
 mod win_api;
+mod rag;
+mod rag_ipc;
+mod security;
+mod context;
+mod memory;
 
 use tauri::{Emitter, Manager};
 
@@ -87,7 +92,30 @@ fn main() {
             ai_chat::stuart_ai_test_provider,
             ai_chat::stuart_ai_chat_start,
             ai_chat::stuart_ai_chat_cancel,
+            // StuartMD RAG Knowledge Engine (M1 + M2)
+            rag_ipc::stuart_rag_set_workspace,
+            rag_ipc::stuart_rag_query,
+            rag_ipc::stuart_rag_get_status,
+            rag_ipc::stuart_rag_sync_workspace,
+            rag_ipc::stuart_rag_cancel_sync,
+            // StuartMD Diff Gatekeeper (M4)
+            security::diff_guard::stuart_companion_preview_diff,
+            security::diff_guard::stuart_companion_apply_diff,
+            security::diff_guard::stuart_companion_save_note,
+            // StuartMD Context Pyramid & Budgeting Engine (M3)
+            context::stuart_context_assemble,
+            // StuartMD Organic Memory & Chat Archive (M5)
+            memory::stuart_session_create,
+            memory::stuart_session_list,
+            memory::stuart_session_get_messages,
+            memory::stuart_session_add_message,
+            memory::stuart_session_delete,
+            memory::stuart_session_search,
+            memory::stuart_organic_memory_upsert,
+            memory::stuart_organic_memory_list,
+            memory::stuart_organic_memory_evolve,
         ])
+        .manage(rag::RagState::new())
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();

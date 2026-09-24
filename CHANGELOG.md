@@ -2,6 +2,18 @@
 
 本文件记录 StuartMD 的版本变更，便于开发与发布对照。
 
+## [3.3.0-experimental] - 2026-09-24 (实验版 / Experimental Preview)
+
+> ⚠️ **注意**：本版本为「AI Wiki + 本地 RAG 灵感阅读伴侣」核心架构实验预览版，提供 100% 物理级离线本地隐私检索与数据防静默篡改审批防护。
+
+### 核心特性 (Core Features)
+- **纯本地多语言 RAG 知识引擎**：集成 `fastembed-rs` (BAAI/bge-m3 1024 维自适应) 与 SQLite 原生 `trigram` Tokenizer，零外部 Python/Node 依赖，实现断网可用的亚毫秒级稠密/稀疏混合检索。
+- **学术复杂版面 PDF 解析**：实现 Recursive XY-Cut 列优先重构算法与跨页页眉页脚去噪抑制，彻底根除双栏文献乱码；提供扫描版 PDF 图像检测与 OCR 降级提示。
+- **Visual Diff 审查防线**：坚守“零静默覆写”铁律，所有 AI 提议变更均经由行级/双栏 Diff 面板显式确认，配合 Win32 代际令牌与原子落盘，支持一键另存为伴生笔记（`.ai-notes.md`）。
+- **五级上下文金字塔与六状态 Token 预算机**：L1 焦点选区至 L5 用户画像分层调度，中间对话三段式语义折叠与超长单轮 Spike 保护，杜绝上下文窗口撑爆与提示词注入（XML CDATA 严格隔离）。
+- **3-Tier 有机记忆网络与 SQLite 对话持久化**：基于艾宾浩斯自适应衰减遗忘模型演化记忆，自动合并高相似度条目，提供会话全文 FTS5 毫秒检索。
+- **同屏共生灵感伴读交互**：灵感伴读侧栏 (`Alt+I`) 集成苏格拉底 4D 思辨追问矩阵，并行边注轨 (Margin Notes) 实现 Nudge Stacking 防遮挡纵向排版，Flash Anchor (`stuart://anchor`) 实现文档行级与 PDF 页面级双向毫秒高光脉冲回跳。
+
 ## [3.2.0] - 2026-09-24
 
 ### 安全与稳定性 (Security & Stability)

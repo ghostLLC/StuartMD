@@ -6,7 +6,7 @@ p = ROOT / "tauri" / "src-tauri" / "Cargo.lock"
 t = p.read_text(encoding="utf-8")
 t2, n = re.subn(
     r'(name = "stuartmd"\r?\nversion = ")[^"]+(")',
-    r"\g<1>3.2.0\g<2>",
+    r"\g<1>3.3.0\g<2>",
     t,
     count=1,
 )

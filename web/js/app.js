@@ -2200,8 +2200,8 @@
     state.theme = theme;
     el.body.dataset.theme = theme;
     const darkish = theme === "dark" || theme === "gray";
-    el.hlLight.disabled = darkish;
-    el.hlDark.disabled = !darkish;
+    if (el.hlLight) el.hlLight.disabled = darkish;
+    if (el.hlDark) el.hlDark.disabled = !darkish;
     if (mermaidReady) {
       mermaidReady = null;
       if (state.mode !== "source") scheduleRender();
@@ -5844,6 +5844,50 @@ flowchart LR
     commitActiveEditsForHistory();
     return typeof redoEdit === "function" ? !!redoEdit() : false;
   }
+
+  // StuartMD Inspiration Companion & Visual Diff Integration
+  Object.defineProperty(window, "currentFilePath", {
+    get() {
+      return state.path;
+    },
+    configurable: true,
+  });
+
+  window.openFileByPath = async (filePath) => {
+    if (!window.pywebview?.api?.open_path) return;
+    try {
+      const res = await window.pywebview.api.open_path(filePath);
+      if (res && !res.error) {
+        if (state.openMode === "current_window" || state.tabs.length) {
+          await addOrFocusTab(res);
+        } else {
+          setDocument(res);
+        }
+      }
+    } catch (e) {
+      console.error("[openFileByPath] Error opening:", filePath, e);
+    }
+  };
+
+  document.addEventListener("DOMContentLoaded", () => {
+    const btnInspiration = document.getElementById("btn-inspiration");
+    if (btnInspiration) {
+      btnInspiration.addEventListener("click", () => {
+        if (window.StuartInspirationSidebar) {
+          window.StuartInspirationSidebar.toggle();
+        }
+      });
+    }
+
+    window.addEventListener("keydown", (e) => {
+      if (e.altKey && (e.key === "i" || e.key === "I")) {
+        e.preventDefault();
+        if (window.StuartInspirationSidebar) {
+          window.StuartInspirationSidebar.toggle();
+        }
+      }
+    });
+  });
 
   // expose for debugging + AI/plugins
   window.StuartMD = {
