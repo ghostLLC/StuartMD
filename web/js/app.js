@@ -2,6 +2,34 @@
 (function () {
   "use strict";
 
+  // Global unhandled rejection & error monitoring (P0-6)
+  window.addEventListener("unhandledrejection", (event) => {
+    console.error("[StuartMD UnhandledRejection]", event.reason);
+    const msg = event.reason?.message || String(event.reason || "未知异步错误");
+    if (typeof toast === "function") {
+      toast("操作异常: " + msg);
+    }
+  });
+
+  window.addEventListener("error", (event) => {
+    console.error("[StuartMD GlobalError]", event.error || event.message);
+  });
+
+  // 3-second draft journaling (Zero-Loss Journaling)
+  let _draftTimer = null;
+  function scheduleDraftJournal() {
+    clearTimeout(_draftTimer);
+    _draftTimer = setTimeout(async () => {
+      if (!state.content) return;
+      const docId = state.path ? String(state.path) : "untitled_" + (state.activeTabId || "def");
+      try {
+        if (window.pywebview?.api?.save_draft) {
+          await window.pywebview.api.save_draft(docId, state.content);
+        }
+      } catch (_) {}
+    }, 3000);
+  }
+
   // ---------- State ----------
   const state = {
     path: null,
@@ -221,23 +249,123 @@
     return blocks;
   }
 
+  // 严格白名单 HTML 清洗器 (原生 DOM 树递归白名单处理器 - 方案 B)
+  function sanitizeHtmlStrict(rawHtml) {
+    if (!rawHtml) return "";
+
+    if (typeof DOMPurify !== "undefined") {
+      return DOMPurify.sanitize(rawHtml, {
+        USE_PROFILES: { html: true, svg: false, mathMl: false },
+        FORBID_TAGS: ["script", "iframe", "object", "embed", "base", "form", "meta", "link", "style", "svg", "math", "applet", "animate", "set"],
+        FORBID_ATTR: ["style"],
+        ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
+        ADD_ATTR: ["target"],
+      });
+    }
+
+    const template = document.createElement("template");
+    template.innerHTML = rawHtml;
+    const content = template.content;
+
+    const ALLOWED_TAGS = new Set([
+      "P", "BR", "HR", "H1", "H2", "H3", "H4", "H5", "H6",
+      "BLOCKQUOTE", "PRE", "CODE", "UL", "OL", "LI", "DL", "DT", "DD",
+      "TABLE", "THEAD", "TBODY", "TFOOT", "TR", "TH", "TD",
+      "STRONG", "B", "EM", "I", "U", "DEL", "S", "A", "IMG",
+      "SPAN", "DIV", "SUB", "SUP", "MARK", "SMALL", "ABBR", "SUMMARY", "DETAILS", "INPUT"
+    ]);
+
+    const ALLOWED_ATTRS = {
+      "A": new Set(["href", "target", "rel", "title", "class", "id"]),
+      "IMG": new Set(["src", "alt", "title", "width", "height", "class", "id", "loading"]),
+      "CODE": new Set(["class", "id", "data-language"]),
+      "PRE": new Set(["class", "id", "data-mermaid"]),
+      "TH": new Set(["align", "colspan", "rowspan", "class", "id"]),
+      "TD": new Set(["align", "colspan", "rowspan", "class", "id"]),
+      "OL": new Set(["start", "type", "class", "id"]),
+      "INPUT": new Set(["type", "disabled", "checked", "class", "id"]),
+      "DEFAULT": new Set(["class", "id", "title", "dir", "lang", "data-index", "data-mermaid"])
+    };
+
+    function isSafeUrl(rawUrl) {
+      if (!rawUrl) return false;
+      const normalized = rawUrl.replace(/[\u0000-\u001F\u007F\s]/g, "").toLowerCase();
+      if (
+        normalized.includes("javascript:") ||
+        normalized.includes("data:") ||
+        normalized.includes("vbscript:") ||
+        normalized.includes("file:") ||
+        normalized.includes("about:")
+      ) {
+        return false;
+      }
+      return (
+        normalized.startsWith("http://") ||
+        normalized.startsWith("https://") ||
+        normalized.startsWith("mailto:") ||
+        normalized.startsWith("#") ||
+        normalized.startsWith("/") ||
+        normalized.startsWith("./") ||
+        normalized.startsWith("../")
+      );
+    }
+
+    const allElements = Array.from(content.querySelectorAll("*"));
+    for (const el of allElements) {
+      const tagName = el.tagName.toUpperCase();
+
+      if (!ALLOWED_TAGS.has(tagName)) {
+        el.remove();
+        continue;
+      }
+
+      if (tagName === "INPUT" && el.getAttribute("type") !== "checkbox") {
+        el.remove();
+        continue;
+      }
+
+      const allowedForTag = ALLOWED_ATTRS[tagName] || ALLOWED_ATTRS["DEFAULT"];
+      const attrs = Array.from(el.attributes);
+
+      for (const attr of attrs) {
+        const attrName = attr.name.toLowerCase();
+
+        if (attrName.startsWith("on") || !allowedForTag.has(attrName)) {
+          el.removeAttribute(attr.name);
+          continue;
+        }
+
+        if (attrName === "href" || attrName === "src") {
+          if (!isSafeUrl(attr.value)) {
+            el.removeAttribute(attr.name);
+          }
+        }
+
+        if (attrName === "class" && !/^[a-zA-Z0-9_\-\s]+$/.test(attr.value)) {
+          el.removeAttribute(attr.name);
+        }
+        if (attrName === "id" && !/^[a-zA-Z0-9_\-]+$/.test(attr.value)) {
+          el.removeAttribute(attr.name);
+        }
+      }
+
+      if (tagName === "A") {
+        el.setAttribute("target", "_blank");
+        el.setAttribute("rel", "noopener noreferrer");
+      }
+    }
+
+    const container = document.createElement("div");
+    container.appendChild(content);
+    return container.innerHTML;
+  }
+
   function createBlockNode(block, index) {
     const wrap = document.createElement("div");
     wrap.className = "md-block";
     wrap.dataset.index = String(index);
     const html = renderBlockHtml(block);
-    wrap.innerHTML = html;
-    // Fast path: only sanitize when dangerous patterns may be present
-    if (
-      html.indexOf("<script") >= 0 ||
-      html.indexOf("<iframe") >= 0 ||
-      html.indexOf("<object") >= 0 ||
-      html.indexOf("<embed") >= 0 ||
-      html.indexOf("javascript:") >= 0 ||
-      /\son\w+\s*=/i.test(html)
-    ) {
-      sanitizeRenderedHtml(wrap);
-    }
+    wrap.innerHTML = sanitizeHtmlStrict(html);
     return wrap;
   }
 
@@ -245,22 +373,7 @@
   function sanitizeRenderedHtml(root) {
     if (!root || root.nodeType !== 1) return;
     try {
-      root.querySelectorAll("script,iframe,object,embed,link[rel=import]").forEach((n) => n.remove());
-      const all = root.querySelectorAll("*");
-      for (let i = 0; i < all.length; i++) {
-        const node = all[i];
-        const attrs = node.attributes;
-        if (!attrs || !attrs.length) continue;
-        for (let j = attrs.length - 1; j >= 0; j--) {
-          const a = attrs[j];
-          const n = a.name || "";
-          const v = a.value || "";
-          if (/^on/i.test(n)) node.removeAttribute(n);
-          else if ((n === "href" || n === "src" || n === "xlink:href") && /^\s*javascript:/i.test(v)) {
-            node.removeAttribute(n);
-          }
-        }
-      }
+      root.innerHTML = sanitizeHtmlStrict(root.innerHTML);
     } catch (_) {}
   }
 
@@ -1269,9 +1382,11 @@
     el.preview.addEventListener("click", (e) => {
       const a = e.target.closest("a");
       if (a && el.preview.contains(a)) {
-        const href = a.getAttribute("href") || "";
+        e.preventDefault();
+        e.stopPropagation();
+        const href = (a.getAttribute("href") || "").trim();
+        if (!href) return;
         if (href.startsWith("#")) {
-          e.preventDefault();
           const id = decodeURIComponent(href.slice(1));
           const target =
             el.preview.querySelector(`[id="${CSS.escape(id)}"]`) ||
@@ -1279,12 +1394,13 @@
           if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
           return;
         }
-        if (/^https?:\/\//i.test(href) || href.startsWith("mailto:")) {
-          e.preventDefault();
-          e.stopPropagation();
+        if (/^https?:\/\//i.test(href) || /^mailto:/i.test(href)) {
           if (state.apiReady && window.pywebview?.api?.open_url) {
             window.pywebview.api.open_url(href);
           }
+        } else {
+          console.warn("[Security] Blocked untrusted external link navigation:", href);
+          toast("已拦截不安全的链接跳转");
         }
         return;
       }
@@ -1783,7 +1899,7 @@
     } catch (e) {
       html = `<pre>${escapeHtml(String(e))}</pre>`;
     }
-    el.preview.innerHTML = html;
+    el.preview.innerHTML = sanitizeHtmlStrict(html);
 
     // KaTeX
     if (window.renderMathInElement) {
@@ -1820,9 +1936,11 @@
     // links: open external in system browser via default; prevent in-app nav
     $$("a", el.preview).forEach((a) => {
       a.addEventListener("click", (e) => {
-        const href = a.getAttribute("href") || "";
+        e.preventDefault();
+        e.stopPropagation();
+        const href = (a.getAttribute("href") || "").trim();
+        if (!href) return;
         if (href.startsWith("#")) {
-          e.preventDefault();
           const id = decodeURIComponent(href.slice(1));
           const target =
             el.preview.querySelector(`[id="${CSS.escape(id)}"]`) ||
@@ -1830,7 +1948,14 @@
           if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
           return;
         }
-        // leave external links to default / open
+        if (/^https?:\/\//i.test(href) || /^mailto:/i.test(href)) {
+          if (state.apiReady && window.pywebview?.api?.open_url) {
+            window.pywebview.api.open_url(href);
+          }
+        } else {
+          console.warn("[Security] Blocked untrusted external link navigation:", href);
+          toast("已拦截不安全的链接跳转");
+        }
       });
     });
 
@@ -1853,7 +1978,7 @@
       try {
         window.mermaid.initialize({
           startOnLoad: false,
-          securityLevel: "loose",
+          securityLevel: "strict",
           theme:
             state.theme === "dark" || state.theme === "gray"
               ? "dark"
@@ -2255,15 +2380,18 @@
   }
 
   function markDirty() {
-    if (state.dirty) return;
     state.dirty = true;
     el.dirtyDot.hidden = false;
     const tab = state.tabs.find((t) => t.id === state.activeTabId);
-    if (tab) tab.dirty = true;
+    if (tab) {
+      tab.dirty = true;
+      tab.rev = (tab.rev || 0) + 1;
+    }
     // Patch tab strip only — full renderTabs on every keystroke was costly
     patchTabDirtyUi();
     updateWindowTitle();
     persistSessionSoon();
+    scheduleDraftJournal();
   }
 
   function patchTabDirtyUi() {
@@ -2360,6 +2488,23 @@
         if (ta && typeof ta._stuartCommit === "function") ta._stuartCommit();
       } catch (_) {}
     });
+  }
+
+  /** Explicitly commit active block edits and sync content to source before saving/actions. */
+  function commitActiveBlockEdits() {
+    if (typeof commitActiveEditsForHistory === "function") {
+      commitActiveEditsForHistory();
+    }
+    const activeBlock = el.preview?.querySelector(".md-block.editing, [contenteditable='true']");
+    if (activeBlock) {
+      if (typeof activeBlock._stuartCommit === "function") {
+        try { activeBlock._stuartCommit(); } catch (_) {}
+      }
+      const ta = activeBlock.querySelector("textarea.md-block-source");
+      if (ta && typeof ta._stuartCommit === "function") {
+        try { ta._stuartCommit(); } catch (_) {}
+      }
+    }
   }
 
   function applyHistoryText(text) {
@@ -2499,11 +2644,14 @@
   function saveActiveTabFromEditor() {
     if (!state.activeTabId) return;
     const tab = state.tabs.find((t) => t.id === state.activeTabId);
-    if (!tab) return;
+    if (!tab || tab.kind === "pdf") return;
     tab.content = el.source.value;
     tab.dirty = state.dirty;
     tab.path = state.path;
     tab.name = state.name;
+    if (_hist && _hist.stack) {
+      tab.history = { stack: [..._hist.stack], i: _hist.i };
+    }
   }
 
   function renderTabs() {
@@ -2568,6 +2716,7 @@
       updatePinUi();
       return;
     }
+    commitActiveBlockEdits();
     saveActiveTabFromEditor();
     const tab = state.tabs.find((t) => t.id === id);
     if (!tab) return;
@@ -2580,6 +2729,13 @@
       b64: tab.b64,
       annotations: tab.annotations,
     });
+    if (tab.history && tab.history.stack && tab.history.stack.length > 0) {
+      clearTimeout(_histDebounce);
+      _hist.stack = [...tab.history.stack];
+      _hist.i = tab.history.i;
+    } else {
+      resetHistory(tab.content || "");
+    }
     state.dirty = !!tab.dirty;
     el.dirtyDot.hidden = !tab.dirty;
     renderTabs();
@@ -2607,6 +2763,8 @@
       b64: payload.b64,
       annotations: payload.annotations || [],
       pinned: !!payload.pinned,
+      rev: 0,
+      history: { stack: [payload.content || ""], i: 0 },
     };
     state.tabs.push(tab);
     state.activeTabId = id;
@@ -2641,6 +2799,13 @@
           b64: next.b64,
           annotations: next.annotations,
         });
+        if (next.history && next.history.stack && next.history.stack.length > 0) {
+          clearTimeout(_histDebounce);
+          _hist.stack = [...next.history.stack];
+          _hist.i = next.history.i;
+        } else {
+          resetHistory(next.content || "");
+        }
         state.dirty = !!next.dirty;
         el.dirtyDot.hidden = !next.dirty;
       } else {
@@ -3119,22 +3284,40 @@
 
   async function saveFile() {
     if (!state.apiReady) return;
-    const content = el.source.value;
-    if (state.path) {
-      const res = await window.pywebview.api.write_file(state.path, content);
+    commitActiveBlockEdits();
+
+    const targetTabId = state.activeTabId;
+    const tab = state.tabs.find((t) => t.id === targetTabId);
+    const targetPath = tab?.path || state.path;
+    const contentToSave = el.source.value;
+    const saveRev = tab ? (tab.rev || 0) : 0;
+
+    if (targetPath) {
+      const res = await window.pywebview.api.write_file(targetPath, contentToSave);
       if (res?.error) {
-        toast(res.error);
+        toast("保存失败: " + res.error);
         return;
       }
-      state.content = content;
-      state.dirty = false;
-      el.dirtyDot.hidden = true;
-      updateWindowTitle();
-      const tab = state.tabs.find((t) => t.id === state.activeTabId);
+
       if (tab) {
-        tab.content = content;
-        tab.dirty = false;
+        tab.path = targetPath;
+        if (tab.rev === saveRev) {
+          tab.content = contentToSave;
+          tab.dirty = false;
+        } else {
+          console.log("[StateGuard] 保存期间检测到新打字输入，保留 tab.dirty 标志以防数据丢失");
+        }
       }
+
+      if (state.activeTabId === targetTabId) {
+        if (tab && tab.dirty === false) {
+          state.dirty = false;
+          el.dirtyDot.hidden = true;
+        }
+        state.content = tab ? tab.content : contentToSave;
+        updateWindowTitle();
+      }
+
       updateAutosaveStatus();
       renderTabs();
       toast("已保存");
@@ -3145,22 +3328,41 @@
 
   async function saveFileAs() {
     if (!state.apiReady) return;
+    commitActiveBlockEdits();
+
+    const targetTabId = state.activeTabId;
+    const tab = state.tabs.find((t) => t.id === targetTabId);
     const content = el.source.value;
-    const res = await window.pywebview.api.save_file_dialog(content, state.name || "untitled.md");
-    if (!res) return;
-    if (res.error) {
-      toast(res.error);
+    const defaultName = tab?.name || state.name || "未命名.md";
+
+    const res = await window.pywebview.api.save_file_dialog(content, defaultName);
+    if (!res || res.error) {
+      if (res?.error) toast(res.error);
       return;
     }
-    state.path = res.path;
-    state.name = res.path.split(/[\\/]/).pop();
-    state.content = content;
-    state.dirty = false;
-    el.dirtyDot.hidden = true;
-    el.fileTitle.textContent = state.name;
-    el.statusPath.textContent = res.path;
-    updateWindowTitle();
-    toast("已保存");
+
+    const newName = res.path.split(/[\\/]/).pop();
+
+    if (tab) {
+      tab.path = res.path;
+      tab.name = newName;
+      tab.content = content;
+      tab.dirty = false;
+    }
+
+    if (state.activeTabId === targetTabId) {
+      state.path = res.path;
+      state.name = newName;
+      state.content = content;
+      state.dirty = false;
+      el.dirtyDot.hidden = true;
+      el.fileTitle.textContent = state.name;
+      el.statusPath.textContent = res.path;
+      updateWindowTitle();
+    }
+
+    renderTabs();
+    toast("已保存为: " + newName);
     updateAutosaveStatus();
     await refreshRecents();
     if (state.folder) await loadFolder(state.folder);
@@ -4027,48 +4229,53 @@ ${previewHtml}
 
   async function runMenuAction(action) {
     closeAllMenus();
-    switch (action) {
-      case "new":
-        newDocument();
-        break;
-      case "open":
-        openFileDialog();
-        break;
-      case "open-folder":
-        openFolder();
-        break;
-      case "open-sample":
-        openSample();
-        break;
-      case "save":
-        saveFile();
-        break;
-      case "save-as":
-        saveFileAs();
-        break;
-      case "export-html":
-        exportHtml();
-        break;
-      case "print":
-        printPreview();
-        break;
-      case "new-window":
-        if (state.path) await openInNewWindow(state.path);
-        else if (state.apiReady && window.pywebview?.api?.open_new_window) {
-          const res = await window.pywebview.api.open_new_window();
-          if (res?.error) toast(res.error);
-          else toast("已打开新窗口");
-        }
-        break;
-      case "new-empty-window":
-        if (state.apiReady && window.pywebview?.api?.open_new_window) {
-          const res = await window.pywebview.api.open_new_window();
-          if (res?.error) toast(res.error);
-          else toast("已打开新窗口");
-        }
-        break;
-      default:
-        break;
+    try {
+      switch (action) {
+        case "new":
+          await newDocument();
+          break;
+        case "open":
+          await openFileDialog();
+          break;
+        case "open-folder":
+          await openFolder();
+          break;
+        case "open-sample":
+          await openSample();
+          break;
+        case "save":
+          await saveFile();
+          break;
+        case "save-as":
+          await saveFileAs();
+          break;
+        case "export-html":
+          await exportHtml();
+          break;
+        case "print":
+          printPreview();
+          break;
+        case "new-window":
+          if (state.path) await openInNewWindow(state.path);
+          else if (state.apiReady && window.pywebview?.api?.open_new_window) {
+            const res = await window.pywebview.api.open_new_window();
+            if (res?.error) toast(res.error);
+            else toast("已打开新窗口");
+          }
+          break;
+        case "new-empty-window":
+          if (state.apiReady && window.pywebview?.api?.open_new_window) {
+            const res = await window.pywebview.api.open_new_window();
+            if (res?.error) toast(res.error);
+            else toast("已打开新窗口");
+          }
+          break;
+        default:
+          break;
+      }
+    } catch (err) {
+      console.error(`[MenuAction] ${action} failed:`, err);
+      toast("操作失败: " + (err?.message || err));
     }
   }
 
@@ -4207,39 +4414,32 @@ ${previewHtml}
       handleSourceKeydown(e);
     });
 
+    function isTypingField(target) {
+      if (!target) return false;
+      const tag = target.tagName ? target.tagName.toUpperCase() : "";
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
+        return target !== el.source;
+      }
+      if (target.isContentEditable && !target.classList.contains("editing") && !el.preview?.contains(target)) {
+        return true;
+      }
+      return false;
+    }
+
     // Keyboard shortcuts
     window.addEventListener("keydown", (e) => {
       try {
         if (window.StuartAIUI?.handleShortcutKeydown?.(e)) return;
       } catch (_) {}
-      // Don't hijack typing in form fields (AI model/key/search inputs)
-      const typingEl = e.target;
-      const typingTag = typingEl && typingEl.tagName ? String(typingEl.tagName).toLowerCase() : "";
-      const isTypingField =
-        typingTag === "input" ||
-        typingTag === "textarea" ||
-        typingTag === "select" ||
-        (typingEl && typingEl.isContentEditable);
-      if (isTypingField && typingEl !== el.source && !typingEl.closest?.("#find-bar")) {
-        // Allow copy/paste/undo inside native inputs
-        const mk = e.ctrlKey || e.metaKey;
-        if (mk) {
-          const kk = e.key.toLowerCase();
-          if (kk === "c" || kk === "v" || kk === "x" || kk === "a" || kk === "z" || kk === "y") {
-            return;
-          }
+
+      // Don't hijack typing in form fields (AI model/key/search inputs, find-bar)
+      if (isTypingField(e.target)) {
+        if (e.key === "Escape" && !el.findBar.hidden && e.target.closest?.("#find-bar")) {
+          closeFind();
         }
-        if (e.key === "Escape") {
-          typingEl.blur && typingEl.blur();
-        }
-        if (!mk || (mk && !["z", "y", "s", "o", "n", "e", "f", "b"].includes(e.key.toLowerCase()))) {
-          // let the input handle normal keys; only block app single-letter binds
-          if (mk && ["s", "o", "n", "e", "f", "b"].includes(e.key.toLowerCase())) {
-            e.preventDefault();
-          }
-          return;
-        }
+        return;
       }
+
       const mod = e.ctrlKey || e.metaKey;
       if (!mod) {
         if (e.key === "Escape" && !el.findBar.hidden) closeFind();
@@ -4262,15 +4462,16 @@ ${previewHtml}
         return;
       }
       const k = e.key.toLowerCase();
-      // Undo: Ctrl+Z / Ctrl+Shift+Z  |  Redo: Ctrl+Y / Ctrl+Shift+Y
-      if (k === "z" && !e.shiftKey) {
+      // Undo: Ctrl+Z  |  Redo: Ctrl+Shift+Z / Ctrl+Y
+      if (k === "z") {
         e.preventDefault();
-        if (!undoEdit()) toast("没有可撤销的操作");
-        return;
-      }
-      if (k === "z" && e.shiftKey) {
-        e.preventDefault();
-        if (!undoEdit()) toast("没有可撤销的操作");
+        if (e.shiftKey) {
+          // Ctrl+Shift+Z redo
+          if (!redoEdit()) toast("没有可重做的操作");
+        } else {
+          // Ctrl+Z undo
+          if (!undoEdit()) toast("没有可撤销的操作");
+        }
         return;
       }
       if (k === "y") {
@@ -4283,6 +4484,7 @@ ${previewHtml}
         openFileDialog();
       } else if (k === "s") {
         e.preventDefault();
+        commitActiveBlockEdits();
         if (e.shiftKey) saveFileAs();
         else saveFile();
       } else if (k === "n") {
@@ -4290,11 +4492,18 @@ ${previewHtml}
         newDocument();
       } else if (k === "b") {
         // Bold in editor; sidebar only when not typing
+        const sel = window.getSelection();
         const ae = document.activeElement;
-        const editing =
+        const inEditor =
           ae === el.source ||
-          (ae && (ae.isContentEditable || ae.closest?.(".md-block.editing")));
-        if (editing) return;
+          (ae && el.preview?.contains(ae)) ||
+          (sel && !sel.isCollapsed && el.preview?.contains(sel.anchorNode));
+        if (inEditor) {
+          e.preventDefault();
+          e.stopPropagation();
+          wrapSelection("**", "**");
+          return;
+        }
         if (!e.shiftKey) {
           e.preventDefault();
           toggleSidebar();
@@ -4933,6 +5142,36 @@ flowchart LR
     );
   }
 
+  function setupWindowLifecycle() {
+    const tauri = window.__TAURI__;
+    if (tauri?.event?.listen) {
+      tauri.event.listen("stuart-window-close-requested", async () => {
+        commitActiveBlockEdits();
+        saveActiveTabFromEditor();
+        const dirtyTabs = state.tabs.filter((t) => t.dirty);
+        if (dirtyTabs.length === 0) {
+          try {
+            await tauri.core.invoke("stuart_exit_app");
+          } catch (e) {
+            console.error("stuart_exit_app invoke error:", e);
+            window.close();
+          }
+          return;
+        }
+
+        const names = dirtyTabs.map((t) => `「${tabTitleFor(t)}」`).join("、");
+        const ok = confirm(`以下文档包含未保存的修改：\n${names}\n\n确定放弃修改并关闭应用吗？`);
+        if (ok) {
+          try {
+            await tauri.core.invoke("stuart_exit_app");
+          } catch (e) {
+            window.close();
+          }
+        }
+      });
+    }
+  }
+
   function openSettingsModal() {
     $("#settings-modal").hidden = false;
     bindSettingsResize();
@@ -5217,6 +5456,11 @@ flowchart LR
     }
     try {
       bindEvents();
+    } catch (err) {
+      console.error(err);
+    }
+    try {
+      setupWindowLifecycle();
     } catch (err) {
       console.error(err);
     }

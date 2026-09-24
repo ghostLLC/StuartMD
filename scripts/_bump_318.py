@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 from pathlib import Path
-ROOT = Path(r"C:\Users\Administrator\XiaomiMiMoProjects\.mimo-sessions\2026-09-15\一比一复刻一个阅读markdown文件的typora软件出来，要求风格简约美观、")
+ROOT = Path(__file__).resolve().parent.parent
 for rel, a, b in [
     ("tauri/src-tauri/Cargo.toml", 'version = "3.1.7"', 'version = "3.1.8"'),
     ("tauri/src-tauri/tauri.conf.json", '"version": "3.1.7"', '"version": "3.1.8"'),

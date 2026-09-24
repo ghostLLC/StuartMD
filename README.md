@@ -2,9 +2,9 @@
 
 轻量 **Markdown / PDF** 阅读与编辑器（Windows 桌面）。风格简约，适合读文档、写笔记、批注 PDF，并内置 **选区 AI 问答**。
 
-![version](https://img.shields.io/badge/version-3.1.9-blue)
+![version](https://img.shields.io/badge/version-3.2.0-blue)
 
-**下载：** [GitHub Releases](https://github.com/ghostLLC/StuartMD/releases) · 最新安装包 `StuartMD-Setup-3.1.3.exe`
+**下载：** [GitHub Releases](https://github.com/ghostLLC/StuartMD/releases) · 最新安装包 `StuartMD-Setup-3.2.0.exe`
 
 ## 功能概览
 
@@ -41,14 +41,14 @@
 
 ## 快速开始
 
-1. 安装 `StuartMD-Setup-3.1.3.exe`（默认 `%LOCALAPPDATA%\StuartMD`）
+1. 安装 `StuartMD-Setup-3.2.0.exe`（默认 `%LOCALAPPDATA%\StuartMD`）
 2. 打开示例或任意 `.md` / `.pdf`
 3. 使用 AI：右上角 **模型** → 配置 API Key → 在 Markdown 或 **PDF** 中选中文字 → **讲解**
 
 静默安装：
 
 ```text
-StuartMD-Setup-3.1.3.exe /S
+StuartMD-Setup-3.2.0.exe /S
 ```
 
 ## 快捷键（常用）

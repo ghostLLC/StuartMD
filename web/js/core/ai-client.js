@@ -79,7 +79,7 @@
     return a.ai_test_provider(providerId);
   }
 
-  function bindEvents() {
+  async function bindEvents() {
     if (state.listenersBound) return;
     const tauri = global.__TAURI__ || global.__TAURI_INTERNALS__;
     let listen = null;
@@ -98,8 +98,10 @@
       state.listenersBound = true;
       return;
     }
-    listen("ai-chat-delta", (e) => onDelta(e.payload || e));
-    listen("ai-chat-done", (e) => onDone(e.payload || e));
+    await Promise.all([
+      listen("ai-chat-delta", (e) => onDelta(e.payload || e)),
+      listen("ai-chat-done", (e) => onDone(e.payload || e)),
+    ]);
     state.listenersBound = true;
     void tauri;
   }
@@ -124,9 +126,9 @@
     state.requestId = null;
   }
 
-  async function cancel() {
+  async function cancel(reqId) {
     const a = api();
-    const id = state.requestId;
+    const id = reqId || state.requestId;
     state.streaming = false;
     state.requestId = null;
     if (a && a.ai_chat_cancel && id) {
@@ -252,7 +254,7 @@
   async function explain(input, handlers) {
     const C = Ctx();
     if (!C) return { error: "AI context module missing" };
-    bindEvents();
+    await bindEvents();
     const cfg = await ensureConfig();
     if (!cfg || cfg.enabled === false) {
       return { error: "AI 功能已关闭，请在「模型」中启用" };
@@ -359,6 +361,7 @@
   }
 
   global.StuartAI = {
+    state,
     get config() {
       return state.ai;
     },

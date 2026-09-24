@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 from pathlib import Path
 
-p = Path(
-    r"C:\Users\Administrator\XiaomiMiMoProjects\.mimo-sessions\2026-09-15\一比一复刻一个阅读markdown文件的typora软件出来，要求风格简约美观、\web\js\ui\ai-ui.js"
-)
+ROOT = Path(__file__).resolve().parent.parent
+p = ROOT / "web" / "js" / "ui" / "ai-ui.js"
 t = p.read_text(encoding="utf-8")
 # Keep first triggerExplain, drop the second duplicate up to handleShortcutKeydown
 first = t.find("  async function triggerExplain(opts)")

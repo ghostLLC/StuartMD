@@ -22,3 +22,13 @@ tauri/src-tauri/gen/schemas/*.json
 venv/
 *.egg-info/
 *.spec
+
+# Test artifacts and temporary files
+.agents/
+ORIGINAL_REQUEST.md
+tests/*.exe
+tests/*.pdb
+tests/edge_profile_canvas/
+tests/edge_profile_canvas_comp/
+tests/scratch_p0_2_atomic/
+tests/scratch_p1_3_settings/

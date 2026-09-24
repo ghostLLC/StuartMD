@@ -1,9 +1,7 @@
 # -*- coding: utf-8 -*-
 from pathlib import Path
 
-ROOT = Path(
-    r"C:\Users\Administrator\XiaomiMiMoProjects\.mimo-sessions\2026-09-15\一比一复刻一个阅读markdown文件的typora软件出来，要求风格简约美观、"
-)
+ROOT = Path(__file__).resolve().parent.parent
 
 def rep(rel, old, new):
     p = ROOT / rel

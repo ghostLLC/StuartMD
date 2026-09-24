@@ -6,7 +6,7 @@ mod ai_chat;
 mod fs_api;
 mod win_api;
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 fn parse_startup_file() -> Option<String> {
     for a in std::env::args().skip(1) {
@@ -35,6 +35,7 @@ fn main() {
             fs_api::stuart_read_file,
             fs_api::stuart_write_file,
             fs_api::stuart_read_pdf,
+            fs_api::stuart_read_pdf_binary,
             fs_api::stuart_read_dir_tree,
             fs_api::stuart_get_recents,
             fs_api::stuart_open_path,
@@ -68,6 +69,7 @@ fn main() {
             win_api::stuart_export_pdf_annotations,
             win_api::stuart_capture_window,
             win_api::stuart_apply_window_state,
+            win_api::stuart_exit_app,
             // AI / memory / tool surface (medium-term)
             ai_api::stuart_get_capabilities,
             ai_api::stuart_ai_home,
@@ -86,6 +88,12 @@ fn main() {
             ai_chat::stuart_ai_chat_start,
             ai_chat::stuart_ai_chat_cancel,
         ])
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.emit("stuart-window-close-requested", ());
+            }
+        })
         .setup(|app| {
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.set_title("StuartMD");

@@ -1,17 +1,23 @@
 //! File/settings commands aligned with pywebview `window.pywebview.api`.
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use serde_json::{json, Value};
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
+use tauri::ipc::Response;
 
 const APP_ID: &str = "StuartMD";
-pub const VERSION: &str = "3.1.9";
+pub const VERSION: &str = "3.2.0";
 pub const PROG_ID: &str = "StuartMD.Markdown";
 pub const PROG_ID_PDF: &str = "StuartMD.PDF";
 pub const SETTINGS_SCHEMA: i64 = 4;
 const PDF_MAX: u64 = 40 * 1024 * 1024;
+pub const PDF_MAX_BYTES: u64 = 100 * 1024 * 1024; // 100 MB 上限
 pub const MD_EXTS: [&str; 5] = [".md", ".markdown", ".mdown", ".mkd", ".txt"];
+
+static ATOMIC_WRITE_SEQ: AtomicU64 = AtomicU64::new(1);
 
 pub fn walk_md_public(dir: &Path) -> Vec<Value> {
     walk_md(dir, 1, 4)
@@ -64,14 +70,103 @@ pub fn load_json(path: &Path) -> Value {
         .unwrap_or_else(|| json!({}))
 }
 
-pub fn save_json(path: &Path, v: &Value) -> Result<(), String> {
-    if let Some(p) = path.parent() {
-        fs::create_dir_all(p).map_err(|e| e.to_string())?;
+pub fn atomic_write_file(path: &Path, content: &[u8]) -> Result<(), String> {
+    let parent = match path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        _ => Path::new("."),
+    };
+
+    if parent != Path::new(".") {
+        fs::create_dir_all(parent).map_err(|e| format!("创建父目录失败: {e}"))?;
     }
-    let tmp = path.with_extension("tmp");
-    fs::write(&tmp, serde_json::to_string_pretty(v).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
-    fs::rename(&tmp, path).map_err(|e| e.to_string())
+
+    let pid = std::process::id();
+    let mut last_err = String::new();
+
+    for attempt in 0..5 {
+        let seq = ATOMIC_WRITE_SEQ.fetch_add(1, Ordering::Relaxed);
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_micros())
+            .unwrap_or(0);
+        let tmp_name = format!(".~stuart_tmp_{}_{}_{:x}_{}.tmp", pid, seq, timestamp, attempt);
+        let tmp_path = parent.join(&tmp_name);
+
+        let mut file = match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp_path)
+        {
+            Ok(f) => f,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                last_err = format!("临时文件碰撞: {e}");
+                continue;
+            }
+            Err(e) => return Err(format!("创建临时文件失败: {e}")),
+        };
+
+        if let Err(e) = file.write_all(content) {
+            let _ = fs::remove_file(&tmp_path);
+            return Err(format!("写入临时文件失败: {e}"));
+        }
+
+        if let Err(e) = file.sync_all() {
+            let _ = fs::remove_file(&tmp_path);
+            return Err(format!("数据持久化刷盘失败 (fsync): {e}"));
+        }
+        drop(file);
+
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::ffi::OsStrExt;
+            use windows_sys::Win32::Storage::FileSystem::{ReplaceFileW, REPLACEFILE_IGNORE_MERGE_ERRORS};
+
+            let replace_res = if path.exists() {
+                let wide_target: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+                let wide_tmp: Vec<u16> = tmp_path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+
+                let ret = unsafe {
+                    ReplaceFileW(
+                        wide_target.as_ptr(),
+                        wide_tmp.as_ptr(),
+                        std::ptr::null(),
+                        REPLACEFILE_IGNORE_MERGE_ERRORS,
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                    )
+                };
+                if ret != 0 {
+                    Ok(())
+                } else {
+                    fs::rename(&tmp_path, path).map_err(|e| format!("Windows ReplaceFileW 及 rename 降级均失败: {e}"))
+                }
+            } else {
+                fs::rename(&tmp_path, path).map_err(|e| format!("原子文件移动创建失败: {e}"))
+            };
+
+            if let Err(e) = replace_res {
+                let _ = fs::remove_file(&tmp_path);
+                return Err(e);
+            }
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            if let Err(e) = fs::rename(&tmp_path, path) {
+                let _ = fs::remove_file(&tmp_path);
+                return Err(format!("原子文件替换失败: {e}"));
+            }
+        }
+
+        return Ok(());
+    }
+
+    Err(format!("超过最大重试次数，临时文件创建失败: {last_err}"))
+}
+
+pub fn save_json(path: &Path, v: &Value) -> Result<(), String> {
+    let bytes = serde_json::to_vec_pretty(v).map_err(|e| e.to_string())?;
+    atomic_write_file(path, &bytes)
 }
 
 pub fn default_settings() -> Value {
@@ -219,6 +314,20 @@ pub fn load_settings_migrated() -> Value {
     load_settings_migrated_unlocked()
 }
 
+pub fn modify_settings<F>(modifier: F) -> Result<Value, String>
+where
+    F: FnOnce(&mut Value) -> Result<(), String>,
+{
+    let _guard = settings_guard();
+    let path = settings_path();
+    let mut current = load_settings_migrated_unlocked();
+
+    modifier(&mut current)?;
+
+    save_json(&path, &current)?;
+    Ok(current)
+}
+
 pub fn push_recent(path: &str, kind: &str) {
     let _guard = settings_guard();
     let path_ref = settings_path();
@@ -308,15 +417,14 @@ pub fn stuart_get_settings() -> Value {
 
 #[tauri::command]
 pub fn stuart_save_settings(data: Value) -> Result<bool, String> {
-    let _guard = settings_guard();
-    let path = settings_path();
-    let mut cur = load_settings_migrated_unlocked();
-    if let (Some(obj), Some(patch)) = (cur.as_object_mut(), data.as_object()) {
-        for (k, v) in patch {
-            obj.insert(k.clone(), v.clone());
+    modify_settings(|cur| {
+        if let (Some(obj), Some(patch)) = (cur.as_object_mut(), data.as_object()) {
+            for (k, v) in patch {
+                obj.insert(k.clone(), v.clone());
+            }
         }
-    }
-    save_json(&path, &cur)?;
+        Ok(())
+    })?;
     Ok(true)
 }
 
@@ -374,15 +482,15 @@ pub fn stuart_read_file(path: String) -> Value {
 #[tauri::command]
 pub fn stuart_write_file(path: String, content: String) -> Value {
     let p = Path::new(&path);
-    if let Some(parent) = p.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    match fs::write(p, content) {
+    match atomic_write_file(p, content.as_bytes()) {
         Ok(()) => {
             push_recent(&p.to_string_lossy(), "file");
             json!({"ok": true, "path": p.to_string_lossy()})
         }
-        Err(e) => json!({"error": e.to_string()}),
+        Err(e) => {
+            eprintln!("[I/O Error] stuart_write_file failed for {}: {}", path, e);
+            json!({"error": e})
+        }
     }
 }
 
@@ -412,6 +520,29 @@ pub fn stuart_read_pdf(path: String) -> Value {
         "b64": B64.encode(&bytes),
         "annotations": annotations
     })
+}
+
+#[tauri::command]
+pub fn stuart_read_pdf_binary(path: String) -> Result<Response, String> {
+    let p = Path::new(&path);
+    if !p.exists() {
+        return Err("PDF 文件不存在".to_string());
+    }
+
+    let meta = fs::metadata(p).map_err(|e| format!("获取 PDF 元数据失败: {e}"))?;
+    if !meta.is_file() {
+        return Err("目标路径不是常规文件".to_string());
+    }
+    if meta.len() > PDF_MAX_BYTES {
+        return Err(format!(
+            "PDF 文件过大 ({:.2} MB)，超过系统 100 MB 安全处理上限",
+            meta.len() as f64 / (1024.0 * 1024.0)
+        ));
+    }
+
+    let bytes = fs::read(p).map_err(|e| format!("读取 PDF 文件失败: {e}"))?;
+    push_recent(&p.to_string_lossy(), "file");
+    Ok(Response::new(bytes))
 }
 
 fn walk_md(dir: &Path, depth: i32, max_depth: i32) -> Vec<Value> {
@@ -505,12 +636,12 @@ pub fn stuart_get_recents() -> Value {
 pub fn stuart_open_path(path: String) -> Value {
     let p = Path::new(&path);
     if p.is_dir() {
-        let sp = settings_path();
-        let mut s = load_settings_migrated();
-        if let Some(obj) = s.as_object_mut() {
-            obj.insert("last_folder".into(), json!(p.to_string_lossy()));
-        }
-        let _ = save_json(&sp, &s);
+        let _ = modify_settings(|s| {
+            if let Some(obj) = s.as_object_mut() {
+                obj.insert("last_folder".into(), json!(p.to_string_lossy()));
+            }
+            Ok(())
+        });
         push_recent(&p.to_string_lossy(), "folder");
         return json!({"kind": "folder", "path": p.to_string_lossy()});
     }
@@ -549,22 +680,62 @@ pub fn stuart_open_new_window() -> Value {
 }
 
 #[tauri::command]
-pub fn stuart_open_url(url: String) -> bool {
-    // Strict scheme allowlist — reject httpfoo / javascript: / file: etc.
+pub fn stuart_open_url(app: tauri::AppHandle, url: String) -> bool {
     let u = url.trim();
-    if !(u.starts_with("http://") || u.starts_with("https://")) {
+    let lower = u.to_ascii_lowercase();
+    if !(lower.starts_with("http://") || lower.starts_with("https://")) {
         return false;
     }
+
+    if u.chars().any(|c| c.is_control() || c == '"' || c == '\'' || c == '`' || c == ' ' || c == '\r' || c == '\n') {
+        return false;
+    }
+
+    if url::Url::parse(u).is_err() {
+        return false;
+    }
+
+    #[cfg(feature = "custom-protocol")]
+    {
+        use tauri_plugin_opener::OpenerExt;
+        if app.opener().open_url(u, None::<&str>).is_ok() {
+            return true;
+        }
+    }
+
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", u])
-            .spawn()
-            .is_ok()
+        use std::ffi::OsStr;
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::UI::Shell::ShellExecuteW;
+
+        const SW_SHOWNORMAL: i32 = 1;
+
+        let wide_op: Vec<u16> = OsStr::new("open")
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let wide_url: Vec<u16> = OsStr::new(u)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+
+        unsafe {
+            let instance = ShellExecuteW(
+                std::ptr::null_mut(),
+                wide_op.as_ptr(),
+                wide_url.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                SW_SHOWNORMAL,
+            );
+            (instance as usize) > 32
+        }
     }
+
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = u;
+        let _ = (app, u);
         false
     }
 }
@@ -645,29 +816,33 @@ pub fn stuart_read_plugin_source(path: String) -> Value {
 
 #[tauri::command]
 pub fn stuart_set_plugin_enabled(plugin_id: String, enabled: bool) -> Value {
-    let sp = settings_path();
-    let mut s = load_settings_migrated();
-    let mut disabled: Vec<String> = s
-        .get("plugins_disabled")
-        .and_then(|d| d.as_array())
-        .map(|a| {
-            a.iter()
-                .filter_map(|x| x.as_str().map(|s| s.to_string()))
-                .collect()
-        })
-        .unwrap_or_default();
-    if enabled {
-        disabled.retain(|x| x != &plugin_id);
-    } else if !disabled.contains(&plugin_id) {
-        disabled.push(plugin_id.clone());
-    }
-    disabled.sort();
-    disabled.dedup();
-    if let Some(obj) = s.as_object_mut() {
-        obj.insert("plugins_disabled".into(), json!(disabled));
-    }
-    match save_json(&sp, &s) {
-        Ok(()) => json!({"ok": true, "disabled": disabled}),
+    let res = modify_settings(|s| {
+        let mut disabled: Vec<String> = s
+            .get("plugins_disabled")
+            .and_then(|d| d.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if enabled {
+            disabled.retain(|x| x != &plugin_id);
+        } else if !disabled.contains(&plugin_id) {
+            disabled.push(plugin_id.clone());
+        }
+        disabled.sort();
+        disabled.dedup();
+        if let Some(obj) = s.as_object_mut() {
+            obj.insert("plugins_disabled".into(), json!(disabled));
+        }
+        Ok(())
+    });
+    match res {
+        Ok(s) => {
+            let disabled = s.get("plugins_disabled").cloned().unwrap_or(json!([]));
+            json!({"ok": true, "disabled": disabled})
+        }
         Err(e) => json!({"error": e}),
     }
 }
@@ -675,7 +850,7 @@ pub fn stuart_set_plugin_enabled(plugin_id: String, enabled: bool) -> Value {
 #[tauri::command]
 pub fn stuart_import_wallpaper(b64: String, name: Option<String>) -> Value {
     const WALLPAPER_MAX: usize = 12 * 1024 * 1024;
-    let payload = b64.split(',').last().unwrap_or("");
+    let payload = b64.split(',').next_back().unwrap_or("");
     if payload.len() > WALLPAPER_MAX {
         return json!({"error": "壁纸过大（>12MB）"});
     }
@@ -713,16 +888,17 @@ pub fn stuart_get_wallpaper() -> Value {
 
 #[tauri::command]
 pub fn stuart_clear_wallpaper() -> Value {
-    let sp = settings_path();
-    let mut s = load_settings_migrated();
-    if let Some(obj) = s.as_object_mut() {
-        obj.insert("wallpaper".into(), json!({}));
-        if obj.get("theme").and_then(|t| t.as_str()) == Some("wallpaper") {
-            obj.insert("theme".into(), json!("light"));
+    let res = modify_settings(|s| {
+        if let Some(obj) = s.as_object_mut() {
+            obj.insert("wallpaper".into(), json!({}));
+            if obj.get("theme").and_then(|t| t.as_str()) == Some("wallpaper") {
+                obj.insert("theme".into(), json!("light"));
+            }
         }
-    }
-    match save_json(&sp, &s) {
-        Ok(()) => json!({"ok": true}),
+        Ok(())
+    });
+    match res {
+        Ok(_) => json!({"ok": true}),
         Err(e) => json!({"error": e}),
     }
 }
@@ -732,12 +908,9 @@ pub fn stuart_export_html(html: String, suggested_name: Option<String>) -> Value
     // Frontend prefers dialog plugin; this command is a write fallback when path is known.
     let name = export_safe_name(&suggested_name.unwrap_or_else(|| "export.html".into()));
     let path = data_dir().join("exports").join(&name);
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    match fs::write(&path, html) {
+    match atomic_write_file(&path, html.as_bytes()) {
         Ok(()) => json!({"ok": true, "path": path.to_string_lossy()}),
-        Err(e) => json!({"error": e.to_string()}),
+        Err(e) => json!({"error": e}),
     }
 }
 
@@ -754,4 +927,70 @@ pub fn stuart_open_welcome() -> Value {
         "content": "# StuartMD\n\n轻量 Markdown 阅读与编辑器。\n\n**项目仓库：** https://github.com/ghostLLC/StuartMD\n\n**当前版本：** 2.9.10\n\n## 能做什么\n\n- 读文档：美化排版、公式、表格、代码高亮\n- 写笔记：阅读 / 分栏 / 源码，点击段落直接编辑\n- 飞书式交互：块手柄、选中浮动栏、块菜单；双击代码/公式/图表进源码编辑\n- 撤销重做：Ctrl+Z / Ctrl+Y\n- 看 PDF：标注批注\n- 多窗口、主题、多语言\n",
         "size": 0
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_atomic_write_file_basic_and_overwrite() {
+        let dir = std::env::temp_dir().join(format!("stuart_test_{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let file_path = dir.join("test_atomic.txt");
+
+        // 1. Initial write
+        let content1 = b"Hello, StuartMD Atomic Write!";
+        assert!(atomic_write_file(&file_path, content1).is_ok());
+        assert_eq!(fs::read(&file_path).unwrap(), content1);
+
+        // 2. Overwrite existing file
+        let content2 = b"Updated content atomically preserved.";
+        assert!(atomic_write_file(&file_path, content2).is_ok());
+        assert_eq!(fs::read(&file_path).unwrap(), content2);
+
+        // Clean up
+        let _ = fs::remove_file(&file_path);
+        let _ = fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn test_atomic_write_file_relative_path() {
+        let test_name = format!(".~temp_rel_test_{}.txt", std::process::id());
+        let rel_path = PathBuf::from(&test_name);
+        let content = b"relative path test";
+        assert!(atomic_write_file(&rel_path, content).is_ok());
+        assert_eq!(fs::read(&rel_path).unwrap(), content);
+        let _ = fs::remove_file(&rel_path);
+    }
+
+    #[test]
+    fn test_url_safety_rules() {
+        let valid_urls = [
+            "https://github.com/ghostLLC/StuartMD",
+            "http://example.com/page?query=123#anchor",
+        ];
+        for u in valid_urls {
+            let lower = u.to_ascii_lowercase();
+            assert!(lower.starts_with("http://") || lower.starts_with("https://"));
+            assert!(!u.chars().any(|c| c.is_control() || c == '"' || c == '\'' || c == '`' || c == ' ' || c == '\r' || c == '\n'));
+            assert!(url::Url::parse(u).is_ok());
+        }
+
+        let dangerous_urls = [
+            "https://example.com\" --disable-web-security",
+            "https://example.com'`whoami`",
+            "file:///C:/Windows/System32/calc.exe",
+            "javascript:alert(1)",
+            "https://example.com/has space/test",
+            "https://example.com/test\r\nevil",
+        ];
+        for u in dangerous_urls {
+            let lower = u.to_ascii_lowercase();
+            let is_http = lower.starts_with("http://") || lower.starts_with("https://");
+            let has_bad_chars = u.chars().any(|c| c.is_control() || c == '"' || c == '\'' || c == '`' || c == ' ' || c == '\r' || c == '\n');
+            let is_rejected = !is_http || has_bad_chars || url::Url::parse(u).is_err();
+            assert!(is_rejected, "URL should be rejected: {}", u);
+        }
+    }
 }

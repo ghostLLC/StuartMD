@@ -4,9 +4,7 @@ from pathlib import Path
 import re
 import sys
 
-ROOT = Path(
-    r"C:\Users\Administrator\XiaomiMiMoProjects\.mimo-sessions\2026-09-15\一比一复刻一个阅读markdown文件的typora软件出来，要求风格简约美观、"
-)
+ROOT = Path(__file__).resolve().parent.parent
 ok = True
 
 
@@ -46,10 +44,12 @@ changelog = read("CHANGELOG.md")
 sample = read("samples/欢迎使用 StuartMD.md")
 
 # Version sync
-check('"3.1.6"' in cargo and "3.1.6" in cargo, "Cargo.toml 3.1.6")
-check('name = "stuartmd"' in lock and "3.1.6" in lock, "Cargo.lock stuartmd 3.1.6")
-check('"version": "3.1.6"' in conf, "tauri.conf.json 3.1.6")
-check('VERSION: &str = "3.1.6"' in fs, "fs_api VERSION 3.1.6")
+ver_m = re.search(r'version\s*=\s*"([^"]+)"', cargo)
+current_ver = ver_m.group(1) if ver_m else "3.1.9"
+check(current_ver in cargo, f"Cargo.toml {current_ver}")
+check('name = "stuartmd"' in lock and current_ver in lock, f"Cargo.lock stuartmd {current_ver}")
+check(f'"version": "{current_ver}"' in conf, f"tauri.conf.json {current_ver}")
+check(f'VERSION: &str = "{current_ver}"' in fs, f"fs_api VERSION {current_ver}")
 check("3.1.6" in changelog and "设计" in changelog, "CHANGELOG 3.1.6")
 win_early = read("tauri/src-tauri/src/win_api.rs")
 check('"PDF"' in win_early and "pdffile" in win_early, "PDF ProgId icon set")

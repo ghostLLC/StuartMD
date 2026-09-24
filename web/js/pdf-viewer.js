@@ -55,6 +55,10 @@
 
   const annotHist = { stack: [], i: -1, max: 80 };
 
+  // === PHASE P1-2: PDF.js Virtualization & VRAM Eviction State ===
+  const activeRenderTasks = new Map(); // pageNum (Number) -> RenderTask
+  const MAX_RENDERED_PAGES = 5; // Hard invariant: at most 5 concurrently painted canvas pages
+
   const el = () => ({
     area: document.getElementById("pdf-area"),
     editor: document.getElementById("editor-area"),
@@ -219,11 +223,32 @@
 
   async function disposeDoc() {
     try {
+      if (state._virtualIo) {
+        state._virtualIo.disconnect();
+        state._virtualIo = null;
+      }
       if (state._io) {
         state._io.disconnect();
         state._io = null;
       }
     } catch (_) {}
+
+    for (const [pageNum, task] of activeRenderTasks.entries()) {
+      try { task.cancel(); } catch (_) {}
+    }
+    activeRenderTasks.clear();
+
+    const e = el();
+    if (e.scroll) {
+      e.scroll.querySelectorAll("canvas").forEach((c) => {
+        try {
+          c.width = 0;
+          c.height = 0;
+        } catch (_) {}
+        c.remove();
+      });
+    }
+
     try {
       if (state.doc && typeof state.doc.destroy === "function") {
         await state.doc.destroy();
@@ -363,10 +388,28 @@
     e.scroll.innerHTML = "";
 
     try {
-      const bin = atob(payload.b64);
-      const bytes = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      state.doc = await window.pdfjsLib.getDocument({ data: bytes }).promise;
+      let docInit;
+      if (payload.data) {
+        docInit = { data: payload.data };
+      } else if (payload.path && window.__TAURI__?.core?.invoke) {
+        try {
+          const ab = await window.__TAURI__.core.invoke("stuart_read_pdf_binary", { path: payload.path });
+          docInit = { data: new Uint8Array(ab) };
+        } catch (_) {}
+      }
+      if (!docInit && payload.b64) {
+        const bin = atob(payload.b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        docInit = { data: bytes };
+      }
+      if (!docInit) throw new Error("缺少 PDF 数据源");
+
+      state.doc = await window.pdfjsLib.getDocument({
+        ...docInit,
+        cMapUrl: "libs/pdfjs/cmaps/",
+        cMapPacked: true,
+      }).promise;
       state.total = state.doc.numPages;
       e.pageInput.value = "1";
       e.pageInput.max = String(state.total);
@@ -421,10 +464,278 @@
     e.scroll.classList.remove("pdf-zooming");
   }
 
+  /**
+   * Hard eviction of PDF page canvases to release GPU VRAM backing store in WebView2/Chromium.
+   * Explicitly sets canvas.width = 0 and canvas.height = 0 before DOM removal.
+   */
+  function cancelAndEvictPage(wrap) {
+    if (!wrap) return;
+    const pageNum = Number(wrap.dataset.page);
+
+    // 1. Cancel active render task if in progress
+    const task = activeRenderTasks.get(pageNum);
+    if (task) {
+      try {
+        task.cancel();
+      } catch (_) {}
+      activeRenderTasks.delete(pageNum);
+    }
+    delete wrap.dataset.rendering;
+
+    // If page is not painted, skip DOM destruction
+    if (wrap.dataset.painted !== "1") return;
+
+    // 2. Physical VRAM release: set width=0, height=0 on ALL canvases (primary + annotation)
+    const canvases = wrap.querySelectorAll("canvas");
+    canvases.forEach((c) => {
+      try {
+        c.width = 0;
+        c.height = 0;
+      } catch (_) {}
+      c.remove();
+    });
+
+    // 3. Remove text layer and annot layer
+    const textLayer = wrap.querySelector(".pdf-text-layer");
+    if (textLayer) textLayer.remove();
+    const annotLayer = wrap.querySelector(".pdf-annot-layer");
+    if (annotLayer) annotLayer.remove();
+    const label = wrap.querySelector(".pdf-page-label");
+    if (label) label.remove();
+
+    // 4. Restore lightweight placeholder so page container dimensions remain stable
+    if (!wrap.querySelector(".pdf-page-placeholder")) {
+      const ph = document.createElement("div");
+      ph.className = "pdf-page-placeholder";
+      ph.textContent = `第 ${pageNum} 页…`;
+      wrap.appendChild(ph);
+    }
+
+    wrap.dataset.painted = "0";
+    wrap.classList.add("pending");
+  }
+
+  /**
+   * Enforces the sliding window invariant: concurrently painted pages <= MAX_RENDERED_PAGES (5).
+   * Evicts pages furthest from current scroll viewport center.
+   */
+  function enforceMaxRenderedPool() {
+    const e = el();
+    if (!e.scroll) return;
+    const paintedWraps = Array.from(e.scroll.querySelectorAll('.pdf-page[data-painted="1"]'));
+    if (paintedWraps.length <= MAX_RENDERED_PAGES) return;
+
+    const scrollCenter = e.scroll.scrollTop + e.scroll.clientHeight / 2;
+    paintedWraps.sort((a, b) => {
+      const centerA = a.offsetTop + a.offsetHeight / 2;
+      const centerB = b.offsetTop + b.offsetHeight / 2;
+      return Math.abs(centerB - scrollCenter) - Math.abs(centerA - scrollCenter);
+    });
+
+    while (paintedWraps.length > MAX_RENDERED_PAGES) {
+      const furthest = paintedWraps.shift();
+      cancelAndEvictPage(furthest);
+    }
+  }
+
+  async function renderPage(target, existingWrap) {
+    let num, wrap;
+    if (typeof target === "number") {
+      num = target;
+      wrap = existingWrap || el().scroll?.querySelector(`.pdf-page[data-page="${num}"]`);
+    } else {
+      wrap = target;
+      num = Number(wrap?.dataset?.page);
+    }
+
+    if (!wrap || !state.doc) return;
+    if (num < 1 || num > (state.total || state.doc.numPages)) return;
+    if (wrap.dataset.painted === "1" || wrap.dataset.rendering === "1") return;
+
+    // Cancel any stale task for this page
+    const prevTask = activeRenderTasks.get(num);
+    if (prevTask) {
+      try { prevTask.cancel(); } catch (_) {}
+      activeRenderTasks.delete(num);
+    }
+
+    wrap.dataset.rendering = "1";
+
+    try {
+      const page = await state.doc.getPage(num);
+      const rotation = ((page.rotate || 0) + state.rotation) % 360;
+      const viewport = page.getViewport({ scale: state.scale, rotation });
+
+      wrap.className = "pdf-page";
+      wrap.dataset.page = String(num);
+      wrap.style.width = `${viewport.width}px`;
+      wrap.style.height = `${viewport.height}px`;
+      wrap.style.minHeight = `${viewport.height}px`;
+
+      // Clear placeholder
+      const ph = wrap.querySelector(".pdf-page-placeholder");
+      if (ph) ph.remove();
+
+      // Main PDF canvas
+      let canvas = wrap.querySelector("canvas:not(.pdf-ann-canvas)");
+      if (!canvas) {
+        canvas = document.createElement("canvas");
+        wrap.appendChild(canvas);
+      }
+      const ctx = canvas.getContext("2d");
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.floor(viewport.width * dpr);
+      canvas.height = Math.floor(viewport.height * dpr);
+      canvas.style.width = `${viewport.width}px`;
+      canvas.style.height = `${viewport.height}px`;
+
+      let layer = wrap.querySelector(".pdf-text-layer");
+      if (!layer) {
+        layer = document.createElement("div");
+        layer.className = "pdf-text-layer";
+        wrap.appendChild(layer);
+      }
+      layer.style.width = `${viewport.width}px`;
+      layer.style.height = `${viewport.height}px`;
+
+      let annotLayer = wrap.querySelector(".pdf-annot-layer");
+      if (!annotLayer) {
+        annotLayer = document.createElement("div");
+        annotLayer.className = "pdf-annot-layer";
+        wrap.appendChild(annotLayer);
+      }
+      annotLayer.style.width = `${viewport.width}px`;
+      annotLayer.style.height = `${viewport.height}px`;
+
+      let label = wrap.querySelector(".pdf-page-label");
+      if (!label) {
+        label = document.createElement("div");
+        label.className = "pdf-page-label";
+        label.textContent = String(num);
+        wrap.appendChild(label);
+      }
+
+      const renderTask = page.render({
+        canvasContext: ctx,
+        viewport,
+        transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null,
+      });
+      activeRenderTasks.set(num, renderTask);
+
+      await renderTask.promise;
+
+      // Check if wrap was evicted while renderTask was in flight
+      if (wrap.dataset.rendering !== "1") {
+        return;
+      }
+
+      wrap.dataset.painted = "1";
+      wrap.classList.remove("pending");
+
+      // Extract and cache plain text
+      const textContent = await page.getTextContent();
+      try {
+        const plain = (textContent.items || [])
+          .map((it) => (it && it.str) || "")
+          .join(" ")
+          .replace(/\s+/g, " ")
+          .trim();
+        if (plain) state._pageText[num] = plain;
+      } catch (_) {}
+
+      layer.innerHTML = "";
+      const frag = document.createDocumentFragment();
+      const vscale = viewport.scale || 1;
+      textContent.items.forEach((item) => {
+        if (!item.str) return;
+        const tx = window.pdfjsLib.Util.transform(viewport.transform, item.transform);
+        const angle = Math.atan2(tx[1], tx[0]);
+        const fontHeight = Math.hypot(tx[2], tx[3]);
+        const fs =
+          typeof item.height === "number" && item.height > 0
+            ? item.height * vscale
+            : fontHeight * 0.82;
+        const top = tx[5] - fs * 0.95;
+        const span = document.createElement("span");
+        span.textContent = item.str;
+        span.setAttribute(
+          "style",
+          `left:${tx[4]}px;top:${top}px;font-size:${fs}px;transform:rotate(${angle}rad);transform-origin:0 0`
+        );
+        frag.appendChild(span);
+      });
+      layer.appendChild(frag);
+
+      drawAnnotationsForPage(annotLayer, num, viewport);
+
+      // Enforce pool limit
+      enforceMaxRenderedPool();
+    } catch (err) {
+      if (err?.name === "RenderingCancelledException" || err?.message?.includes("cancelled")) {
+        return; // Silent catch: fast scroll cancellation is expected behavior
+      }
+      console.error(`[PDF.js] Page ${num} render error:`, err);
+      wrap.dataset.painted = "0";
+      wrap.classList.add("pending");
+      if (!wrap.querySelector(".pdf-page-placeholder")) {
+        wrap.innerHTML = `<div class="pdf-page-placeholder">第 ${num} 页渲染失败</div>`;
+      }
+    } finally {
+      delete wrap.dataset.rendering;
+      activeRenderTasks.delete(num);
+    }
+  }
+
+  function setupVirtualizedPdfObserver(pageWrappers, scrollContainer) {
+    if (state._virtualIo) {
+      state._virtualIo.disconnect();
+      state._virtualIo = null;
+    }
+
+    const io = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          const wrap = entry.target;
+          if (entry.isIntersecting) {
+            renderPage(wrap);
+          } else {
+            cancelAndEvictPage(wrap);
+          }
+        });
+        enforceMaxRenderedPool();
+      },
+      { root: scrollContainer, rootMargin: "800px 0px" }
+    );
+
+    pageWrappers.forEach((w) => io.observe(w));
+    state._virtualIo = io;
+  }
+
   async function renderAll() {
     const e = el();
     if (!state.doc || !e.scroll) return;
     clearLiveZoom();
+
+    // 1. Cancel in-flight renders and clean up canvases
+    for (const [pageNum, task] of activeRenderTasks.entries()) {
+      try { task.cancel(); } catch (_) {}
+    }
+    activeRenderTasks.clear();
+
+    e.scroll.querySelectorAll("canvas").forEach((c) => {
+      try { c.width = 0; c.height = 0; } catch (_) {}
+      c.remove();
+    });
+
+    if (state._virtualIo) {
+      state._virtualIo.disconnect();
+      state._virtualIo = null;
+    }
+    if (state._io) {
+      state._io.disconnect();
+      state._io = null;
+    }
+
     e.scroll.innerHTML = "";
     hideAnnotMenu();
     const total = state.total || 0;
@@ -464,128 +775,20 @@
     e.scroll.appendChild(frag);
     bindHighlightLayer();
 
-    const paint = async (wrap) => {
-      if (!wrap || wrap.dataset.painted === "1") return;
-      if (!state.doc) return;
-      wrap.dataset.painted = "1";
-      const num = Number(wrap.dataset.page);
-      try {
-        await renderPage(num, wrap);
-      } catch (err) {
-        wrap.dataset.painted = "";
-        wrap.classList.add("pending");
-        wrap.innerHTML = `<div class="pdf-page-placeholder">第 ${num} 页渲染失败</div>`;
-      }
-    };
-
-    for (let i = 0; i < Math.min(state.spread ? 4 : 2, pageEls.length); i++) {
-      await paint(pageEls[i]);
-    }
     state.baseScale = state.scale;
 
+    // Attach virtual observer for bidirectional render/evict
     if ("IntersectionObserver" in window) {
-      const io = new IntersectionObserver(
-        (entries) => {
-          entries.forEach((en) => {
-            if (en.isIntersecting) {
-              paint(en.target);
-              io.unobserve(en.target);
-            }
-          });
-        },
-        { root: e.scroll, rootMargin: "600px 0px" }
-      );
-      pageEls.forEach((w) => {
-        if (w.dataset.painted !== "1") io.observe(w);
-      });
-      state._io = io;
-      setTimeout(() => {
-        if (!state.doc) return;
-        pageEls.slice(0, 4).forEach((w) => {
-          if (w.dataset.painted !== "1") paint(w);
-        });
-      }, 400);
+      setupVirtualizedPdfObserver(pageEls, e.scroll);
+      // Pre-paint initial visible pages
+      const initCount = Math.min(state.spread ? 4 : 2, pageEls.length);
+      for (let i = 0; i < initCount; i++) {
+        renderPage(pageEls[i]);
+      }
     } else {
-      for (const w of pageEls) await paint(w);
+      // Fallback for non-IO environments
+      for (const w of pageEls) await renderPage(w);
     }
-  }
-
-  async function renderPage(num, existingWrap) {
-    const e = el();
-    if (!state.doc) return;
-    const page = await state.doc.getPage(num);
-    const rotation = ((page.rotate || 0) + state.rotation) % 360;
-    const viewport = page.getViewport({ scale: state.scale, rotation });
-    const wrap = existingWrap || document.createElement("div");
-    wrap.className = "pdf-page";
-    wrap.dataset.page = String(num);
-    wrap.style.width = `${viewport.width}px`;
-    wrap.style.height = `${viewport.height}px`;
-    wrap.style.minHeight = "";
-    wrap.innerHTML = "";
-
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = Math.floor(viewport.width * dpr);
-    canvas.height = Math.floor(viewport.height * dpr);
-    canvas.style.width = `${viewport.width}px`;
-    canvas.style.height = `${viewport.height}px`;
-    wrap.appendChild(canvas);
-
-    const layer = document.createElement("div");
-    layer.className = "pdf-text-layer";
-    layer.style.width = `${viewport.width}px`;
-    layer.style.height = `${viewport.height}px`;
-    wrap.appendChild(layer);
-
-    const annotLayer = document.createElement("div");
-    annotLayer.className = "pdf-annot-layer";
-    annotLayer.style.width = `${viewport.width}px`;
-    annotLayer.style.height = `${viewport.height}px`;
-    wrap.appendChild(annotLayer);
-
-    const label = document.createElement("div");
-    label.className = "pdf-page-label";
-    label.textContent = String(num);
-    wrap.appendChild(label);
-
-    if (!existingWrap) e.scroll.appendChild(wrap);
-
-    await page.render({ canvasContext: ctx, viewport, transform: [dpr, 0, 0, dpr, 0, 0] }).promise;
-
-    const textContent = await page.getTextContent();
-    // Cache plain page text for AI explain (selection + page neighborhood)
-    try {
-      const plain = (textContent.items || [])
-        .map((it) => (it && it.str) || "")
-        .join(" ")
-        .replace(/\s+/g, " ")
-        .trim();
-      if (plain) state._pageText[num] = plain;
-    } catch (_) {}
-    const frag = document.createDocumentFragment();
-    const vscale = viewport.scale || 1;
-    textContent.items.forEach((item) => {
-      if (!item.str) return;
-      const tx = window.pdfjsLib.Util.transform(viewport.transform, item.transform);
-      const angle = Math.atan2(tx[1], tx[0]);
-      const fontHeight = Math.hypot(tx[2], tx[3]);
-      const fs =
-        typeof item.height === "number" && item.height > 0
-          ? item.height * vscale
-          : fontHeight * 0.82;
-      const top = tx[5] - fs * 0.95;
-      const span = document.createElement("span");
-      span.textContent = item.str;
-      span.setAttribute(
-        "style",
-        `left:${tx[4]}px;top:${top}px;font-size:${fs}px;transform:rotate(${angle}rad);transform-origin:0 0`
-      );
-      frag.appendChild(span);
-    });
-    layer.appendChild(frag);
-    drawAnnotationsForPage(annotLayer, num, viewport);
   }
 
   async function fitScaleToHeight(reRender = true) {

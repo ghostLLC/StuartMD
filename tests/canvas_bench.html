@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head><title>Canvas VRAM Benchmark</title></head>
+<body>
+<h1 id="status">INIT</h1>
+<div id="c-wrap"></div>
+<script>
+window.__canvases = [];
+
+window.allocateCanvases = function() {
+  const wrap = document.getElementById("c-wrap");
+  for (let i = 0; i < 50; i++) {
+    const c = document.createElement("canvas");
+    c.width = 2000;
+    c.height = 2000;
+    const ctx = c.getContext("2d");
+    ctx.fillStyle = "red";
+    ctx.fillRect(0, 0, 2000, 2000);
+    wrap.appendChild(c);
+    window.__canvases.push(c);
+  }
+  document.getElementById("status").textContent = "ALLOCATED_50";
+};
+
+window.evictCanvasesZero = function() {
+  for (const c of window.__canvases) {
+    c.width = 0;
+    c.height = 0;
+    c.remove();
+  }
+  window.__canvases = [];
+  document.getElementById("status").textContent = "EVICTED_ZERO";
+};
+
+window.evictCanvasesRemoveOnly = function() {
+  for (const c of window.__canvases) {
+    c.remove();
+  }
+  window.__canvases = [];
+  document.getElementById("status").textContent = "EVICTED_REMOVE_ONLY";
+};
+</script>
+</body>
+</html>

@@ -2,6 +2,23 @@
 
 本文件记录 StuartMD 的版本变更，便于开发与发布对照。
 
+## [3.2.0] - 2026-09-24
+
+### 安全与稳定性 (Security & Stability)
+- **封堵 RCE 命令注入**：`stuart_open_url` 改用 Win32 `ShellExecuteW` 与严格协议/字符白名单，彻底废除 `cmd.exe /C start` 间接调用
+- **原子安全落盘**：`stuart_write_file` 采用同目录临时文件原子替换与 `sync_all()` 物理刷盘，彻底杜绝掉电/崩溃时 0 字节截断丢失
+- **严格 DOM 白名单清洗**：彻底废除正则黑名单，基于 DOM 树深度遍历白名单清洗，消除 `<svg/onload=...>` 等 XSS 隐患；嵌入严格 CSP
+- **DPAPI 凭证加固**：Windows DPAPI 引入专属应用熵隔离与 `SecureZeroMemory` 明文内存安全擦除
+
+### 性能与显存 (Performance & Memory)
+- **PDF 显存虚拟化硬释放**：视口滑动窗口池保持 <= 5 页活跃，滚出页面即刻重置宽高并释放 Canvas，彻底根除百页 PDF 累积 2.2GB 显存引发的 WebView2 OOM 崩溃；加入 `renderTask.cancel()` 保护
+- **AI 流式字符对齐**：引入 UTF-8 变长字节流跨网络切片缓冲队列，根除中文字符截断乱码
+
+### 交互与体验 (UX & Shortcuts)
+- **快捷键修正**：将 `Ctrl+Shift+Z` 恢复为标准重做 (`redoEdit()`)；加入输入框焦点判定，隔离全局快捷键冒泡
+- **异步保存防竞态**：引入 `tab.rev` 代际令牌，杜绝跨标签异步保存覆写；保存前自动刷写活动块编辑内容
+- **自动化测试自适应**：修复所有测试脚本为基于 `Path(__file__)` 动态根路径探测
+
 ## [3.1.9] - 2026-09-21
 
 ### 交互
