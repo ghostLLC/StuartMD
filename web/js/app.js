@@ -4301,10 +4301,6 @@ ${previewHtml}
     });
     $("#btn-find").addEventListener("click", openFind);
     $("#btn-pin")?.addEventListener("click", togglePinActive);
-    $("#btn-outline").addEventListener("click", () => {
-      toggleSidebar(true);
-      showSidebarPanel("outline");
-    });
     $("#btn-theme").addEventListener("click", (e) => {
       e.stopPropagation();
       toggleMenu("#btn-theme", "#theme-menu");
