@@ -2885,12 +2885,9 @@
         return true;
       }
     }
-    if (typeof SAMPLE === "string") {
-      state.isSampleDoc = true;
-      setDocument({ path: null, name: "欢迎使用 StuartMD.md", content: SAMPLE, welcome: true });
-      hideBootSplash();
-      return true;
-    }
+    // Welcome content comes from samples/欢迎使用 StuartMD.md (backend open_welcome)
+    toast("无法读取示例文档，请检查安装目录 samples");
+    hideBootSplash();
     return false;
   }
 
@@ -3393,10 +3390,7 @@
       if (!ok) return;
     }
     if (!state.apiReady) {
-      state.isSampleDoc = true;
-      state.sampleDismissed = false;
-      setDocument({ path: null, name: "示例文档.md", content: SAMPLE });
-      setMode("preview");
+      toast("应用尚未就绪，请稍候再试");
       return;
     }
     const res = await window.pywebview.api.open_sample();
@@ -4950,35 +4944,6 @@ ${previewHtml}
   }
 
   // ---------- Welcome sample ----------
-  const SAMPLE = `# 欢迎使用 StuartMD
-
-**当前版本：** 3.4.1
-这是一款**简约美观**的 Markdown 阅读与编辑器。
-
-## 快速上手
-
-1. 点击顶部 **打开文件** 或按 <kbd>Ctrl</kbd>+<kbd>O</kbd>
-2. 使用 **阅读 / 分栏 / 源码** 三种模式切换
-3. 按 <kbd>Ctrl</kbd>+<kbd>S</kbd> 保存（已开启自动保存）
-
-## 功能一览
-
-| 功能 | 快捷键 | 说明 |
-|------|--------|------|
-| 打开文件 | Ctrl+O | 选择本地 Markdown |
-| 保存 | Ctrl+S | 写入当前文件 |
-| 查找 | Ctrl+F | 文档内搜索 |
-| 切换主题 | Ctrl+T | 浅色 / 深色 / 羊皮纸 / 小黄人 |
-| 导出 HTML | Ctrl+E | 生成可分享页面 |
-| AI 问答 | Alt+E | 选中文字后结合上下文问答 |
-| 伴读 | Alt+I | 问答 / 知识 / 记忆侧栏 |
-| 新窗口 | 工具栏 | 同时打开多个文档 |
-
-## 代码高亮
-
-\`\`\`javascript
-function hello(name) {
-  return \`Hello, \${name}!\`;
 }
 console.log(hello("StuartMD"));
 \`\`\`
@@ -5630,7 +5595,7 @@ flowchart LR
       setTimeout(() => {
         if (!state.apiReady) {
           hideBootSplash();
-          setDocument({ path: null, name: "欢迎使用 StuartMD.md", content: SAMPLE, welcome: true });
+          /* welcome loaded via open_welcome() */
         }
       }, 800);
     }
