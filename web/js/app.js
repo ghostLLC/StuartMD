@@ -4952,6 +4952,7 @@ ${previewHtml}
   // ---------- Welcome sample ----------
   const SAMPLE = `# 欢迎使用 StuartMD
 
+**当前版本：** 3.4.1
 这是一款**简约美观**的 Markdown 阅读与编辑器。
 
 ## 快速上手
