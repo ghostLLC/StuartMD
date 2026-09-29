@@ -4,7 +4,7 @@
 
 ![version](https://img.shields.io/badge/version-3.4.0-blue)
 
-**下载：** [GitHub Releases](https://github.com/ghostLLC/StuartMD/releases) · 最新安装包 `StuartMD-Setup-3.3.0.exe`
+**下载：** [GitHub Releases](https://github.com/ghostLLC/StuartMD/releases) · 最新安装包 `StuartMD-Setup-3.4.0.exe`
 
 ## 功能概览
 
@@ -25,7 +25,8 @@
 - 选中文字 → 标注条「**讲解**」或 `Alt+E`，结合本页与邻页文本讲解
 - 批注侧车存在 AppData，不直接改原文件（导出时才写入）
 
-### AI 问答（3.0.x / 3.1.x）
+### AI 问答与伴读（3.4.x）
+- `StuartAIService` 统一模型调用与流式输出
 - 选中文字 → 浮动栏「**讲解**」或 **Alt+E**（可自定义）；**Markdown 与 PDF 均支持**
 - **只讲解、不改写**文档；结合章节 / 邻近块等上下文
 - 讲解面板：聊天记录、追问、复制、记入记忆、再讲一次
@@ -41,14 +42,14 @@
 
 ## 快速开始
 
-1. 安装 `StuartMD-Setup-3.3.0.exe`（默认 `%LOCALAPPDATA%\StuartMD`）
+1. 安装 `StuartMD-Setup-3.4.0.exe`（默认 `%LOCALAPPDATA%\StuartMD`）
 2. 打开示例或任意 `.md` / `.pdf`
-3. 使用 AI：右上角 **模型** → 配置 API Key → 在 Markdown 或 **PDF** 中选中文字 → **讲解**
+3. 使用 AI：右上角 **模型** → 配置 API Key → 在 Markdown 或 **PDF** 中选中文字 → **问答**
 
 静默安装：
 
 ```text
-StuartMD-Setup-3.3.0.exe /S
+StuartMD-Setup-3.4.0.exe /S
 ```
 
 ## 快捷键（常用）
