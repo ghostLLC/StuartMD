@@ -3992,3 +3992,19 @@ body.ai-shortcut-recording #ai-shortcut-input {
   max-height: 50vh;
   overflow: auto;
 }
+
+.sc-detail-edit {
+  width: 100%;
+  min-height: 200px;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  line-height: 1.6;
+  resize: vertical;
+  box-sizing: border-box;
+}
