@@ -49,7 +49,7 @@
       </div>
       <div class="sc-panel" data-panel="chat">
         <div class="sc-quote" id="sc-quote" hidden></div>
-        <div class="sc-list" id="sc-messages"></div>
+        <div class="sc-list" id="sc-messages"><div class="sc-empty sc-guide"><strong>问答</strong>：选中正文后点「引用选区」，或直接提问；<kbd>Alt+E</kbd> 可快速问答。</div></div>
         <div class="sc-input-zone">
           <textarea id="sc-input" rows="2" placeholder="结合选区提问…"></textarea>
           <div class="sc-actions">
@@ -67,7 +67,7 @@
           </div>
         </div>
         <div class="sc-list" id="sc-vault-list">
-          <div class="sc-empty">输入关键词检索当前文件夹的 Markdown。</div>
+          <div class="sc-empty sc-guide"><strong>知识</strong>：在当前工作区 Markdown 中全文检索；点卡片可复制路径。不含向量索引，关键词即可。</div>
         </div>
       </div>
       <div class="sc-panel" data-panel="memory" hidden>
@@ -77,7 +77,7 @@
           <button type="button" class="sc-chip" data-mem="notes">备忘</button>
         </div>
         <div class="sc-list" id="sc-memory-list">
-          <div class="sc-empty">记忆会在问答与「记入记忆」后逐渐丰富。</div>
+          <div class="sc-empty sc-guide"><strong>记忆</strong>：问答后「记入记忆」会写在这里；点卡片可查看与删除。</div>
         </div>
       </div>
       <div class="sc-resize" id="sc-resize" title="拖动调整宽度"></div>
@@ -322,13 +322,22 @@
       }
       list.innerHTML = hits
         .map(
-          (h) => `<div class="sc-card">
+          (h) => `<div class="sc-card sc-card-click" data-path="${esc(h.path || "")}" title="点击复制路径">
           <div class="sc-card-title">${esc(h.name || h.path)}</div>
-          <div class="sc-card-meta">L${esc(String(h.line || ""))}</div>
+          <div class="sc-card-meta">L${esc(String(h.line || ""))} · 点击复制路径</div>
           <div class="sc-card-snippet">${esc(h.preview || "")}</div>
         </div>`
         )
         .join("");
+      list.querySelectorAll("[data-path]").forEach((el) => {
+        el.addEventListener("click", () => {
+          const path = el.dataset.path;
+          try {
+            navigator.clipboard?.writeText(path);
+            toast("已复制路径");
+          } catch (_) {}
+        });
+      });
     } catch (e) {
       list.innerHTML = `<div class="sc-empty">${esc(e && e.message ? e.message : e)}</div>`;
     }
@@ -357,12 +366,21 @@
       }
       list.innerHTML = rows
         .map(
-          (k) => `<div class="sc-card">
+          (k) => `<div class="sc-card sc-card-click" data-mem-key="${esc(k.key)}" role="button" tabindex="0" title="点击查看内容">
           <div class="sc-card-title">${esc(k.key)}</div>
-          <div class="sc-card-meta">${esc(String(k.size || 0))} bytes</div>
+          <div class="sc-card-meta">${esc(String(k.size || 0))} bytes · 点击查看</div>
         </div>`
         )
         .join("");
+      list.querySelectorAll("[data-mem-key]").forEach((el) => {
+        el.addEventListener("click", () => showMemoryDetail(el.dataset.memKey));
+        el.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            showMemoryDetail(el.dataset.memKey);
+          }
+        });
+      });
     } catch (e) {
       list.innerHTML = `<div class="sc-empty">${esc(e && e.message ? e.message : e)}</div>`;
     }

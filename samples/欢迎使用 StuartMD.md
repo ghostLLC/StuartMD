@@ -4,7 +4,7 @@
 
 **项目仓库：** [https://github.com/ghostLLC/StuartMD](https://github.com/ghostLLC/StuartMD)
 
-**当前版本：** 3.4.4
+**当前版本：** 3.4.5
 
 - 顶栏 **伴读**（Alt+I）：问答 / 知识 / 记忆
 - 选中文字 **✦** 或 Alt+E：快速问答

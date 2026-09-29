@@ -3975,3 +3975,20 @@ body.ai-shortcut-recording #ai-shortcut-input {
   background: transparent;
 }
 .stuart-companion { position: fixed; }
+
+.sc-guide { text-align: left; line-height: 1.7; }
+.sc-card-click { cursor: pointer; }
+.sc-card-click:hover { border-color: var(--accent, #6366f1); background: var(--bg-soft); }
+.sc-detail-head { display: flex; gap: 8px; margin-bottom: 8px; }
+.sc-detail-body {
+  margin: 8px 0 0;
+  padding: 8px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  max-height: 50vh;
+  overflow: auto;
+}
