@@ -915,8 +915,24 @@ pub fn stuart_apply_window_state(app: tauri::AppHandle) -> Value {
     }
     let x = ws.get("x").and_then(|v| v.as_i64()).unwrap_or(-1);
     let y = ws.get("y").and_then(|v| v.as_i64()).unwrap_or(-1);
+
+    fn fit_dim(v: i64, lo: i64, hi: i64) -> i64 {
+        if v <= 0 { return lo; }
+        v.clamp(lo, hi)
+    }
+    // Monitor work area (fallback 1366x768)
+    let (mw, mh) = (1366i64, 768i64);
+    #[cfg(target_os = "windows")]
+    let (mw, mh) = {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
+        unsafe { (GetSystemMetrics(SM_CXSCREEN) as i64, GetSystemMetrics(SM_CYSCREEN) as i64) }
+    };
+    let max_w = (mw as f64 * 0.92) as i64;
+    let max_h = (mh as f64 * 0.90) as i64;
     let width = ws.get("width").and_then(|v| v.as_u64()).unwrap_or(0);
     let height = ws.get("height").and_then(|v| v.as_u64()).unwrap_or(0);
+    let width = fit_dim(width as i64, 880, max_w) as u64;
+    let height = fit_dim(height as i64, 560, max_h) as u64;
     if width >= 480 && height >= 360 && x > -20000 && y > -20000 {
         let _ = w.unmaximize();
         let _ = w.set_position(PhysicalPosition::new(x as i32, y as i32));

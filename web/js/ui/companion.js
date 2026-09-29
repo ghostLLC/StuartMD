@@ -386,6 +386,52 @@
     }
   }
 
+
+  async function showMemoryDetail(key) {
+    const list = $("#sc-memory-list");
+    const api = global.pywebview && global.pywebview.api;
+    if (!list) return;
+    if (!api || !api.memory_get) {
+      list.innerHTML = `<div class="sc-empty">记忆接口不可用</div>`;
+      return;
+    }
+    if (!key) {
+      toast("无效的记忆键");
+      return;
+    }
+    list.innerHTML = `<div class="sc-empty">加载中…</div>`;
+    try {
+      const res = await api.memory_get(key);
+      const err = res && res.error;
+      const body = (res && res.content) || "";
+      list.innerHTML = `
+        <div class="sc-detail">
+          <div class="sc-detail-head">
+            <button type="button" class="btn sm" id="sc-mem-back">返回列表</button>
+            <button type="button" class="btn sm" id="sc-mem-del">删除</button>
+          </div>
+          <div class="sc-card-title">${esc(key)}</div>
+          <pre class="sc-detail-body">${esc(err || body || "（空）")}</pre>
+        </div>`;
+      const back = document.getElementById("sc-mem-back");
+      if (back) back.addEventListener("click", () => loadMemory());
+      const del = document.getElementById("sc-mem-del");
+      if (del) {
+        del.addEventListener("click", async () => {
+          try {
+            if (api.memory_delete) await api.memory_delete(key);
+            toast("已删除记忆：" + key);
+          } catch (e2) {
+            toast(String(e2 && e2.message ? e2.message : e2));
+          }
+          loadMemory();
+        });
+      }
+    } catch (e) {
+      list.innerHTML = `<div class="sc-empty">${esc(e && e.message ? e.message : e)}</div>`;
+    }
+  }
+
   global.StuartCompanion = {
     toggle,
     isOpen: () => state.open,
