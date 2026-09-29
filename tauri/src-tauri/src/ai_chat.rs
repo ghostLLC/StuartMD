@@ -11,7 +11,7 @@ use std::time::Duration;
 use tauri::Emitter;
 
 use crate::ai_api::ai_home;
-use crate::fs_api::{load_settings_migrated, save_json, settings_path};
+use crate::fs_api::load_settings_migrated;
 
 static CANCEL: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
 static ACTIVE: LazyLock<Mutex<HashMap<String, ()>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -48,21 +48,29 @@ fn dpapi_protect(plain: &[u8]) -> Result<Vec<u8>, String> {
     };
 
     if plain.is_empty() {
-        return Err("密钥为空".into());
+        return Ok(Vec::new());
     }
-    let mut in_blob = CRYPT_INTEGER_BLOB {
+
+    const APP_ENTROPY: &[u8] = b"stuartmd::secure_vault::entropy_salt_v1";
+
+    let in_blob = CRYPT_INTEGER_BLOB {
         cbData: plain.len() as u32,
         pbData: plain.as_ptr() as *mut u8,
+    };
+    let entropy_blob = CRYPT_INTEGER_BLOB {
+        cbData: APP_ENTROPY.len() as u32,
+        pbData: APP_ENTROPY.as_ptr() as *mut u8,
     };
     let mut out_blob = CRYPT_INTEGER_BLOB {
         cbData: 0,
         pbData: std::ptr::null_mut(),
     };
+
     let ok = unsafe {
         CryptProtectData(
-            &mut in_blob,
+            &in_blob,
             std::ptr::null(),
-            std::ptr::null_mut(),
+            &entropy_blob,
             std::ptr::null_mut(),
             std::ptr::null(),
             CRYPTPROTECT_UI_FORBIDDEN,
@@ -70,11 +78,19 @@ fn dpapi_protect(plain: &[u8]) -> Result<Vec<u8>, String> {
         )
     };
     if ok == 0 {
-        return Err("DPAPI 加密失败".into());
+        let err = std::io::Error::last_os_error();
+        return Err(format!("DPAPI 加密失败: {err}"));
     }
-    let out = unsafe { std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize) }
-        .to_vec();
-    unsafe { LocalFree(out_blob.pbData as *mut core::ffi::c_void) };
+
+    let out = if !out_blob.pbData.is_null() && out_blob.cbData > 0 {
+        unsafe { std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize) }.to_vec()
+    } else {
+        Vec::new()
+    };
+
+    if !out_blob.pbData.is_null() {
+        unsafe { LocalFree(out_blob.pbData as *mut core::ffi::c_void) };
+    }
     Ok(out)
 }
 
@@ -86,37 +102,72 @@ fn dpapi_unprotect(blob: &[u8]) -> Result<Vec<u8>, String> {
     };
 
     if blob.is_empty() {
-        return Err("密钥文件为空".into());
+        return Ok(Vec::new());
     }
-    let mut in_blob = CRYPT_INTEGER_BLOB {
+
+    const APP_ENTROPY: &[u8] = b"stuartmd::secure_vault::entropy_salt_v1";
+
+    let in_blob = CRYPT_INTEGER_BLOB {
         cbData: blob.len() as u32,
         pbData: blob.as_ptr() as *mut u8,
+    };
+    let entropy_blob = CRYPT_INTEGER_BLOB {
+        cbData: APP_ENTROPY.len() as u32,
+        pbData: APP_ENTROPY.as_ptr() as *mut u8,
     };
     let mut out_blob = CRYPT_INTEGER_BLOB {
         cbData: 0,
         pbData: std::ptr::null_mut(),
     };
-    let mut descr: *mut u16 = std::ptr::null_mut();
-    let ok = unsafe {
+
+    // 1. 优先尝试带应用熵解密
+    let mut ok = unsafe {
         CryptUnprotectData(
             &in_blob,
-            &mut descr,
             std::ptr::null_mut(),
+            &entropy_blob,
             std::ptr::null_mut(),
             std::ptr::null(),
             CRYPTPROTECT_UI_FORBIDDEN,
             &mut out_blob,
         )
     };
+
+    // 2. 若失败，回退尝试无熵解密（兼容旧版客户端写入的数据）
     if ok == 0 {
-        return Err("DPAPI 解密失败".into());
+        ok = unsafe {
+            CryptUnprotectData(
+                &in_blob,
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                CRYPTPROTECT_UI_FORBIDDEN,
+                &mut out_blob,
+            )
+        };
     }
-    if !descr.is_null() {
-        unsafe { LocalFree(descr as *mut core::ffi::c_void) };
+
+    if ok == 0 {
+        let err = std::io::Error::last_os_error();
+        return Err(format!("DPAPI 解密失败: {err}"));
     }
-    let out = unsafe { std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize) }
-        .to_vec();
-    unsafe { LocalFree(out_blob.pbData as *mut core::ffi::c_void) };
+
+    // 严格防止空指针创建 slice 导致的 UB
+    if out_blob.pbData.is_null() || out_blob.cbData == 0 {
+        if !out_blob.pbData.is_null() {
+            unsafe { LocalFree(out_blob.pbData as *mut core::ffi::c_void) };
+        }
+        return Ok(Vec::new());
+    }
+
+    let out = unsafe { std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize) }.to_vec();
+
+    // 显式内存擦除
+    unsafe {
+        std::ptr::write_bytes(out_blob.pbData, 0, out_blob.cbData as usize);
+        LocalFree(out_blob.pbData as *mut core::ffi::c_void);
+    }
     Ok(out)
 }
 
@@ -143,13 +194,19 @@ fn provider_has_key(id: &str) -> bool {
 }
 
 fn read_api_key(id: &str) -> Result<String, String> {
+    use zeroize::Zeroize;
     let p = key_path(id)?;
     if !p.is_file() {
         return Err("尚未配置该服务商的 API Key".into());
     }
     let blob = fs::read(&p).map_err(|e| e.to_string())?;
-    let plain = dpapi_unprotect(&blob)?;
-    String::from_utf8(plain).map_err(|_| "密钥编码无效".into())
+    let mut plain = dpapi_unprotect(&blob)?;
+    let key_str = String::from_utf8(plain.clone()).map_err(|_| {
+        plain.zeroize();
+        String::from("密钥编码无效")
+    })?;
+    plain.zeroize();
+    Ok(key_str)
 }
 
 pub fn builtin_ai_defaults() -> Value {
@@ -295,12 +352,13 @@ pub fn load_ai_settings() -> Value {
 }
 
 fn save_ai_settings(ai: &Value) -> Result<(), String> {
-    let path = settings_path();
-    let mut s = load_settings_migrated();
-    if let Some(obj) = s.as_object_mut() {
-        obj.insert("ai".into(), ai.clone());
-    }
-    save_json(&path, &s)
+    crate::fs_api::modify_settings(|s| {
+        if let Some(obj) = s.as_object_mut() {
+            obj.insert("ai".into(), ai.clone());
+        }
+        Ok(())
+    })?;
+    Ok(())
 }
 
 fn active_provider(ai: &Value) -> Result<Value, String> {
@@ -363,15 +421,16 @@ fn clear_active(id: &str) {
     }
 }
 
-fn parse_sse_data_line(line: &str) -> Option<String> {
+pub fn parse_sse_data_line(line: &str) -> Option<String> {
     let t = line.trim();
     if !t.starts_with("data:") {
         return None;
     }
     let data = t[5..].trim();
-    if data.is_empty() || data == "[DONE]" {
+    if data.is_empty() {
         return None;
     }
+    // Retain [DONE] token so the stream terminates immediately instead of hanging
     Some(data.to_string())
 }
 
@@ -663,22 +722,72 @@ pub fn stuart_ai_chat_start(
         match result {
             Ok(resp) => {
                 let mut reader = resp.into_reader();
-                let mut buf = String::new();
+                let mut byte_buf: Vec<u8> = Vec::with_capacity(4096);
                 let mut chunk = [0u8; 2048];
+                const MAX_LINE_BYTES: usize = 1024 * 1024; // 1MB 单行安全上限
+
                 loop {
                     if is_cancelled(&rid2) {
                         break;
                     }
                     match reader.read(&mut chunk) {
                         Ok(0) => {
-                            finished_ok = !acc.is_empty() || err_msg.is_empty();
+                            if !byte_buf.is_empty() {
+                                let clean_slice = if byte_buf.ends_with(b"\r\n") {
+                                    &byte_buf[..byte_buf.len() - 2]
+                                } else if byte_buf.ends_with(b"\n") {
+                                    &byte_buf[..byte_buf.len() - 1]
+                                } else {
+                                    &byte_buf[..]
+                                };
+                                let line = String::from_utf8_lossy(clean_slice);
+                                if let Some(data) = parse_sse_data_line(&line) {
+                                    if data == "[DONE]" {
+                                        finished_ok = true;
+                                    } else if let Ok(v) = serde_json::from_str::<Value>(&data) {
+                                        if let Some(err) = v.get("error") {
+                                            err_msg = err
+                                                .get("message")
+                                                .and_then(|m| m.as_str())
+                                                .unwrap_or("上游返回错误")
+                                                .to_string();
+                                        }
+                                        let piece = extract_delta_text(&v);
+                                        if !piece.is_empty() {
+                                            acc.push_str(&piece);
+                                            emit_chat(
+                                                &app,
+                                                "ai-chat-delta",
+                                                json!({"requestId": rid2, "text": piece}),
+                                            );
+                                        }
+                                    }
+                                }
+                                byte_buf.clear();
+                            }
+                            finished_ok = finished_ok || !acc.is_empty() || err_msg.is_empty();
                             break;
                         }
                         Ok(n) => {
-                            buf.push_str(&String::from_utf8_lossy(&chunk[..n]));
-                            while let Some(pos) = buf.find('\n') {
-                                let line = buf[..pos].trim_end_matches('\r').to_string();
-                                buf = buf[pos + 1..].to_string();
+                            byte_buf.extend_from_slice(&chunk[..n]);
+
+                            if byte_buf.len() > MAX_LINE_BYTES {
+                                eprintln!("[AI Stream] 单行长度超过 1MB 限制，主动清空缓冲区以保护内存");
+                                byte_buf.clear();
+                                break;
+                            }
+
+                            while let Some(pos) = byte_buf.iter().position(|&b| b == b'\n') {
+                                let line_bytes: Vec<u8> = byte_buf.drain(..=pos).collect();
+                                let clean_slice = if line_bytes.ends_with(b"\r\n") {
+                                    &line_bytes[..line_bytes.len() - 2]
+                                } else if line_bytes.ends_with(b"\n") {
+                                    &line_bytes[..line_bytes.len() - 1]
+                                } else {
+                                    &line_bytes[..]
+                                };
+
+                                let line = String::from_utf8_lossy(clean_slice);
                                 if let Some(data) = parse_sse_data_line(&line) {
                                     if data == "[DONE]" {
                                         finished_ok = true;
@@ -777,15 +886,15 @@ pub fn stuart_ai_chat_start(
             }
         }
 
+        let cancelled = !finished_ok && is_cancelled(&rid2);
         clear_active(&rid2);
         if !err_msg.is_empty() && acc.is_empty() {
             emit_chat(
                 &app,
                 "ai-chat-done",
-                json!({"requestId": rid2, "ok": false, "text": "", "error": err_msg}),
+                json!({"requestId": rid2, "ok": false, "text": "", "error": err_msg, "cancelled": cancelled}),
             );
         } else {
-            let cancelled = !finished_ok && acc.is_empty();
             emit_chat(
                 &app,
                 "ai-chat-done",
@@ -793,7 +902,7 @@ pub fn stuart_ai_chat_start(
                     "requestId": rid2,
                     "ok": !acc.is_empty() || finished_ok,
                     "text": acc,
-                    "error": if err_msg.is_empty() && cancelled { Some("已取消") } else { None },
+                    "error": if err_msg.is_empty() && cancelled { Some("已取消") } else if !err_msg.is_empty() { Some(err_msg.as_str()) } else { None },
                     "cancelled": cancelled
                 }),
             );
@@ -801,4 +910,77 @@ pub fn stuart_ai_chat_start(
     });
 
     json!({"ok": true, "request_id": rid, "provider_id": pid, "model": model_id})
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_sse_data_line_done_preservation() {
+        // [DONE] token must be preserved, not dropped!
+        assert_eq!(parse_sse_data_line("data: [DONE]"), Some("[DONE]".to_string()));
+        assert_eq!(parse_sse_data_line("data:[DONE]"), Some("[DONE]".to_string()));
+        assert_eq!(parse_sse_data_line("data: {\"choices\":[]}"), Some("{\"choices\":[]}".to_string()));
+        assert_eq!(parse_sse_data_line("data: "), None);
+        assert_eq!(parse_sse_data_line("event: message"), None);
+        assert_eq!(parse_sse_data_line("   data:  [DONE]  "), Some("[DONE]".to_string()));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_dpapi_protect_unprotect_roundtrip_and_entropy() {
+        let secret = b"my-super-secret-api-key-12345";
+        let encrypted = dpapi_protect(secret).expect("encryption should succeed");
+        assert!(!encrypted.is_empty());
+        assert_ne!(encrypted.as_slice(), secret);
+
+        let decrypted = dpapi_unprotect(&encrypted).expect("decryption should succeed");
+        assert_eq!(decrypted.as_slice(), secret);
+
+        // Empty slice test
+        let empty_enc = dpapi_protect(b"").expect("empty slice encryption should succeed");
+        assert!(empty_enc.is_empty());
+        let empty_dec = dpapi_unprotect(b"").expect("empty slice decryption should succeed");
+        assert!(empty_dec.is_empty());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_dpapi_legacy_fallback_no_entropy() {
+        use windows_sys::Win32::Foundation::LocalFree;
+        use windows_sys::Win32::Security::Cryptography::{
+            CryptProtectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
+        };
+
+        // Simulate a legacy encrypted secret without application entropy
+        let secret = b"legacy-unprotected-key-99999";
+        let in_blob = CRYPT_INTEGER_BLOB {
+            cbData: secret.len() as u32,
+            pbData: secret.as_ptr() as *mut u8,
+        };
+        let mut out_blob = CRYPT_INTEGER_BLOB {
+            cbData: 0,
+            pbData: std::ptr::null_mut(),
+        };
+
+        let ok = unsafe {
+            CryptProtectData(
+                &in_blob,
+                std::ptr::null(),
+                std::ptr::null_mut(), // null entropy (legacy)
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                CRYPTPROTECT_UI_FORBIDDEN,
+                &mut out_blob,
+            )
+        };
+        assert_ne!(ok, 0);
+        let legacy_blob = unsafe { std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize) }.to_vec();
+        unsafe { LocalFree(out_blob.pbData as *mut core::ffi::c_void) };
+
+        // Test that dpapi_unprotect seamlessly decrypts legacy secret via dual-fallback!
+        let decrypted = dpapi_unprotect(&legacy_blob).expect("dual-fallback should decrypt legacy key");
+        assert_eq!(decrypted.as_slice(), secret);
+    }
 }

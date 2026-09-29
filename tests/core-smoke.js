@@ -24,7 +24,7 @@ ok(!core.paths.pathEqualsOrUnder("C:\\x\\b.md", "C:\\w"), "outside root");
 ok(core.paths.hasRealDocument([{ path: "C:\\a\\x.md", name: "x.md" }], null, null), "has real");
 ok(!core.paths.hasRealDocument([{ path: "C:\\a\\samples\\示例文档.md", name: "示例文档.md" }], null, null), "sample only");
 const s = core.settings.migrate({ theme: "glass", mode: "split" });
-ok(s.theme === "light" && s.mode === "split" && s.schema_version === 2, "migrate");
+ok(s.theme === "light" && s.mode === "split" && s.schema_version === 4, "migrate");
 ok(core.docStats.countChars("a b\nc") === 3, "chars");
 ok(core.docStats.countLines("a\nb") === 2, "lines");
 const blocks = core.docStats.splitMarkdownBlocks("# T\n\nbody\n");

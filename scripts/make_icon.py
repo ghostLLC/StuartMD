@@ -1,7 +1,8 @@
+from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 import os, struct, io
 
-ROOT = r"C:\Users\Administrator\XiaomiMiMoProjects\.mimo-sessions\2026-09-15\一比一复刻一个阅读markdown文件的typora软件出来，要求风格简约美观、"
+ROOT = str(Path(__file__).resolve().parent.parent)
 OUT_DIR = os.path.join(ROOT, "assets")
 ICO_DIR = os.path.join(ROOT, "tauri", "src-tauri", "icons")
 os.makedirs(ICO_DIR, exist_ok=True)

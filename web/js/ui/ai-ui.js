@@ -856,11 +856,13 @@
       }
     } catch (_) {}
     p.close?.addEventListener("click", async () => {
-      await global.StuartAI?.cancel();
+      const reqId = uiState.requestId || global.StuartAI?.state?.requestId;
+      await global.StuartAI?.cancel(reqId);
       closePanel();
     });
     p.cancel?.addEventListener("click", async () => {
-      await global.StuartAI?.cancel();
+      const reqId = uiState.requestId || global.StuartAI?.state?.requestId;
+      await global.StuartAI?.cancel(reqId);
       setThinking(false);
       finishStreamingChat(uiState.lastAnswer || "", "已取消生成");
     });
@@ -908,34 +910,35 @@
     });
   }
 
-  function listenChat(requestId, onDelta, onDone) {
+  async function listenChat(requestId, onDelta, onDone) {
     const tauri = global.__TAURI__;
     if (tauri?.event?.listen) {
       let un1 = null;
       let un2 = null;
-      tauri.event
-        .listen("ai-chat-delta", (e) => {
+      const clean = () => {
+        try {
+          if (un1) un1();
+          if (un2) un2();
+        } catch (_) {}
+        un1 = null;
+        un2 = null;
+      };
+      const [u1, u2] = await Promise.all([
+        tauri.event.listen("ai-chat-delta", (e) => {
           const payload = e.payload || e;
           if (payload.requestId && payload.requestId !== requestId) return;
           onDelta(payload);
-        })
-        .then((f) => {
-          un1 = f;
-        });
-      tauri.event
-        .listen("ai-chat-done", (e) => {
+        }),
+        tauri.event.listen("ai-chat-done", (e) => {
           const payload = e.payload || e;
           if (payload.requestId && payload.requestId !== requestId) return;
           onDone(payload);
-          try {
-            un1 && un1();
-            un2 && un2();
-          } catch (_) {}
-        })
-        .then((f) => {
-          un2 = f;
-        });
-      return;
+          clean();
+        }),
+      ]);
+      un1 = u1;
+      un2 = u2;
+      return clean;
     }
     const onD = (ev) => {
       const payload = ev.detail || ev;
@@ -951,6 +954,10 @@
     };
     global.addEventListener("ai-chat-delta", onD);
     global.addEventListener("ai-chat-done", onE);
+    return () => {
+      global.removeEventListener("ai-chat-delta", onD);
+      global.removeEventListener("ai-chat-done", onE);
+    };
   }
 
   async function sendFollowUp() {
@@ -985,20 +992,11 @@
     setThinking(true, "正在思考…");
     const requestId = "ai-" + Date.now().toString(36) + "-f";
     uiState.requestId = requestId;
-    const res = await api.ai_chat_start(
-      requestId,
-      provider.id,
-      provider.model,
-      uiState.lastMessages,
-      cfg.thinking || "balanced",
-      cfg.max_output_tokens || 2048
-    );
-    if (res?.error) {
-      setThinking(false);
-      finishStreamingChat("", res.error);
-      return;
+    if (AI.state) {
+      AI.state.requestId = requestId;
+      AI.state.active = true;
     }
-    listenChat(
+    const cleanupListeners = await listenChat(
       requestId,
       (payload) => {
         setThinking(false);
@@ -1006,6 +1004,9 @@
         updateStreamingChat(uiState.lastAnswer);
       },
       (payload) => {
+        if (AI.state && AI.state.requestId === requestId) {
+          AI.state.active = false;
+        }
         const text = payload.text || uiState.lastAnswer || "";
         uiState.lastAnswer = text;
         const errMsg = payload.error && !text ? payload.error : payload.error || null;
@@ -1020,6 +1021,23 @@
         }
       }
     );
+    const res = await api.ai_chat_start(
+      requestId,
+      provider.id,
+      provider.model,
+      uiState.lastMessages,
+      cfg.thinking || "balanced",
+      cfg.max_output_tokens || 2048
+    );
+    if (res?.error) {
+      if (cleanupListeners) cleanupListeners();
+      if (AI.state && AI.state.requestId === requestId) {
+        AI.state.active = false;
+      }
+      setThinking(false);
+      finishStreamingChat("", res.error);
+      return;
+    }
   }
 
   function resolveSelectedQuote() {
@@ -1148,6 +1166,9 @@
 
       const res = await AI.explain(explainInput, {
         onDelta: (full) => {
+          if (AI.state?.requestId) {
+            uiState.requestId = AI.state.requestId;
+          }
           setThinking(false);
           uiState.lastAnswer = full;
           updateStreamingChat(full);

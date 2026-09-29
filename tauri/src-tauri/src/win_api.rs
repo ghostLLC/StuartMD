@@ -6,10 +6,16 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::fs_api::{
-    data_dir, exe_dir, load_json, load_settings_migrated, load_settings_migrated as load_set,
-    path_to_file_uri, save_json, settings_path, wallpapers_dir, PROG_ID, PROG_ID_PDF, VERSION,
+    data_dir, exe_dir, load_json, load_settings_migrated, modify_settings,
+    path_to_file_uri, save_json, wallpapers_dir, PROG_ID, PROG_ID_PDF, VERSION,
 };
 use tauri::{Manager, PhysicalPosition, PhysicalSize};
+
+#[tauri::command]
+pub fn stuart_exit_app(app: tauri::AppHandle) {
+    println!("[Lifecycle] 前端多标签检查完成，批准应用安全退出");
+    app.exit(0);
+}
 
 pub fn open_path_os(p: &Path) -> bool {
     #[cfg(target_os = "windows")]
@@ -424,7 +430,7 @@ pub fn extract_colors_from_image_bytes(bytes: &[u8]) -> Vec<String> {
 #[tauri::command]
 pub fn stuart_import_wallpaper_ex(b64: String, name: Option<String>) -> Value {
     const WALLPAPER_MAX: usize = 12 * 1024 * 1024;
-    let payload = b64.split(',').last().unwrap_or("");
+    let payload = b64.split(',').next_back().unwrap_or("");
     if payload.len() > WALLPAPER_MAX {
         return json!({"error": "壁纸过大（>12MB）"});
     }
@@ -451,19 +457,23 @@ pub fn stuart_import_wallpaper_ex(b64: String, name: Option<String>) -> Value {
     }
     let colors = extract_colors_from_image_bytes(&raw);
     let uri = path_to_file_uri(&file);
-    let mut settings = load_settings_migrated();
-    if let Some(obj) = settings.as_object_mut() {
-        obj.insert(
-            "wallpaper".into(),
-            json!({
-                "path": file.to_string_lossy(),
-                "uri": uri,
-                "colors": colors
-            }),
-        );
-        obj.insert("theme".into(), json!("wallpaper"));
+    let res = modify_settings(|settings| {
+        if let Some(obj) = settings.as_object_mut() {
+            obj.insert(
+                "wallpaper".into(),
+                json!({
+                    "path": file.to_string_lossy(),
+                    "uri": uri,
+                    "colors": colors
+                }),
+            );
+            obj.insert("theme".into(), json!("wallpaper"));
+        }
+        Ok(())
+    });
+    if let Err(e) = res {
+        return json!({"error": e});
     }
-    let _ = save_json(&settings_path(), &settings);
     json!({
         "ok": true,
         "path": file.to_string_lossy(),
@@ -862,22 +872,26 @@ pub fn stuart_capture_window(app: tauri::AppHandle) -> Value {
     let size = w.outer_size().unwrap_or(tauri::PhysicalSize::new(0, 0));
     let maximized = w.is_maximized().unwrap_or(false);
     let fullscreen = w.is_fullscreen().unwrap_or(false);
-    let mut s = load_settings_migrated();
-    if let Some(obj) = s.as_object_mut() {
-        obj.insert(
-            "window_state".into(),
-            json!({
-                "x": pos.x,
-                "y": pos.y,
-                "width": size.width,
-                "height": size.height,
-                "maximized": maximized,
-                "fullscreen": fullscreen,
-            }),
-        );
+    let res = modify_settings(|s| {
+        if let Some(obj) = s.as_object_mut() {
+            obj.insert(
+                "window_state".into(),
+                json!({
+                    "x": pos.x,
+                    "y": pos.y,
+                    "width": size.width,
+                    "height": size.height,
+                    "maximized": maximized,
+                    "fullscreen": fullscreen,
+                }),
+            );
+        }
+        Ok(())
+    });
+    match res {
+        Ok(_) => json!({"ok": true}),
+        Err(e) => json!({"error": e}),
     }
-    let _ = save_json(&settings_path(), &s);
-    json!({"ok": true})
 }
 
 #[tauri::command]

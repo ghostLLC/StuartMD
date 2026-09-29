@@ -1,0 +1,101 @@
+/* web/css/margin-notes.css */
+/* StuartMD Margin Notes Track & Flash Pulse Anchor Animation */
+
+.margin-notes-track {
+  position: absolute;
+  right: 16px;
+  top: 60px;
+  width: 220px;
+  pointer-events: none;
+  z-index: 40;
+}
+
+.margin-note-card {
+  position: absolute;
+  width: 100%;
+  pointer-events: auto;
+  background: var(--bg-card, #ffffff);
+  border-radius: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color, #e2e8f0);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  box-sizing: border-box;
+}
+
+[data-theme="dark"] .margin-note-card {
+  background: #1e293b;
+  border-color: #334155;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.margin-note-card:hover {
+  transform: translateX(-4px);
+  border-color: var(--accent, #3b82f6);
+  box-shadow: 0 6px 18px rgba(59, 130, 246, 0.15);
+}
+
+.mn-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.mn-badge {
+  font-weight: 600;
+  color: var(--accent, #3b82f6);
+}
+
+.mn-time {
+  color: var(--text-secondary, #94a3b8);
+}
+
+.mn-content {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-primary, #334155);
+}
+
+[data-theme="dark"] .mn-content {
+  color: #cbd5e1;
+}
+
+/* Bidirectional Golden Flash Pulse Animation */
+@keyframes stuart-flash-pulse-anim {
+  0% {
+    background-color: rgba(245, 158, 11, 0.45);
+    outline: 2px solid #f59e0b;
+    box-shadow: 0 0 16px rgba(245, 158, 11, 0.6);
+  }
+  50% {
+    background-color: rgba(245, 158, 11, 0.25);
+    outline: 2px solid rgba(245, 158, 11, 0.5);
+    box-shadow: 0 0 10px rgba(245, 158, 11, 0.4);
+  }
+  100% {
+    background-color: transparent;
+    outline: 2px solid transparent;
+    box-shadow: none;
+  }
+}
+
+.stuart-flash-pulse {
+  animation: stuart-flash-pulse-anim 1.8s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+  border-radius: 4px;
+}
+
+.stuart-flash-anchor-link {
+  color: var(--accent, #3b82f6);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.stuart-flash-anchor-link:hover {
+  text-decoration-style: solid;
+  color: #2563eb;
+}

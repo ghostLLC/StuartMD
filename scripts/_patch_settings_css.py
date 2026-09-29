@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 from pathlib import Path
 
-p = Path(
-    r"C:\Users\Administrator\XiaomiMiMoProjects\.mimo-sessions\2026-09-15\一比一复刻一个阅读markdown文件的typora软件出来，要求风格简约美观、\web\css\app.css"
-)
+ROOT = Path(__file__).resolve().parent.parent
+p = ROOT / "web" / "css" / "app.css"
 t = p.read_text(encoding="utf-8")
 old_card = """.modal-card {
   width: min(520px, 100%);

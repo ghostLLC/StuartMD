@@ -4,9 +4,7 @@ from pathlib import Path
 import re
 import sys
 
-ROOT = Path(
-    r"C:\Users\Administrator\XiaomiMiMoProjects\.mimo-sessions\2026-09-15\一比一复刻一个阅读markdown文件的typora软件出来，要求风格简约美观、"
-)
+ROOT = Path(__file__).resolve().parent.parent
 ok = True
 
 
