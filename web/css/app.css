@@ -2491,6 +2491,24 @@ body[data-theme="wallpaper"] #preview *::selection {
   background: transparent;
 }
 
+/* Clickable empty line — reading-mode editing of blank paragraphs */
+.md-block.md-empty {
+  min-height: 1.6em;
+  cursor: text;
+  margin: 0.15em 0;
+}
+.md-block.md-empty .md-empty-line {
+  min-height: 1.6em;
+  margin: 0;
+  line-height: 1.6;
+}
+.md-block.md-empty:hover {
+  background: color-mix(in srgb, var(--accent, #1a73e8) 4%, transparent);
+}
+.md-block.md-empty.editing {
+  background: color-mix(in srgb, var(--accent, #1a73e8) 6%, transparent);
+}
+
 .preview-hint {
   position: absolute;
   right: 16px;
@@ -4058,5 +4076,71 @@ body.ai-shortcut-recording #ai-shortcut-input {
   font-size: 12.5px;
   line-height: 1.6;
   resize: vertical;
+  box-sizing: border-box;
+}
+
+
+/* Memory detail: lazy edit, actions under content */
+.sc-mem-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+.sc-mem-body {
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-soft);
+  transition: border-color 0.15s ease, background 0.15s ease;
+  cursor: text;
+}
+.sc-mem-body .sc-detail-edit {
+  margin-top: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  min-height: 180px;
+}
+.sc-mem-body .sc-detail-edit:not(.is-active) {
+  cursor: default;
+  caret-color: transparent;
+}
+.sc-mem-body .sc-detail-edit.is-active {
+  color: var(--text);
+  caret-color: auto;
+}
+.sc-mem-body.is-active {
+  border-color: var(--accent, #1a73e8);
+  background: var(--bg);
+}
+.sc-detail-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  justify-content: flex-end;
+}
+.sc-detail-actions .btn.danger {
+  color: #c5221f;
+  border-color: color-mix(in srgb, #c5221f 35%, var(--border));
+}
+.sc-detail-actions .btn.danger:hover {
+  background: color-mix(in srgb, #c5221f 12%, transparent);
+}
+.sc-field-label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-2);
+  margin: 8px 0 4px;
+}
+.sc-detail-input {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12.5px;
   box-sizing: border-box;
 }

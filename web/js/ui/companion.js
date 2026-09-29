@@ -350,13 +350,9 @@
     try {
       const res = await api.memory_list();
       const keys = (res && res.keys) || [];
-      if (!keys.length) {
-        list.innerHTML = `<div class="sc-empty">记忆会在问答与「记入记忆」后逐渐丰富。</div>`;
-        return;
-      }
       const filter = state.memFilter;
       const isProfileKey = (key) => /(^|_)(profile|prefs|preference)/i.test(String(key || "")) || String(key || "") === "user_profile";
-      const rows = keys.filter((k) => {
+      const rows = (keys || []).filter((k) => {
         const key = String(k.key || "");
         const profile = isProfileKey(key);
         if (filter === "all") return true;
@@ -364,18 +360,23 @@
         if (filter === "notes") return !profile;
         return true;
       });
+      const newBtn = `<div class="sc-mem-toolbar"><button type="button" class="btn sm primary" id="sc-mem-new">新建记忆</button></div>`;
       if (!rows.length) {
-        list.innerHTML = `<div class="sc-empty">该分类下暂无记忆</div>`;
+        list.innerHTML = newBtn + `<div class="sc-empty">暂无记忆。可点「新建记忆」，或在问答后「记入记忆」。</div>`;
+        bindMemoryNew();
         return;
       }
-      list.innerHTML = rows
-        .map(
-          (k) => `<div class="sc-card sc-card-click" data-mem-key="${esc(k.key)}" role="button" tabindex="0" title="点击查看内容">
+      list.innerHTML =
+        newBtn +
+        rows
+          .map(
+            (k) => `<div class="sc-card sc-card-click" data-mem-key="${esc(k.key)}" role="button" tabindex="0" title="点击查看内容">
           <div class="sc-card-title">${esc(k.key)}</div>
           <div class="sc-card-meta">${esc(String(k.size || 0))} bytes · 点击查看</div>
         </div>`
-        )
-        .join("");
+          )
+          .join("");
+      bindMemoryNew();
       list.querySelectorAll("[data-mem-key]").forEach((el) => {
         el.addEventListener("click", () => showMemoryDetail(el.dataset.memKey));
         el.addEventListener("keydown", (e) => {
@@ -390,6 +391,69 @@
     }
   }
 
+  function bindMemoryNew() {
+    const btn = document.getElementById("sc-mem-new");
+    if (btn) btn.addEventListener("click", () => showMemoryCreate());
+  }
+
+  async function showMemoryCreate() {
+    const list = $("#sc-memory-list");
+    const api = global.pywebview?.api;
+    if (!list) return;
+    list.innerHTML = `
+      <div class="sc-detail">
+        <div class="sc-card-title">新建记忆</div>
+        <label class="sc-field-label">键名</label>
+        <input id="sc-mem-new-key" class="sc-detail-input" type="text" placeholder="例如：note_写作偏好" spellcheck="false" />
+        <label class="sc-field-label">内容</label>
+        <div class="sc-mem-body" id="sc-mem-body">
+          <textarea id="sc-mem-editor" class="sc-detail-edit is-active" rows="10" spellcheck="false"></textarea>
+        </div>
+        <div class="sc-card-meta">键名建议：prefs_* / note_* / activity_*</div>
+        <div class="sc-detail-actions">
+          <button type="button" class="btn sm" id="sc-mem-back">返回</button>
+          <button type="button" class="btn sm primary" id="sc-mem-save">保存</button>
+        </div>
+      </div>`;
+    const keyInput = document.getElementById("sc-mem-new-key");
+    const ta = document.getElementById("sc-mem-editor");
+    if (keyInput) keyInput.focus();
+    document.getElementById("sc-mem-back")?.addEventListener("click", () => loadMemory());
+    document.getElementById("sc-mem-save")?.addEventListener("click", async () => {
+      const key = String(keyInput?.value || "").trim();
+      const val = ta ? ta.value : "";
+      if (!key) {
+        toast("请填写键名");
+        return;
+      }
+      try {
+        if (!api?.memory_set) {
+          toast("记忆写入接口不可用");
+          return;
+        }
+        const r = await api.memory_set(key, val);
+        if (r && r.error) toast(r.error);
+        else {
+          toast("已创建记忆：" + key);
+          loadMemory();
+        }
+      } catch (e) {
+        toast(String(e && e.message ? e.message : e));
+      }
+    });
+  }
+
+  async function confirmMemoryDelete(key) {
+    const msg = `确定删除记忆「${key}」？\n此操作不可撤销。`;
+    const ui = global.StuartUIConfirm || global.StuartMDPdf?.uiConfirm;
+    if (typeof ui === "function") {
+      try {
+        const r = await ui(msg);
+        return r === true || (r && r.ok === true);
+      } catch (_) {}
+    }
+    return global.confirm ? global.confirm(msg) : false;
+  }
 
   async function showMemoryDetail(key) {
     const list = $("#sc-memory-list");
@@ -408,58 +472,70 @@
       const res = await api.memory_get(key);
       const err = res && res.error;
       const body = (res && res.content) || "";
+      const text = err || body || "";
       list.innerHTML = `
         <div class="sc-detail">
-          <div class="sc-detail-head">
+          <div class="sc-card-title">${esc(key)}</div>
+          <div class="sc-mem-body" id="sc-mem-body" title="单击开始编辑">
+            <textarea id="sc-mem-editor" class="sc-detail-edit" rows="12" spellcheck="false" readonly>${esc(text)}</textarea>
+          </div>
+          <div class="sc-card-meta" id="sc-mem-hint">单击内容进入编辑，点「保存」写入</div>
+          <div class="sc-detail-actions">
             <button type="button" class="btn sm" id="sc-mem-back">返回</button>
             <button type="button" class="btn sm primary" id="sc-mem-save">保存</button>
-            <button type="button" class="btn sm" id="sc-mem-del">删除</button>
+            <button type="button" class="btn sm danger" id="sc-mem-del">删除</button>
           </div>
-          <div class="sc-card-title">${esc(key)}</div>
-          <textarea id="sc-mem-editor" class="sc-detail-edit" rows="12" spellcheck="false">${esc(err || body || "")}</textarea>
-          <div class="sc-card-meta">单击内容可编辑，点「保存」写入</div>
         </div>`;
+      const bodyEl = document.getElementById("sc-mem-body");
       const ta = document.getElementById("sc-mem-editor");
-      if (ta) {
+      const hint = document.getElementById("sc-mem-hint");
+      const armEdit = () => {
+        if (!ta || ta.dataset.armed === "1") return;
+        ta.dataset.armed = "1";
+        ta.removeAttribute("readonly");
+        ta.classList.add("is-active");
+        if (bodyEl) bodyEl.classList.add("is-active");
+        if (hint) hint.textContent = "编辑中 · 点「保存」写入";
         ta.focus();
         ta.addEventListener("input", () => {
           ta.dataset.dirty = "1";
         });
-      }
-      const back = document.getElementById("sc-mem-back");
-      if (back) back.addEventListener("click", () => loadMemory());
-      const save = document.getElementById("sc-mem-save");
-      if (save) {
-        save.addEventListener("click", async () => {
-          const val = ta ? ta.value : "";
-          try {
-            if (!api.memory_set) {
-              toast("记忆写入接口不可用");
-              return;
-            }
-            const r2 = await api.memory_set(key, val);
-            if (r2 && r2.error) toast(r2.error);
-            else {
-              if (ta) ta.dataset.dirty = "";
-              toast("已保存记忆：" + key);
-            }
-          } catch (e2) {
-            toast(String(e2 && e2.message ? e2.message : e2));
-          }
+      };
+      if (bodyEl) {
+        bodyEl.addEventListener("click", (e) => {
+          e.stopPropagation();
+          armEdit();
         });
       }
-      const del = document.getElementById("sc-mem-del");
-      if (del) {
-        del.addEventListener("click", async () => {
-          try {
-            if (api.memory_delete) await api.memory_delete(key);
-            toast("已删除记忆：" + key);
-          } catch (e2) {
-            toast(String(e2 && e2.message ? e2.message : e2));
+      document.getElementById("sc-mem-back")?.addEventListener("click", () => loadMemory());
+      document.getElementById("sc-mem-save")?.addEventListener("click", async () => {
+        const val = ta ? ta.value : "";
+        try {
+          if (!api.memory_set) {
+            toast("记忆写入接口不可用");
+            return;
           }
-          loadMemory();
-        });
-      }
+          const r2 = await api.memory_set(key, val);
+          if (r2 && r2.error) toast(r2.error);
+          else {
+            if (ta) ta.dataset.dirty = "";
+            toast("已保存记忆：" + key);
+          }
+        } catch (e2) {
+          toast(String(e2 && e2.message ? e2.message : e2));
+        }
+      });
+      document.getElementById("sc-mem-del")?.addEventListener("click", async () => {
+        const ok = await confirmMemoryDelete(key);
+        if (!ok) return;
+        try {
+          if (api.memory_delete) await api.memory_delete(key);
+          toast("已删除记忆：" + key);
+        } catch (e2) {
+          toast(String(e2 && e2.message ? e2.message : e2));
+        }
+        loadMemory();
+      });
     } catch (e) {
       list.innerHTML = `<div class="sc-empty">${esc(e && e.message ? e.message : e)}</div>`;
     }

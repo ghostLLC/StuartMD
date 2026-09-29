@@ -1799,5 +1799,8 @@
     getSelection,
     getAiContext,
     loadPageText,
+    uiConfirm,
   };
+  // Shared in-app confirm (Tauri native confirm() often no-ops)
+  window.StuartUIConfirm = uiConfirm;
 })();

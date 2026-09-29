@@ -182,20 +182,37 @@
           continue;
         }
       }
-      if (!inFence && line.trim() === "" && buf.length) {
-        flush();
+      if (!inFence && line.trim() === "") {
+        if (buf.length) flush();
+        else blocks.push("");
         continue;
       }
       buf.push(line);
     }
     flush();
+    while (blocks.length && blocks[0] === "") blocks.shift();
+    while (blocks.length && blocks[blocks.length - 1] === "") blocks.pop();
     return blocks;
   }
 
   function joinBlocks(blocks) {
     const core = CoreDoc();
     if (core) return core.joinBlocks(blocks);
-    return blocks.join("\n\n");
+    const list = (blocks || []).map((b) => (b == null ? "" : String(b)));
+    const out = [];
+    for (let i = 0; i < list.length; i++) {
+      const b = list[i];
+      if (i === 0) {
+        if (b) out.push(...b.split("\n"));
+        else out.push("");
+      } else if (b) {
+        out.push("");
+        out.push(...b.split("\n"));
+      } else {
+        out.push("");
+      }
+    }
+    return out.join("\n");
   }
 
   function blockNeedsPostProcess(block) {
@@ -255,8 +272,9 @@
 
     if (typeof DOMPurify !== "undefined") {
       return DOMPurify.sanitize(rawHtml, {
-        USE_PROFILES: { html: true, svg: false, mathMl: false },
-        FORBID_TAGS: ["script", "iframe", "object", "embed", "base", "form", "meta", "link", "style", "svg", "math", "applet", "animate", "set"],
+        // svg/mathMl required for Mermaid diagrams and KaTeX visual twins
+        USE_PROFILES: { html: true, svg: true, mathMl: true },
+        FORBID_TAGS: ["script", "iframe", "object", "embed", "base", "form", "meta", "link", "style", "applet", "animate", "set"],
         FORBID_ATTR: ["style"],
         ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
         ADD_ATTR: ["target"],
@@ -272,7 +290,10 @@
       "BLOCKQUOTE", "PRE", "CODE", "UL", "OL", "LI", "DL", "DT", "DD",
       "TABLE", "THEAD", "TBODY", "TFOOT", "TR", "TH", "TD",
       "STRONG", "B", "EM", "I", "U", "DEL", "S", "A", "IMG",
-      "SPAN", "DIV", "SUB", "SUP", "MARK", "SMALL", "ABBR", "SUMMARY", "DETAILS", "INPUT"
+      "SPAN", "DIV", "SUB", "SUP", "MARK", "SMALL", "ABBR", "SUMMARY", "DETAILS", "INPUT",
+      "SVG", "G", "PATH", "RECT", "CIRCLE", "LINE", "POLYLINE", "POLYGON", "ELLIPSE",
+      "TEXT", "TSPAN", "DEFS", "MARKER", "CLIPPATH", "FILTER", "FOREIGNOBJECT", "TITLE", "DESC",
+      "MATH", "MI", "MN", "MO", "MSUP", "MSUB", "MFRAC", "MSQRT", "MROW", "MTEXT", "MSPACE", "MSTYLE", "MERROR", "MPADDED", "MPHANTOM"
     ]);
 
     const ALLOWED_ATTRS = {
@@ -364,7 +385,13 @@
     const wrap = document.createElement("div");
     wrap.className = "md-block";
     wrap.dataset.index = String(index);
-    const html = renderBlockHtml(block);
+    const src = block == null ? "" : String(block);
+    if (!src.trim()) {
+      wrap.classList.add("md-empty");
+      wrap.innerHTML = '<p class="md-empty-line"><br></p>';
+      return wrap;
+    }
+    const html = renderBlockHtml(src);
     wrap.innerHTML = sanitizeHtmlStrict(html);
     return wrap;
   }
@@ -1446,8 +1473,12 @@
       }
       const node = e.target.closest(".md-block");
       if (!node || node.classList.contains("editing")) return;
-      if (e.detail > 1) return;
+      // Multi-click (double/triple) must cancel pending enter-edit — otherwise the
+      // first click's timer fires mid-gesture and wipes the block.
       clearTimeout(bindPreviewDelegates._clickTimer);
+      if (e.detail > 1) return;
+      const clickX = e.clientX;
+      const clickY = e.clientY;
       bindPreviewDelegates._clickTimer = setTimeout(() => {
         if (!document.contains(node)) return;
         if (node.classList.contains("editing")) return;
@@ -1455,11 +1486,11 @@
         if (recentlyHadSelection(1500)) return;
         // Typora-like: single-click enters the right edit surface in reading mode
         if (node.querySelector(".mermaid-diagram")) {
-          enterBlockSourceEdit(node);
+          enterBlockSourceEdit(node, clickX, clickY);
           return;
         }
         if (node.querySelector(".katex, .katex-display")) {
-          enterBlockSourceEdit(node);
+          enterBlockSourceEdit(node, clickX, clickY);
           return;
         }
         if (node.querySelector("table")) {
@@ -1470,8 +1501,8 @@
           enterCodeEdit(node);
           return;
         }
-        enterBlockEdit(node);
-      }, 200);
+        enterBlockEdit(node, clickX, clickY);
+      }, 90);
     });
 
     el.preview.addEventListener("dblclick", (e) => {
@@ -1629,10 +1660,19 @@
     return out;
   }
 
-  function placeCaretOnClick(target) {
+  function placeCaretOnClick(target, x, y) {
     try {
       const sel = window.getSelection();
       if (!sel) return;
+      // Prefer the real click point so heading/list edits feel immediate
+      if (x != null && y != null && typeof document.caretRangeFromPoint === "function") {
+        const r = document.caretRangeFromPoint(x, y);
+        if (r && target.contains(r.startContainer)) {
+          sel.removeAllRanges();
+          sel.addRange(r);
+          return;
+        }
+      }
       const range = document.createRange();
       range.selectNodeContents(target);
       range.collapse(false);
@@ -1835,7 +1875,7 @@
     });
   }
 
-  function enterBlockEdit(node) {
+  function enterBlockEdit(node, clickX, clickY) {
     if (node.classList.contains("editing")) return;
     // Math / diagram: WYSIWYG edit corrupts KaTeX / mermaid DOM — source editor
     if (node.querySelector(".katex, .katex-display, .mermaid-diagram")) {
@@ -1869,7 +1909,7 @@
       h.spellcheck = false;
       h.style.outline = "none";
     });
-    placeCaretOnClick(hosts[0]);
+    placeCaretOnClick(hosts[0], clickX, clickY);
 
     let done = false;
     const clearDoc = () => document.removeEventListener("mousedown", onDocDown, true);
@@ -2087,7 +2127,13 @@
     let body = original;
     const fence = original.match(/^\s*```[\w+-]*\r?\n([\s\S]*?)\r?\n?```\s*$/);
     if (fence) body = fence[1];
-    else body = codeEl.textContent || "";
+    else {
+      // Fallback: strip fence markers from source rather than highlighted DOM
+      body = original
+        .replace(/^\s*```[\w+-]*\r?\n?/, "")
+        .replace(/\r?\n?```\s*$/, "");
+      if (!body.trim()) body = codeEl.textContent || "";
+    }
 
     const prevScroll = el.previewPane.scrollTop;
     node.innerHTML = "";
@@ -2109,6 +2155,10 @@
     };
     fit();
     ta.addEventListener("input", fit);
+    let userEdited = false;
+    ta.addEventListener("input", () => {
+      userEdited = true;
+    });
     ta.focus();
     ta.setSelectionRange(0, 0);
     el.previewPane.scrollTop = prevScroll;
@@ -2125,8 +2175,12 @@
       done = true;
       cleanupDocDown();
       const nextBody = ta.value.replace(/\s+$/, "");
-      const next = "```" + lang + "\n" + nextBody + (nextBody ? "\n" : "") + "```";
-      // Empty body is legitimate for code (user cleared the snippet)
+      let next = "```" + lang + "\n" + nextBody + (nextBody ? "\n" : "") + "```";
+      // Never wipe a non-empty fence just because extraction/blur produced empty
+      // and the user never typed.
+      if (!userEdited && !nextBody.trim() && String(original).trim()) {
+        next = original;
+      }
       commitBlockSource(idx, next, original, { allowEmpty: true });
       const joined = el.source.value || "";
       lastPreviewSource = "";
@@ -4674,6 +4728,51 @@ ${previewHtml}
         ta.selectionStart = ta.selectionEnd = s + 2;
         setContent(ta.value, true);
       }
+      // Empty list line: Enter strips marker; Backspace strips then deletes line
+      if (
+        (e.key === "Enter" || e.key === "Backspace") &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        !e.shiftKey &&
+        el.source.selectionStart === el.source.selectionEnd
+      ) {
+        const ta = el.source;
+        const v = ta.value;
+        const pos = ta.selectionStart;
+        const lineStart = v.lastIndexOf("\n", Math.max(0, pos - 1)) + 1;
+        const lineEnd = (() => {
+          const i = v.indexOf("\n", pos);
+          return i < 0 ? v.length : i;
+        })();
+        const line = v.slice(lineStart, lineEnd);
+        const emptyList = /^\s*(?:[-*+]|\d+[.)])\s*$/.test(line) || /^\s*- \[[ xX]\]\s*$/.test(line);
+        const caretAtStart = pos === lineStart;
+        if (e.key === "Enter" && emptyList) {
+          e.preventDefault();
+          const stripped = stripListMarker(line);
+          ta.value = v.slice(0, lineStart) + stripped + v.slice(lineEnd);
+          ta.selectionStart = ta.selectionEnd = lineStart + stripped.length;
+          setContent(ta.value, true);
+          return;
+        }
+        if (e.key === "Backspace" && emptyList && caretAtStart) {
+          e.preventDefault();
+          const stripped = stripListMarker(line);
+          if (stripped.trim()) {
+            ta.value = v.slice(0, lineStart) + stripped + v.slice(lineEnd);
+            ta.selectionStart = ta.selectionEnd = lineStart;
+          } else {
+            // second backspace: delete the empty line (and its newline)
+            const delFrom = lineStart > 0 ? lineStart - 1 : lineStart;
+            const delTo = lineEnd < v.length ? lineEnd + 1 : lineEnd;
+            ta.value = v.slice(0, delFrom) + v.slice(delTo);
+            ta.selectionStart = ta.selectionEnd = delFrom;
+          }
+          setContent(ta.value, true);
+          return;
+        }
+      }
       // Ctrl+B bold
       if ((e.ctrlKey || e.metaKey) && (e.key === "b" || e.key === "B")) {
         e.preventDefault();
@@ -5128,56 +5227,125 @@ ${previewHtml}
     return true;
   }
 
+  /** Find source line index for the Nth list-marker line (0-based). */
+  function findListLineIndex(lines, liOrdinal) {
+    let n = 0;
+    for (let i = 0; i < lines.length; i++) {
+      if (/^\s*(?:[-*+]|\d+[.)])\s+/.test(lines[i]) || /^\s*- \[[ xX]\]\s+/.test(lines[i]) || /^\s*(?:[-*+]|\d+[.)])\s*$/.test(lines[i]) || /^\s*- \[[ xX]\]\s*$/.test(lines[i])) {
+        if (n === liOrdinal) return i;
+        n++;
+      }
+    }
+    return -1;
+  }
+
+  function listMarkerOnly(line) {
+    return /^\s*(?:[-*+]|\d+[.)])\s*$/.test(line) || /^\s*- \[[ xX]\]\s*$/.test(line) || /^\s*(?:[-*+]|\d+[.)])\s+$/.test(line) || /^\s*- \[[ xX]\]\s+$/.test(line);
+  }
+
+  function stripListMarker(line) {
+    return line
+      .replace(/^\s*- \[[ xX]\]\s+/, "")
+      .replace(/^\s*- \[[ xX]\]\s*$/, "")
+      .replace(/^\s*(?:[-*+]|\d+[.)])\s+/, "")
+      .replace(/^\s*(?:[-*+]|\d+[.)])\s*$/, "");
+  }
+
+  /** Rewrite one list line in the active block source and re-render. */
+  function rewriteListLine(node, li, mode) {
+    // mode: "strip-marker" | "delete-line"
+    const idx = Number(node.dataset.index || 0);
+    const all = splitMarkdownBlocks(el.source.value || "");
+    const src = all[idx] || "";
+    const lines = src.split("\n");
+    const lis = [...node.querySelectorAll("li")];
+    const ord = Math.max(0, lis.indexOf(li));
+    let lineIdx = findListLineIndex(lines, ord);
+    if (lineIdx < 0) {
+      // fallback: first marker-only line
+      lineIdx = lines.findIndex((l) => listMarkerOnly(l));
+    }
+    if (lineIdx < 0) return false;
+    const prev = el.source.value || "";
+    if (mode === "delete-line") {
+      lines.splice(lineIdx, 1);
+    } else {
+      lines[lineIdx] = stripListMarker(lines[lineIdx]);
+    }
+    all[idx] = lines.join("\n");
+    const joined = joinBlocks(all);
+    if (joined === prev) return true;
+    pushHistory(prev);
+    el.source.value = joined;
+    state.content = joined;
+    markDirty();
+    scheduleAutoSave();
+    lastPreviewSource = "";
+    node._stuartCommit = null;
+    exitBlockEditVisual(node);
+    node.innerHTML = "";
+    renderMarkdown(joined);
+    lastPreviewSource = joined;
+    lastPreviewBlocks = splitMarkdownBlocks(joined);
+    pushHistory(joined);
+    return true;
+  }
+
   /** WYSIWYG block: execCommand + convert via htmlToMarkdown on blur. */
   function handleBlockEditKeydown(e, node) {
-    // List: first Backspace at start of item removes the bullet, not the line
-    if (e.key === "Backspace" && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) {
-      const sel = window.getSelection();
-      if (sel && sel.isCollapsed) {
-        const anchor = sel.anchorNode;
-        const li = (anchor && (anchor.nodeType === 1 ? anchor : anchor.parentElement))?.closest?.("li");
-        if (li && node.contains(li)) {
-          try {
-            const range = sel.getRangeAt(0);
-            const pre = range.cloneRange();
-            pre.selectNodeContents(li);
-            pre.setEnd(range.startContainer, range.startOffset);
-            if (pre.toString().length === 0) {
-              e.preventDefault();
-              const liText = li.textContent.trim().slice(0, 24);
-              const idx = Number(node.dataset.index || 0);
-              const all = splitMarkdownBlocks(el.source.value || "");
-              const src = all[idx] || "";
-              const lines = src.split("\n");
-              const key = liText.slice(0, 12);
-              let changed = false;
-              const nextLines = lines.map((line) => {
-                if (changed) return line;
-                if (!/^\s*(?:[-*+]|\d+[.)]|\[[ xX]\])\s+/.test(line)) return line;
-                if (key && !line.includes(key) && liText && !line.includes(liText)) return line;
-                changed = true;
-                return line.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, "").replace(/^\s*- \[[ xX]\]\s+/, "");
-              });
-              if (changed) {
-                all[idx] = nextLines.join("\n");
-                const joined = joinBlocks(all);
-                el.source.value = joined;
-                state.content = joined;
-                markDirty();
-                scheduleAutoSave();
-                lastPreviewSource = "";
-                node._stuartCommit = null;
-                exitBlockEditVisual(node);
-                node.innerHTML = "";
-                renderMarkdown(joined);
-                lastPreviewSource = joined;
-                lastPreviewBlocks = splitMarkdownBlocks(joined);
-                pushHistory(joined);
-              }
-              return;
-            }
-          } catch (_) {}
+    const sel = window.getSelection();
+    const liAtCaret = (() => {
+      if (!sel || !sel.anchorNode) return null;
+      const a = sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement;
+      const li = a?.closest?.("li");
+      return li && node.contains(li) ? li : null;
+    })();
+    const caretAtStartOfLi = (li) => {
+      if (!sel || !sel.rangeCount || !li) return false;
+      const range = sel.getRangeAt(0);
+      const pre = range.cloneRange();
+      pre.selectNodeContents(li);
+      pre.setEnd(range.startContainer, range.startOffset);
+      return pre.toString().length === 0;
+    };
+    const liEmpty = (li) => !!li && !String(li.textContent || "").replace(/\s+/g, "").length;
+
+    // Enter on empty list item: strip the marker (exit list), do NOT spawn another bullet
+    if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && liAtCaret && liEmpty(liAtCaret)) {
+      e.preventDefault();
+      e.stopPropagation();
+      rewriteListLine(node, liAtCaret, "strip-marker");
+      return;
+    }
+
+    // Backspace on empty list item: 1) strip marker  2) delete the empty line
+    if (e.key === "Backspace" && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey && liAtCaret && caretAtStartOfLi(liAtCaret)) {
+      if (liEmpty(liAtCaret)) {
+        e.preventDefault();
+        e.stopPropagation();
+        // If this line is still a marker-only source line → strip marker first
+        const idx = Number(node.dataset.index || 0);
+        const all = splitMarkdownBlocks(el.source.value || "");
+        const src = all[idx] || "";
+        const lines = src.split("\n");
+        const lis = [...node.querySelectorAll("li")];
+        const ord = Math.max(0, lis.indexOf(liAtCaret));
+        let lineIdx = findListLineIndex(lines, ord);
+        if (lineIdx < 0) lineIdx = lines.findIndex((l) => listMarkerOnly(l));
+        const srcLine = lineIdx >= 0 ? lines[lineIdx] : "";
+        if (srcLine && listMarkerOnly(srcLine)) {
+          rewriteListLine(node, liAtCaret, "strip-marker");
+        } else {
+          rewriteListLine(node, liAtCaret, "delete-line");
         }
+        return;
+      }
+      // Non-empty item, caret at start: strip marker only (keep text as paragraph)
+      if (caretAtStartOfLi(liAtCaret)) {
+        e.preventDefault();
+        e.stopPropagation();
+        rewriteListLine(node, liAtCaret, "strip-marker");
+        return;
       }
     }
 
