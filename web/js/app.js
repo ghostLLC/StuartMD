@@ -4944,37 +4944,7 @@ ${previewHtml}
   }
 
   // ---------- Welcome sample ----------
-}
-console.log(hello("StuartMD"));
-\`\`\`
-
-## LaTeX 公式
-
-行内公式 $E = mc^2$，以及块级公式：
-
-$$
-\\int_{-\\infty}^{\\infty} e^{-x^2}\\,dx = \\sqrt{\\pi}
-$$
-
-## Mermaid 图表
-
-\`\`\`mermaid
-flowchart LR
-  A[打开文件] --> B[阅读预览]
-  B --> C[编辑分栏]
-  C --> D[自动保存]
-\`\`\`
-
-## 任务列表
-
-- [x] 打开并预览 Markdown
-- [x] 语法高亮与公式 / Mermaid
-- [ ] 写下你的第一篇笔记
-
----
-
-左侧可打开文件夹浏览 Markdown；右键文件树可「新窗口打开」。
-`;
+  // Content is loaded from samples/ via backend open_welcome() / open_sample().
 
   // ---------- Settings modal ----------
   const SETTINGS_GEOM_KEY = "StuartMD-settings-ui";

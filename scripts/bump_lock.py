@@ -5,7 +5,7 @@ p = Path(r"C:\Users\Administrator\XiaomiMiMoProjects\.mimo-sessions\2026-09-15\S
 t = p.read_text(encoding="utf-8")
 t2, n = re.subn(
     r'(name = "stuartmd"\r?\nversion = ")[^"]+(")',
-    r"\g<1>3.4.2\g<2>",
+    r"\g<1>3.4.3\g<2>",
     t,
     count=1,
 )
