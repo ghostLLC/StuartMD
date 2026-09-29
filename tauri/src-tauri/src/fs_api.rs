@@ -1,15 +1,16 @@
 //! File/settings commands aligned with pywebview `window.pywebview.api`.
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use serde_json::{json, Value};
+use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{LazyLock, Mutex, OnceLock};
 use tauri::ipc::Response;
 
 const APP_ID: &str = "StuartMD";
-pub const VERSION: &str = "3.4.10";
+pub const VERSION: &str = "3.5.0";
 pub const PROG_ID: &str = "StuartMD.Markdown";
 pub const PROG_ID_PDF: &str = "StuartMD.PDF";
 pub const SETTINGS_SCHEMA: i64 = 4;
@@ -26,6 +27,10 @@ pub fn walk_md_public(dir: &Path) -> Vec<Value> {
 static STARTUP_FILE: OnceLock<Option<String>> = OnceLock::new();
 
 pub fn set_startup_file(path: Option<String>) {
+    // CLI/association opens are explicit user intent — grant them immediately.
+    if let Some(p) = path.as_deref() {
+        let _ = register_allowed_path(p);
+    }
     let _ = STARTUP_FILE.set(path);
 }
 
@@ -390,6 +395,406 @@ fn find_sample(name: &str) -> Option<PathBuf> {
     sample_candidates(name).into_iter().find(|p| p.is_file())
 }
 
+// ===========================================================================
+// Path capability model (C2): session allowlist + workspace root
+// ===========================================================================
+
+static SESSION_PATHS: LazyLock<Mutex<HashSet<PathBuf>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
+static WORKSPACE_ROOT: LazyLock<Mutex<Option<PathBuf>>> = LazyLock::new(|| Mutex::new(None));
+static PATH_GRANTS_SEEDED: AtomicBool = AtomicBool::new(false);
+
+fn session_paths_guard() -> std::sync::MutexGuard<'static, HashSet<PathBuf>> {
+    SESSION_PATHS.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn workspace_root_guard() -> std::sync::MutexGuard<'static, Option<PathBuf>> {
+    WORKSPACE_ROOT.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Reject UNC shares (`\\server\share`), device/verbatim namespaces (`\\?\`, `\\.\`),
+/// URL-shaped inputs, and control characters before any filesystem access.
+fn reject_unsafe_path_str(raw: &str) -> Result<(), String> {
+    let s = raw.trim();
+    if s.is_empty() {
+        return Err("路径为空".into());
+    }
+    if s.chars().any(|c| c == '\0' || c.is_control()) {
+        return Err("路径包含非法控制字符".into());
+    }
+    // Windows accepts `/` as separator; normalize before prefix checks so
+    // `//server/share` cannot smuggle a UNC past a `\\`-only test.
+    let norm = s.replace('/', "\\");
+    if norm.starts_with("\\\\") {
+        return Err("拒绝 UNC / 设备命名空间路径".into());
+    }
+    let lower = s.to_ascii_lowercase();
+    if lower.starts_with("http:")
+        || lower.starts_with("https:")
+        || lower.starts_with("file:")
+        || lower.starts_with("ftp:")
+        || lower.starts_with("javascript:")
+    {
+        return Err("拒绝 URL 形式路径".into());
+    }
+    Ok(())
+}
+
+/// Canonicalize an access target. Existing targets must canonicalize successfully;
+/// not-yet-existing files resolve through their (existing) parent directory.
+fn canonical_target(path: &Path) -> Result<PathBuf, String> {
+    let canon = if path.exists() {
+        fs::canonicalize(path).map_err(|e| format!("路径无法规范化: {e}"))?
+    } else {
+        let parent = path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .ok_or_else(|| "路径缺少父目录".to_string())?;
+        let name = path
+            .file_name()
+            .ok_or_else(|| "路径缺少文件名".to_string())?;
+        let pc = fs::canonicalize(parent).map_err(|e| format!("父目录无法规范化: {e}"))?;
+        pc.join(name)
+    };
+    // Resolved targets must stay local: `\\?\UNC\...` means a remote share
+    // (NTLM leak / out-of-scope writes) even when the input looked local.
+    let s = canon.to_string_lossy();
+    if s.starts_with("\\\\?\\UNC\\") || s.starts_with("\\\\?\\UNC") {
+        return Err("拒绝解析到网络共享的路径".into());
+    }
+    Ok(canon)
+}
+
+/// UI-safe path string: strip the `\\?\` verbatim prefix Windows canonicalize adds.
+pub fn display_path(p: &Path) -> String {
+    let s = p.to_string_lossy().to_string();
+    if let Some(rest) = s.strip_prefix("\\\\?\\UNC\\") {
+        return format!("\\\\{rest}");
+    }
+    if let Some(rest) = s.strip_prefix("\\\\?\\") {
+        return rest.to_string();
+    }
+    s
+}
+
+fn parse_canon_dir(raw: &str) -> Result<PathBuf, String> {
+    reject_unsafe_path_str(raw)?;
+    let p = PathBuf::from(raw.trim());
+    if !p.is_dir() {
+        return Err("目标不是已存在的目录".into());
+    }
+    fs::canonicalize(&p).map_err(|e| format!("路径无法规范化: {e}"))
+}
+
+/// Register a user-approved path (dialog success or explicit grant) for this session.
+pub fn register_allowed_path(raw: &str) -> Result<PathBuf, String> {
+    seed_session_grants();
+    reject_unsafe_path_str(raw)?;
+    let canon = canonical_target(Path::new(raw.trim()))?;
+    session_paths_guard().insert(canon.clone());
+    Ok(canon)
+}
+
+/// Set the process workspace root (must be an existing local directory).
+pub fn set_workspace_root(raw: &str) -> Result<PathBuf, String> {
+    let canon = parse_canon_dir(raw)?;
+    *workspace_root_guard() = Some(canon.clone());
+    Ok(canon)
+}
+
+fn workspace_root_cached() -> Option<PathBuf> {
+    workspace_root_guard().clone()
+}
+
+/// Workspace root: explicit `settings.workspace`, else last opened folder.
+/// Seeded once from settings; callers must not hold SETTINGS_LOCK.
+fn seed_session_grants() {
+    if PATH_GRANTS_SEEDED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let s = load_settings_migrated();
+    if workspace_root_cached().is_none() {
+        let ws = s
+            .get("workspace")
+            .and_then(|v| v.as_str())
+            .filter(|x| !x.trim().is_empty())
+            .or_else(|| {
+                s.get("last_folder")
+                    .and_then(|v| v.as_str())
+                    .filter(|x| !x.trim().is_empty())
+            });
+        if let Some(ws) = ws {
+            let _ = set_workspace_root(ws);
+        }
+    }
+    // Paths the user already opened/saved in prior sessions (recents, session
+    // restore tabs) stay readable/writable without re-prompting.
+    let mut granted: Vec<String> = Vec::new();
+    if let Some(arr) = s.get("recent").and_then(|v| v.as_array()) {
+        for r in arr {
+            if let Some(p) = r.get("path").and_then(|p| p.as_str()) {
+                granted.push(p.to_string());
+            }
+        }
+    }
+    if let Some(arr) = s.get("last_open_files").and_then(|v| v.as_array()) {
+        for p in arr {
+            if let Some(p) = p.as_str() {
+                granted.push(p.to_string());
+            }
+        }
+    }
+    if let Some(sess) = s.get("session").and_then(|v| v.as_object()) {
+        if let Some(p) = sess.get("active_path").and_then(|p| p.as_str()) {
+            granted.push(p.to_string());
+        }
+        if let Some(tabs) = sess.get("tabs").and_then(|t| t.as_array()) {
+            for t in tabs {
+                if let Some(p) = t.get("path").and_then(|p| p.as_str()) {
+                    granted.push(p.to_string());
+                }
+            }
+        }
+    }
+    for g in granted {
+        if let Ok(canon) = canonical_target(Path::new(g.trim())) {
+            session_paths_guard().insert(canon);
+        }
+    }
+}
+
+fn is_permitted(canon: &Path) -> bool {
+    for a in session_paths_guard().iter() {
+        if canon.starts_with(a) {
+            return true;
+        }
+    }
+    if let Some(ws) = workspace_root_cached() {
+        if canon.starts_with(&ws) {
+            return true;
+        }
+    }
+    false
+}
+
+fn under_data_special(canon: &Path) -> bool {
+    for special in [
+        data_dir().join("exports"),
+        data_dir().join("wallpapers"),
+        data_dir().join("drafts"),
+    ] {
+        let sc = fs::canonicalize(&special).unwrap_or(special);
+        if canon.starts_with(&sc) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Read-side grant: path must be session-allowed or under the workspace root.
+pub fn ensure_read_allowed(raw: &str) -> Result<PathBuf, String> {
+    seed_session_grants();
+    reject_unsafe_path_str(raw)?;
+    let p = Path::new(raw.trim());
+    if !p.exists() {
+        return Err(format!("文件不存在: {}", raw.trim()));
+    }
+    let canon = canonical_target(p)?;
+    if !is_permitted(&canon) {
+        return Err("路径未授权：请通过打开/保存对话框选择文件，或注册允许路径".into());
+    }
+    Ok(canon)
+}
+
+/// Write-side grant. Overwrites need an existing grant; *new* files may only be
+/// created under: an allowed path itself, the workspace root, or
+/// data_dir/{exports,wallpapers,drafts}.
+pub fn ensure_write_allowed(raw: &str) -> Result<PathBuf, String> {
+    seed_session_grants();
+    reject_unsafe_path_str(raw)?;
+    let p = Path::new(raw.trim());
+    let existed = p.exists();
+    let canon = canonical_target(p)?;
+    if existed {
+        if !is_permitted(&canon) {
+            return Err("路径未授权：请通过保存对话框选择文件，或注册允许路径".into());
+        }
+        return Ok(canon);
+    }
+    if is_permitted(&canon) || under_data_special(&canon) {
+        return Ok(canon);
+    }
+    Err("禁止在授权范围外创建新文件（仅允许：已允许路径 / 工作区 / 应用数据目录）".into())
+}
+
+/// Directory-side grant for search / tree listing roots.
+pub fn ensure_dir_allowed(raw: &str) -> Result<PathBuf, String> {
+    seed_session_grants();
+    reject_unsafe_path_str(raw)?;
+    let canon = parse_canon_dir(raw)?;
+    if !is_permitted(&canon) {
+        return Err("目录未授权：请先打开该文件夹或注册允许路径".into());
+    }
+    Ok(canon)
+}
+
+/// Adopt a folder the user opened: register it and store it as workspace root.
+pub fn adopt_workspace_dir(raw: &str) -> Result<PathBuf, String> {
+    let canon = register_allowed_path(raw)?;
+    if !canon.is_dir() {
+        return Err("工作区根必须是目录".into());
+    }
+    *workspace_root_guard() = Some(canon.clone());
+    let disp = display_path(&canon);
+    let _ = modify_settings(|s| {
+        if let Some(obj) = s.as_object_mut() {
+            obj.insert("workspace".into(), json!(disp));
+            obj.insert("last_folder".into(), json!(disp));
+        }
+        Ok(())
+    });
+    Ok(canon)
+}
+
+fn drafts_dir() -> PathBuf {
+    let d = data_dir().join("drafts");
+    let _ = fs::create_dir_all(&d);
+    d
+}
+
+fn draft_file_for(path: &str) -> PathBuf {
+    use sha1::{Digest, Sha1};
+    let key = fs::canonicalize(path)
+        .map(|p| display_path(&p))
+        .unwrap_or_else(|_| path.trim().to_string());
+    let mut h = Sha1::new();
+    h.update(key.as_bytes());
+    drafts_dir().join(format!("{:x}.md", h.finalize()))
+}
+
+#[tauri::command]
+pub fn stuart_register_allowed_path(path: String) -> Value {
+    match register_allowed_path(&path) {
+        Ok(canon) => json!({"ok": true, "path": display_path(&canon)}),
+        Err(e) => json!({"error": e}),
+    }
+}
+
+/// Backend open dialog: the picked path is auto-registered (capability grant).
+#[tauri::command]
+pub async fn stuart_dialog_open_file(app: tauri::AppHandle) -> Value {
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_dialog::DialogExt;
+        app.dialog().file().blocking_pick_file()
+    })
+    .await;
+    let picked = match picked {
+        Ok(p) => p,
+        Err(e) => return json!({"error": format!("打开对话框失败: {e}")}),
+    };
+    let Some(fp) = picked else {
+        return json!({"cancelled": true});
+    };
+    let path = match fp.simplified().into_path() {
+        Ok(p) => p,
+        Err(e) => return json!({"error": format!("无效路径: {e}")}),
+    };
+    let raw = path.to_string_lossy().to_string();
+    match register_allowed_path(&raw) {
+        Ok(canon) => json!({"ok": true, "path": display_path(&canon), "kind": if canon.is_dir() { "folder" } else { "file" }}),
+        Err(e) => json!({"error": e}),
+    }
+}
+
+/// Backend save dialog: chosen path is auto-registered even before the file exists.
+#[tauri::command]
+pub async fn stuart_dialog_save_file(app: tauri::AppHandle, default_name: Option<String>) -> Value {
+    let name = default_name
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "untitled.md".into());
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_dialog::DialogExt;
+        app.dialog()
+            .file()
+            .set_file_name(name)
+            .add_filter("Markdown / 文本", &["md", "markdown", "txt"])
+            .blocking_save_file()
+    })
+    .await;
+    let picked = match picked {
+        Ok(p) => p,
+        Err(e) => return json!({"error": format!("保存对话框失败: {e}")}),
+    };
+    let Some(fp) = picked else {
+        return json!({"cancelled": true});
+    };
+    let path = match fp.simplified().into_path() {
+        Ok(p) => p,
+        Err(e) => return json!({"error": format!("无效路径: {e}")}),
+    };
+    let mut raw = path.to_string_lossy().to_string();
+    if !Path::new(&raw)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("markdown") || e.eq_ignore_ascii_case("txt"))
+        .unwrap_or(false)
+    {
+        raw.push_str(".md");
+    }
+    match register_allowed_path(&raw) {
+        Ok(canon) => json!({"ok": true, "path": display_path(&canon)}),
+        Err(e) => json!({"error": e}),
+    }
+}
+
+/// Backend folder dialog: picked folder is registered and becomes the workspace root.
+#[tauri::command]
+pub async fn stuart_dialog_open_folder(app: tauri::AppHandle) -> Value {
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_dialog::DialogExt;
+        app.dialog().file().blocking_pick_folder()
+    })
+    .await;
+    let picked = match picked {
+        Ok(p) => p,
+        Err(e) => return json!({"error": format!("打开目录对话框失败: {e}")}),
+    };
+    let Some(fp) = picked else {
+        return json!({"cancelled": true});
+    };
+    let path = match fp.simplified().into_path() {
+        Ok(p) => p,
+        Err(e) => return json!({"error": format!("无效路径: {e}")}),
+    };
+    let raw = path.to_string_lossy().to_string();
+    match adopt_workspace_dir(&raw) {
+        Ok(canon) => json!({"ok": true, "path": display_path(&canon), "workspace": true}),
+        Err(e) => json!({"error": e}),
+    }
+}
+
+/// Journal draft: `data_dir()/drafts/<sha1>.md` via atomic write.
+#[tauri::command]
+pub fn stuart_save_draft(path: String, content: String) -> Value {
+    const DRAFT_MAX: usize = 16 * 1024 * 1024;
+    if content.len() > DRAFT_MAX {
+        return json!({"error": "草稿过大（>16MB）"});
+    }
+    let f = draft_file_for(&path);
+    match atomic_write_file(&f, content.as_bytes()) {
+        Ok(()) => json!({"ok": true, "draft": display_path(&f)}),
+        Err(e) => json!({"error": e}),
+    }
+}
+
+#[tauri::command]
+pub fn stuart_clear_draft(path: String) -> Value {
+    let f = draft_file_for(&path);
+    let deleted = f.is_file() && fs::remove_file(&f).is_ok();
+    json!({"ok": true, "deleted": deleted})
+}
+
 #[tauri::command]
 pub fn stuart_get_app_info() -> Value {
     json!({
@@ -425,23 +830,36 @@ pub fn stuart_save_settings(data: Value) -> Result<bool, String> {
         }
         Ok(())
     })?;
+    // Keep the in-memory workspace root in sync with persisted settings.
+    if let Some(obj) = data.as_object() {
+        for key in ["workspace", "last_folder"] {
+            if let Some(v) = obj.get(key).and_then(|x| x.as_str()).filter(|s| !s.trim().is_empty()) {
+                let _ = set_workspace_root(v);
+                break;
+            }
+        }
+    }
     Ok(true)
 }
 
 #[tauri::command]
 pub fn stuart_file_exists(path: String) -> bool {
-    Path::new(&path).exists()
+    // Unauthorized paths must not leak existence.
+    match ensure_read_allowed(&path) {
+        Ok(canon) => canon.exists(),
+        Err(_) => false,
+    }
 }
 
-#[tauri::command]
-pub fn stuart_read_file(path: String) -> Value {
-    let p = Path::new(&path);
+/// Core read implementation. Callers must have already applied the path grant.
+pub fn read_file_trusted(path: &str) -> Value {
+    let p = Path::new(path);
     if !p.exists() {
         return json!({"error": format!("文件不存在: {path}")});
     }
     if p.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()) == Some("pdf".into()) {
-        let path_s = path.clone();
-        let mut v = stuart_read_pdf(path);
+        let path_s = path.to_string();
+        let mut v = read_pdf_trusted(&path_s);
         if let Some(obj) = v.as_object_mut() {
             if !obj.contains_key("error") {
                 push_recent(&path_s, "file");
@@ -471,7 +889,7 @@ pub fn stuart_read_file(path: String) -> Value {
     push_recent(&p.to_string_lossy(), "file");
     json!({
         "kind": "markdown",
-        "path": p.to_string_lossy(),
+        "path": display_path(p),
         "name": p.file_name().unwrap_or_default().to_string_lossy(),
         "content": content,
         "size": meta.len(),
@@ -480,12 +898,25 @@ pub fn stuart_read_file(path: String) -> Value {
 }
 
 #[tauri::command]
+pub fn stuart_read_file(path: String) -> Value {
+    let canon = match ensure_read_allowed(&path) {
+        Ok(c) => c,
+        Err(e) => return json!({"error": e}),
+    };
+    read_file_trusted(&display_path(&canon))
+}
+
+#[tauri::command]
 pub fn stuart_write_file(path: String, content: String) -> Value {
-    let p = Path::new(&path);
-    match atomic_write_file(p, content.as_bytes()) {
+    let canon = match ensure_write_allowed(&path) {
+        Ok(c) => c,
+        Err(e) => return json!({"error": e}),
+    };
+    match atomic_write_file(&canon, content.as_bytes()) {
         Ok(()) => {
-            push_recent(&p.to_string_lossy(), "file");
-            json!({"ok": true, "path": p.to_string_lossy()})
+            let disp = display_path(&canon);
+            push_recent(&disp, "file");
+            json!({"ok": true, "path": disp})
         }
         Err(e) => {
             eprintln!("[I/O Error] stuart_write_file failed for {}: {}", path, e);
@@ -494,9 +925,9 @@ pub fn stuart_write_file(path: String, content: String) -> Value {
     }
 }
 
-#[tauri::command]
-pub fn stuart_read_pdf(path: String) -> Value {
-    let p = Path::new(&path);
+/// Core PDF read. Callers must have already applied the path grant.
+fn read_pdf_trusted(path: &str) -> Value {
+    let p = Path::new(path);
     if !p.exists() {
         return json!({"error": format!("文件不存在: {path}")});
     }
@@ -514,7 +945,7 @@ pub fn stuart_read_pdf(path: String) -> Value {
     let annotations = crate::win_api::load_annotations_for(p);
     json!({
         "kind": "pdf",
-        "path": p.to_string_lossy(),
+        "path": display_path(p),
         "name": p.file_name().unwrap_or_default().to_string_lossy(),
         "size": meta.len(),
         "b64": B64.encode(&bytes),
@@ -523,13 +954,19 @@ pub fn stuart_read_pdf(path: String) -> Value {
 }
 
 #[tauri::command]
-pub fn stuart_read_pdf_binary(path: String) -> Result<Response, String> {
-    let p = Path::new(&path);
-    if !p.exists() {
-        return Err("PDF 文件不存在".to_string());
-    }
+pub fn stuart_read_pdf(path: String) -> Value {
+    let canon = match ensure_read_allowed(&path) {
+        Ok(c) => c,
+        Err(e) => return json!({"error": e}),
+    };
+    read_pdf_trusted(&display_path(&canon))
+}
 
-    let meta = fs::metadata(p).map_err(|e| format!("获取 PDF 元数据失败: {e}"))?;
+#[tauri::command]
+pub fn stuart_read_pdf_binary(path: String) -> Result<Response, String> {
+    let canon = ensure_read_allowed(&path)?;
+
+    let meta = fs::metadata(&canon).map_err(|e| format!("获取 PDF 元数据失败: {e}"))?;
     if !meta.is_file() {
         return Err("目标路径不是常规文件".to_string());
     }
@@ -540,8 +977,8 @@ pub fn stuart_read_pdf_binary(path: String) -> Result<Response, String> {
         ));
     }
 
-    let bytes = fs::read(p).map_err(|e| format!("读取 PDF 文件失败: {e}"))?;
-    push_recent(&p.to_string_lossy(), "file");
+    let bytes = fs::read(&canon).map_err(|e| format!("读取 PDF 文件失败: {e}"))?;
+    push_recent(&display_path(&canon), "file");
     Ok(Response::new(bytes))
 }
 
@@ -593,13 +1030,13 @@ fn walk_md_capped(dir: &Path, depth: i32, max_depth: i32, count: &mut usize) -> 
                 .unwrap_or(false);
             if !children.is_empty() || has_md {
                 *count += 1;
-                items.push(json!({"name": name, "path": p.to_string_lossy(), "type": "dir", "children": children}));
+                items.push(json!({"name": name, "path": display_path(&p), "type": "dir", "children": children}));
             }
         } else if let Some(ext) = p.extension().and_then(|x| x.to_str()) {
             let e2 = format!(".{}", ext.to_lowercase());
             if MD_EXTS.contains(&e2.as_str()) {
                 *count += 1;
-                items.push(json!({"name": name, "path": p.to_string_lossy(), "type": "file"}));
+                items.push(json!({"name": name, "path": display_path(&p), "type": "file"}));
             }
         }
     }
@@ -608,14 +1045,14 @@ fn walk_md_capped(dir: &Path, depth: i32, max_depth: i32, count: &mut usize) -> 
 
 #[tauri::command]
 pub fn stuart_read_dir_tree(path: String) -> Value {
-    let root = Path::new(&path);
-    if !root.is_dir() {
-        return json!({"error": "目录不存在"});
-    }
+    let root = match ensure_dir_allowed(&path) {
+        Ok(r) => r,
+        Err(e) => return json!({"error": e}),
+    };
     json!({
-        "path": root.to_string_lossy(),
+        "path": display_path(&root),
         "name": root.file_name().unwrap_or_default().to_string_lossy(),
-        "items": walk_md(root, 1, 3)
+        "items": walk_md(&root, 1, 3)
     })
 }
 
@@ -634,16 +1071,19 @@ pub fn stuart_get_recents() -> Value {
 
 #[tauri::command]
 pub fn stuart_open_path(path: String) -> Value {
-    let p = Path::new(&path);
+    let p = Path::new(path.trim());
     if p.is_dir() {
-        let _ = modify_settings(|s| {
-            if let Some(obj) = s.as_object_mut() {
-                obj.insert("last_folder".into(), json!(p.to_string_lossy()));
-            }
-            Ok(())
-        });
+        // User opened a folder → session grant + workspace root (stored in settings).
+        if let Err(e) = adopt_workspace_dir(&path) {
+            return json!({"error": e});
+        }
         push_recent(&p.to_string_lossy(), "folder");
-        return json!({"kind": "folder", "path": p.to_string_lossy()});
+        return json!({"kind": "folder", "path": display_path(p)});
+    }
+    // Opening a file is itself the dialog-equivalent user grant.
+    match register_allowed_path(&path) {
+        Ok(_) => {}
+        Err(e) => return json!({"error": e}),
     }
     stuart_read_file(path)
 }
@@ -917,7 +1357,10 @@ pub fn stuart_export_html(html: String, suggested_name: Option<String>) -> Value
 #[tauri::command]
 pub fn stuart_open_welcome() -> Value {
     if let Some(cand) = find_sample("欢迎使用 StuartMD.md") {
-        return stuart_read_file(cand.to_string_lossy().to_string());
+        // App-shipped samples are trusted content; grant then read.
+        let disp = cand.to_string_lossy().to_string();
+        let _ = register_allowed_path(&disp);
+        return read_file_trusted(&disp);
     }
     json!({
         "path": null,
@@ -992,5 +1435,54 @@ mod tests {
             let is_rejected = !is_http || has_bad_chars || url::Url::parse(u).is_err();
             assert!(is_rejected, "URL should be rejected: {}", u);
         }
+    }
+
+    #[test]
+    fn test_reject_unsafe_path_str() {
+        for bad in [
+            "",
+            "   ",
+            "\\\\server\\share\\a.md",
+            "//server/share/a.md",
+            "\\\\?\\C:\\Windows\\a.md",
+            "\\\\.\\pipe\\evil",
+            "//?/C:/Windows/a.md",
+            "https://example.com/a.md",
+            "file:///C:/a.md",
+            "C:\\a\0b.md",
+        ] {
+            assert!(
+                reject_unsafe_path_str(bad).is_err(),
+                "should reject: {bad:?}"
+            );
+        }
+        for good in ["C:\\notes\\a.md", "D:/docs/b.md", "notes/rel.md"] {
+            assert!(
+                reject_unsafe_path_str(good).is_ok(),
+                "should accept: {good:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_write_grant_covers_special_dirs() {
+        // drafts are under data_dir and must be recognized as app-managed
+        let drafts = data_dir().join("drafts");
+        let _ = fs::create_dir_all(&drafts);
+        let drafts_c = fs::canonicalize(&drafts).unwrap_or(drafts.clone());
+        assert!(under_data_special(&drafts_c.join("a.md")));
+        let exports_c =
+            fs::canonicalize(data_dir().join("exports")).unwrap_or_else(|_| data_dir().join("exports"));
+        assert!(under_data_special(&exports_c.join("out.html")));
+    }
+
+    #[test]
+    fn test_draft_roundtrip() {
+        let key = "C:\\notes\\journal-test.md";
+        let f = draft_file_for(key);
+        assert!(f.starts_with(drafts_dir()));
+        assert!(atomic_write_file(&f, b"hello draft").is_ok());
+        assert!(f.is_file());
+        let _ = fs::remove_file(&f);
     }
 }

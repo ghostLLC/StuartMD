@@ -21,13 +21,27 @@
     return !!(h && h.state && h.state.apiReady);
   }
 
+  /**
+   * Sanitize AI/plugin markdown before it is written to the document.
+   * Delegates to StuartCore.htmlSanitize (DOM parse + allowlist walk).
+   * Resolved at call time so script order does not matter.
+   */
   function sanitizeUntrustedMarkdown(text) {
-    return String(text == null ? "" : text)
-      .replace(/<script\b[\s\S]*?<\/script>/gi, "")
-      .replace(/<iframe\b[\s\S]*?<\/iframe>/gi, "")
-      .replace(/<object\b[\s\S]*?<\/object>/gi, "")
-      .replace(/<embed\b[^>]*>/gi, "")
-      .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "");
+    const mod = global.StuartCore && global.StuartCore.htmlSanitize;
+    const fn = mod && mod.sanitizeUntrustedMarkdown;
+    if (typeof fn === "function") return fn(text);
+    // Module not loaded yet (script order) — fail closed via DOM text extraction.
+    // Never fall back to a regex tag blacklist.
+    const s = String(text == null ? "" : text);
+    if (!s) return "";
+    if (s.indexOf("<") === -1) return s;
+    try {
+      const tpl = document.createElement("template");
+      tpl.innerHTML = s;
+      return tpl.content.textContent || "";
+    } catch (_) {
+      return "";
+    }
   }
 
   /** In-process tool registry for plugins / AI tools. */

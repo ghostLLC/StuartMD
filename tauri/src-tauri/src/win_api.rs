@@ -50,7 +50,10 @@ pub fn stuart_open_sample() -> Value {
     ];
     for cand in candidates {
         if cand.is_file() {
-            return crate::fs_api::stuart_read_file(cand.to_string_lossy().to_string());
+            let disp = cand.to_string_lossy().to_string();
+            // App-shipped samples are trusted content; grant then read.
+            let _ = crate::fs_api::register_allowed_path(&disp);
+            return crate::fs_api::read_file_trusted(&disp);
         }
     }
     json!({
@@ -95,24 +98,80 @@ pub fn stuart_open_plugins_dir() -> bool {
     open_path_os(&d)
 }
 
+/// Local-path validation for shell reveal (M3): existing local paths only —
+/// reject UNC (`\\server`), device namespaces (`\\?\`, `\\.\`), URLs, and any
+/// `:` that is not a drive-letter separator (blocks NTLM hash leaks / ADS).
+fn reveal_local_path(raw: &str) -> Result<PathBuf, String> {
+    let s = raw.trim();
+    if s.is_empty() {
+        return Err("路径为空".into());
+    }
+    if s.chars().any(|c| c == '\0' || c.is_control()) {
+        return Err("路径包含非法控制字符".into());
+    }
+    let norm = s.replace('/', "\\");
+    if norm.starts_with("\\\\") {
+        return Err("拒绝 UNC / 设备路径".into());
+    }
+    let lower = s.to_ascii_lowercase();
+    if lower.starts_with("http:")
+        || lower.starts_with("https:")
+        || lower.starts_with("file:")
+        || lower.starts_with("ftp:")
+    {
+        return Err("拒绝 URL 形式路径".into());
+    }
+    // Only a drive-letter colon is allowed ("C:" at index 1).
+    for (i, c) in s.char_indices() {
+        if c == ':' && i != 1 {
+            return Err("路径含非法 ':'".into());
+        }
+    }
+    if s.contains(':') {
+        let b = s.as_bytes();
+        if b.len() < 2 || !b[0].is_ascii_alphabetic() || b[1] != b':' {
+            return Err("非法盘符路径".into());
+        }
+    }
+    let p = Path::new(s);
+    if !p.exists() {
+        return Err("路径不存在".into());
+    }
+    let canon = p
+        .canonicalize()
+        .map_err(|e| format!("路径无法规范化: {e}"))?;
+    let cs = canon.to_string_lossy();
+    if cs.starts_with("\\\\?\\UNC\\") {
+        return Err("拒绝网络共享路径".into());
+    }
+    Ok(canon)
+}
+
 #[tauri::command]
 pub fn stuart_reveal_in_explorer(path: Option<String>) -> bool {
     let target = path.unwrap_or_else(|| exe_dir().to_string_lossy().to_string());
-    let p = Path::new(&target);
+    let canon = match reveal_local_path(&target) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("[Shell] reveal_in_explorer rejected: {e} ({target})");
+            return false;
+        }
+    };
     #[cfg(target_os = "windows")]
     {
-        if p.is_file() {
-            Command::new("explorer")
-                .args(["/select,", &target])
-                .spawn()
-                .is_ok()
+        // explorer /select, only for existing files; plain open for directories.
+        if canon.is_file() {
+            let arg = format!("/select,{}", canon.to_string_lossy());
+            Command::new("explorer").arg(&arg).spawn().is_ok()
+        } else if canon.is_dir() {
+            open_path_os(&canon)
         } else {
-            open_path_os(p)
+            false
         }
     }
     #[cfg(not(target_os = "windows"))]
     {
-        open_path_os(p)
+        open_path_os(&canon)
     }
 }
 
@@ -346,28 +405,30 @@ fn parse_version(v: &str) -> (u64, u64, u64) {
 #[tauri::command]
 pub fn stuart_check_update() -> Value {
     let url = "https://api.github.com/repos/ghostLLC/StuartMD/releases/latest";
-    #[cfg(target_os = "windows")]
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let mut cmd = Command::new("powershell");
-    cmd.args([
-        "-NoProfile",
-        "-WindowStyle",
-        "Hidden",
-        "-Command",
-        &format!(
-            "(Invoke-WebRequest -UseBasicParsing -Uri '{url}' -Headers @{{'User-Agent'='StuartMD/{VERSION}'}}).Content"
-        ),
-    ]);
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-    let out = cmd.output();
-    let text = match out {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
-        _ => {
-            return json!({"ok": false, "error": "检查更新失败：网络或 PowerShell 不可用"})
+    // L5: in-process HTTPS via ureq — never shell out to PowerShell.
+    let ua = format!("StuartMD/{VERSION}");
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(std::time::Duration::from_secs(12))
+        .timeout_read(std::time::Duration::from_secs(30))
+        .user_agent(&ua)
+        .build();
+    let text = match agent.get(url).call() {
+        Ok(r) => match r.into_string() {
+            Ok(s) => s,
+            Err(e) => {
+                return json!({"ok": false, "error": format!("检查更新失败：读取响应失败 {e}")})
+            }
+        },
+        Err(ureq::Error::Status(code, r)) => {
+            let body = r.into_string().unwrap_or_default();
+            return json!({
+                "ok": false,
+                "error": format!("检查更新失败：HTTP {code}"),
+                "body": body.chars().take(200).collect::<String>()
+            });
+        }
+        Err(e) => {
+            return json!({"ok": false, "error": format!("检查更新失败：网络错误 {e}")})
         }
     };
     let v: Value = match serde_json::from_str(text.trim()) {
@@ -949,4 +1010,37 @@ fn uuid_like() -> u128 {
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     t.wrapping_mul(0x9E3779B97F4A7C15)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_reveal_local_path_rejects_unc_urls_ads() {
+        for bad in [
+            "",
+            "\\\\server\\share\\a.md",
+            "//server/share/a.md",
+            "\\\\?\\C:\\Windows\\a.md",
+            "https://example.com/a.md",
+            "C:\\a.md:stream",
+            "C:relative\\a.md:ads",
+            "C:\\nonexistent\\definitely\\missing.md",
+        ] {
+            assert!(
+                reveal_local_path(bad).is_err(),
+                "should reject: {bad:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_reveal_local_path_accepts_existing_local() {
+        let f = std::env::temp_dir().join(format!("stuart_reveal_test_{}.txt", std::process::id()));
+        std::fs::write(&f, b"x").unwrap();
+        let raw = f.to_string_lossy().to_string();
+        assert!(reveal_local_path(&raw).is_ok(), "should accept: {raw}");
+        let _ = std::fs::remove_file(&f);
+    }
 }

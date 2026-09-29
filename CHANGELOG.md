@@ -2,6 +2,32 @@
 
 本文件记录 StuartMD 的版本变更，便于开发与发布对照。
 
+## [3.5.0] - 2026-09-29
+
+### 安全（Critical / High）
+- **插件**：不再启动即执行；启用需确认 + 源码哈希；沙箱影子 window/eval/Function/__TAURI__
+- **路径能力**：读写限制在「用户打开/保存过」与工作区内；拒绝 UNC / 设备路径
+- **粘贴**：contenteditable 粘贴消毒（DOMPurify + 白名单），杜绝粘贴 XSS
+- **HTML 清洗**：内置 DOMPurify；弃用正则黑名单；文档 HTML 不再保留 style
+- **AI base_url**：内置厂商钉死主机；自定义端点变更需确认，并回报密钥发送主机
+- **CSP**：tauri.conf 与 meta 收紧；reveal_in_explorer 拒 UNC（防 NTLM）
+- 更新检查改为 Rust ureq，去掉 PowerShell
+
+### 数据正确性
+- **split/join 字节保真**：硬换行、尾换行、首尾空行、CRLF、围栏内空行往返一致
+- **写路径串行**：每路径队列，autosave / 保存不乱序；saveFileAs 带 rev 守卫
+- **块提交**：索引漂移可按快照恢复；失败提示，禁止静默丢编辑
+- **撤销**：切标签前 flush 历史
+- **草稿**：save_draft / clear_draft 后端落地
+- 修复标签栏拖入文件 openDocumentRespectingMode 未定义崩溃
+
+### 设计
+- 产品 UI 去 emoji；统一「问答」；示例版本同步 3.5.0
+- 实验模块迁 web/experimental/；插件文档写清同意模型
+
+### 测试
+- core-smoke 金样往返 96 断言；Rust 41 测；插件沙箱探针
+
 ## [3.4.10] - 2026-09-29
 
 ### 修复：图表一直不可见

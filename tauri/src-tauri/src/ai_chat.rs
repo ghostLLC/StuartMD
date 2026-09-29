@@ -40,6 +40,71 @@ fn key_path(id: &str) -> Result<PathBuf, String> {
     Ok(keys_dir().join(format!("{}.bin", sanitize_provider_id(id)?)))
 }
 
+/// Hardcoded API roots for builtin providers (H3): base_url overrides are ignored.
+fn pinned_base_url(id: &str) -> Option<&'static str> {
+    match id {
+        "deepseek" => Some("https://api.deepseek.com/v1"),
+        "qwen" => Some("https://dashscope.aliyuncs.com/compatible-mode/v1"),
+        "kimi" => Some("https://api.moonshot.cn/v1"),
+        "glm" => Some("https://open.bigmodel.cn/api/paas/v4"),
+        _ => None,
+    }
+}
+
+/// Extract the host that would receive the API key (for `key_sent_to` metadata).
+fn host_of(url: &str) -> String {
+    url::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.to_string()))
+        .unwrap_or_default()
+}
+
+/// Validate a custom base_url: https required (http only for localhost).
+fn validate_base_url(u: &str) -> Result<String, String> {
+    let s = normalize_base_url(u);
+    if s.is_empty() {
+        return Err("API Base URL 不能为空".into());
+    }
+    let parsed = url::Url::parse(&s).map_err(|e| format!("API Base URL 非法: {e}"))?;
+    let host = parsed.host_str().unwrap_or("").to_ascii_lowercase();
+    let is_local = host == "localhost" || host == "127.0.0.1" || host == "::1";
+    match parsed.scheme() {
+        "https" => {}
+        "http" if is_local => {}
+        _ => {
+            return Err(
+                "API Base URL 必须使用 https（本机调试可使用 http://localhost）".into(),
+            )
+        }
+    }
+    if parsed.username() != "" || parsed.password().is_some() {
+        return Err("API Base URL 不允许携带用户名/密码".into());
+    }
+    Ok(s)
+}
+
+/// Resolve the base URL actually used for a request: builtin ids are pinned.
+fn effective_base_url(provider: &Value) -> Result<(String, String), String> {
+    let id = provider
+        .get("id")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
+    if let Some(pinned) = pinned_base_url(&id) {
+        return Ok((pinned.to_string(), host_of(pinned)));
+    }
+    let raw = provider
+        .get("base_url")
+        .and_then(|x| x.as_str())
+        .unwrap_or("");
+    if raw.trim().is_empty() {
+        return Err("请先填写 API Base URL".into());
+    }
+    let base = validate_base_url(raw)?;
+    let host = host_of(&base);
+    Ok((base, host))
+}
+
 #[cfg(windows)]
 fn dpapi_protect(plain: &[u8]) -> Result<Vec<u8>, String> {
     use windows_sys::Win32::Foundation::LocalFree;
@@ -463,7 +528,8 @@ pub fn stuart_ai_get_config() -> Value {
 }
 
 #[tauri::command]
-pub fn stuart_ai_save_config(ai: Value) -> Value {
+pub fn stuart_ai_save_config(ai: Value, confirm: Option<bool>) -> Value {
+    let prev = load_ai_settings();
     let mut next = merge_ai_settings(ai);
     // Strip any accidental secrets from client payload
     if let Some(list) = next.get_mut("providers").and_then(|p| p.as_array_mut()) {
@@ -475,11 +541,120 @@ pub fn stuart_ai_save_config(ai: Value) -> Value {
             }
         }
     }
+
+    // H3: pin builtin hosts, validate ids and custom base_url schemes.
+    let mut needs_confirm: Option<Value> = None;
+    if let Some(list) = next.get_mut("providers").and_then(|p| p.as_array_mut()) {
+        for p in list.iter_mut() {
+            let Some(o) = p.as_object_mut() else { continue };
+            let id = o
+                .get("id")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string();
+            match sanitize_provider_id(&id) {
+                Ok(clean) => {
+                    if clean != id {
+                        o.insert("id".into(), json!(clean));
+                    }
+                }
+                Err(e) => return json!({"error": format!("服务商配置非法: {e}")}),
+            }
+            let id = o
+                .get("id")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string();
+            if let Some(pinned) = pinned_base_url(&id) {
+                // Ignore/reject any base_url override for builtin providers.
+                let incoming = o
+                    .get("base_url")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let pinned_s = pinned.to_string();
+                if !incoming.is_empty() && normalize_base_url(&incoming) != pinned_s {
+                    eprintln!(
+                        "[AI Config] ignoring base_url override for builtin provider {id}: {incoming} -> {pinned_s}"
+                    );
+                }
+                o.insert("base_url".into(), json!(pinned_s));
+                continue;
+            }
+            let raw = o
+                .get("base_url")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string();
+            if raw.trim().is_empty() {
+                continue;
+            }
+            match validate_base_url(&raw) {
+                Ok(clean) => {
+                    o.insert("base_url".into(), json!(clean));
+                    // Changing the endpoint of a provider that already holds a key
+                    // sends that key to a new host — require explicit confirmation.
+                    let prev_base = prev
+                        .get("providers")
+                        .and_then(|p| p.as_array())
+                        .and_then(|arr| {
+                            arr.iter()
+                                .find(|x| x.get("id").and_then(|i| i.as_str()) == Some(id.as_str()))
+                        })
+                        .and_then(|x| x.get("base_url"))
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("");
+                    let changed = normalize_base_url(prev_base) != clean && !prev_base.is_empty();
+                    if changed && provider_has_key(&id) {
+                        let host = host_of(&clean);
+                        eprintln!(
+                            "[AI Config] base_url changed for provider {id} (key present); key will be sent to {host}"
+                        );
+                        if confirm != Some(true) {
+                            needs_confirm = Some(json!({
+                                "provider_id": id,
+                                "key_sent_to": host,
+                                "old_base_url": prev_base,
+                                "new_base_url": clean,
+                            }));
+                        }
+                    }
+                }
+                Err(e) => return json!({"error": format!("服务商 {id}: {e}")}),
+            }
+        }
+    }
+
+    if let Some(nc) = needs_confirm {
+        return json!({
+            "ok": false,
+            "needs_confirm": true,
+            "reason": "base_url 变更将把已保存的 API Key 发往新主机",
+            "detail": nc
+        });
+    }
+
     // Re-attach key_set flags after save merge
     match save_ai_settings(&next) {
         Ok(()) => {
             let out = load_ai_settings();
-            json!({"ok": true, "ai": out})
+            let key_sent_to: Vec<Value> = out
+                .get("providers")
+                .and_then(|p| p.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|x| {
+                            let id = x.get("id").and_then(|i| i.as_str()).unwrap_or("");
+                            let base = x.get("base_url").and_then(|b| b.as_str()).unwrap_or("");
+                            if base.is_empty() {
+                                return None;
+                            }
+                            Some(json!({"provider_id": id, "key_sent_to": host_of(base)}))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            json!({"ok": true, "ai": out, "key_sent_to": key_sent_to})
         }
         Err(e) => json!({"error": e}),
     }
@@ -547,10 +722,10 @@ pub fn stuart_ai_test_provider(provider_id: String) -> Value {
     else {
         return json!({"error": "服务商不存在"});
     };
-    let base = normalize_base_url(p.get("base_url").and_then(|x| x.as_str()).unwrap_or(""));
-    if base.is_empty() {
-        return json!({"error": "请先填写 API Base URL"});
-    }
+    let (base, key_sent_to) = match effective_base_url(&p) {
+        Ok(v) => v,
+        Err(e) => return json!({"error": e}),
+    };
     let key = match read_api_key(&provider_id) {
         Ok(k) => k,
         Err(e) => return json!({"error": e}),
@@ -565,7 +740,7 @@ pub fn stuart_ai_test_provider(provider_id: String) -> Value {
             let status = r.status();
             let body = r.into_string().unwrap_or_default();
             if !(200..300).contains(&status) {
-                return json!({"error": format!("HTTP {status}"), "body": body.chars().take(200).collect::<String>()});
+                return json!({"error": format!("HTTP {status}"), "key_sent_to": key_sent_to, "body": body.chars().take(200).collect::<String>()});
             }
             let models: Vec<String> = serde_json::from_str::<Value>(&body)
                 .ok()
@@ -585,13 +760,14 @@ pub fn stuart_ai_test_provider(provider_id: String) -> Value {
                 "provider_id": provider_id,
                 "models": models,
                 "model": p.get("model").cloned().unwrap_or(json!("")),
+                "key_sent_to": key_sent_to,
             })
         }
         Err(ureq::Error::Status(code, r)) => {
             let body = r.into_string().unwrap_or_default();
-            json!({"error": format!("HTTP {code}"), "body": body.chars().take(200).collect::<String>()})
+            json!({"error": format!("HTTP {code}"), "key_sent_to": key_sent_to, "body": body.chars().take(200).collect::<String>()})
         }
-        Err(e) => json!({"error": e.to_string()}),
+        Err(e) => json!({"error": e.to_string(), "key_sent_to": key_sent_to}),
     }
 }
 
@@ -652,11 +828,13 @@ pub fn stuart_ai_chat_start(
         }
     };
 
-    let base = normalize_base_url(provider.get("base_url").and_then(|x| x.as_str()).unwrap_or(""));
-    if base.is_empty() {
-        clear_active(&rid);
-        return json!({"error": "请先在「模型」中填写 API Base URL"});
-    }
+    let (base, key_sent_to) = match effective_base_url(&provider) {
+        Ok(v) => v,
+        Err(e) => {
+            clear_active(&rid);
+            return json!({"error": e});
+        }
+    };
     let model_id = model
         .clone()
         .filter(|m| !m.trim().is_empty())
@@ -706,6 +884,7 @@ pub fn stuart_ai_chat_start(
 
     let url = format!("{}/chat/completions", base);
     let rid2 = rid.clone();
+    let key_sent_to2 = key_sent_to.clone();
     std::thread::spawn(move || {
         let mut acc = String::new();
         let mut finished_ok = false;
@@ -892,7 +1071,7 @@ pub fn stuart_ai_chat_start(
             emit_chat(
                 &app,
                 "ai-chat-done",
-                json!({"requestId": rid2, "ok": false, "text": "", "error": err_msg, "cancelled": cancelled}),
+                json!({"requestId": rid2, "ok": false, "text": "", "error": err_msg, "cancelled": cancelled, "key_sent_to": key_sent_to2}),
             );
         } else {
             emit_chat(
@@ -903,13 +1082,14 @@ pub fn stuart_ai_chat_start(
                     "ok": !acc.is_empty() || finished_ok,
                     "text": acc,
                     "error": if err_msg.is_empty() && cancelled { Some("已取消") } else if !err_msg.is_empty() { Some(err_msg.as_str()) } else { None },
-                    "cancelled": cancelled
+                    "cancelled": cancelled,
+                    "key_sent_to": key_sent_to2
                 }),
             );
         }
     });
 
-    json!({"ok": true, "request_id": rid, "provider_id": pid, "model": model_id})
+    json!({"ok": true, "request_id": rid, "provider_id": pid, "model": model_id, "key_sent_to": key_sent_to})
 }
 
 #[cfg(test)]
@@ -925,6 +1105,41 @@ mod tests {
         assert_eq!(parse_sse_data_line("data: "), None);
         assert_eq!(parse_sse_data_line("event: message"), None);
         assert_eq!(parse_sse_data_line("   data:  [DONE]  "), Some("[DONE]".to_string()));
+    }
+
+    #[test]
+    fn test_pinned_builtin_base_urls() {
+        // Builtins must pin to hardcoded hosts regardless of config overrides.
+        let p = json!({"id": "deepseek", "base_url": "https://evil.example.com/v1"});
+        let (base, host) = effective_base_url(&p).unwrap();
+        assert_eq!(base, "https://api.deepseek.com/v1");
+        assert_eq!(host, "api.deepseek.com");
+        assert!(pinned_base_url("qwen").is_some());
+        assert!(pinned_base_url("kimi").is_some());
+        assert!(pinned_base_url("glm").is_some());
+        assert!(pinned_base_url("custom").is_none());
+    }
+
+    #[test]
+    fn test_validate_base_url_scheme_rules() {
+        assert!(validate_base_url("https://api.example.com/v1").is_ok());
+        assert!(validate_base_url("http://localhost:8080/v1").is_ok());
+        assert!(validate_base_url("http://127.0.0.1:1234/v1").is_ok());
+        assert!(validate_base_url("http://evil.example.com/v1").is_err());
+        assert!(validate_base_url("ftp://evil.example.com/").is_err());
+        assert!(validate_base_url("").is_err());
+        assert!(validate_base_url("https://user:pass@example.com/v1").is_err());
+        // Full /chat/completions URL is normalized to API root
+        assert_eq!(
+            validate_base_url("https://api.example.com/v1/chat/completions").unwrap(),
+            "https://api.example.com/v1"
+        );
+    }
+
+    #[test]
+    fn test_host_of() {
+        assert_eq!(host_of("https://api.deepseek.com/v1"), "api.deepseek.com");
+        assert_eq!(host_of("not a url"), "");
     }
 
     #[cfg(windows)]

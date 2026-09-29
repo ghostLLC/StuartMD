@@ -69,6 +69,9 @@
     search_md: (root, query, limit) =>
       invoke("stuart_search_md", { root, query, limit: limit == null ? null : limit }),
     workspace_files: (root) => invoke("stuart_workspace_files", { root }),
+    register_allowed_path: (path) => invoke("stuart_register_allowed_path", { path }),
+    save_draft: (path, content) => invoke("stuart_save_draft", { path, content }),
+    clear_draft: (path) => invoke("stuart_clear_draft", { path }),
     // AI 3.0.0
     ai_get_config: () => invoke("stuart_ai_get_config"),
     ai_save_config: (ai) => invoke("stuart_ai_save_config", { ai }),
@@ -126,6 +129,14 @@
     },
 
     open_file_dialog: async () => {
+      // Prefer backend dialog (auto-grants path capability)
+      try {
+        const backend = await invoke("stuart_dialog_open_file");
+        if (backend && backend.cancelled) return null;
+        if (backend && backend.path) {
+          return await api.read_file(backend.path);
+        }
+      } catch (_) {}
       const dlg = dialogApi();
       if (dlg?.open) {
         const path = await dlg.open({
@@ -138,12 +149,26 @@
           ],
         });
         if (!path) return null;
+        try {
+          await api.register_allowed_path(path);
+        } catch (_) {}
         return api.read_file(path);
       }
       return { error: "系统文件对话框不可用" };
     },
 
     save_file_dialog: async (content, suggested) => {
+      try {
+        const backend = await invoke("stuart_dialog_save_file", {
+          defaultName: suggested || "untitled.md",
+        });
+        if (backend && backend.cancelled) return null;
+        if (backend && backend.path) {
+          const wr = await api.write_file(backend.path, content || "");
+          if (wr && wr.error) return wr;
+          return { ok: true, path: backend.path };
+        }
+      } catch (_) {}
       const dlg = dialogApi();
       if (dlg?.save) {
         const path = await dlg.save({
@@ -156,12 +181,19 @@
         if (!path) return null;
         let finalPath = path;
         if (!/\.(md|markdown|txt)$/i.test(finalPath)) finalPath += ".md";
+        try {
+          await api.register_allowed_path(finalPath);
+        } catch (_) {}
         return api.write_file(finalPath, content || "");
       }
       return { error: "另存为需要系统对话框" };
     },
 
     open_folder_dialog: async () => {
+      try {
+        const backend = await invoke("stuart_dialog_open_folder");
+        if (backend && backend.path) return backend.path;
+      } catch (_) {}
       const dlg = dialogApi();
       if (dlg?.open) {
         const path = await dlg.open({ directory: true, multiple: false });

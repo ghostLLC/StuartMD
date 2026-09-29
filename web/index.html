@@ -4,14 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>StuartMD</title>
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https: asset: stuart:; connect-src 'self' https: http: ipc: tauri:; object-src 'none'; base-uri 'none';" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https: asset: stuart:; connect-src 'self' https: http: ipc: tauri:; object-src 'none'; base-uri 'none'; frame-src 'none';" />
   <link rel="stylesheet" href="libs/katex.min.css" />
   <link rel="stylesheet" href="libs/github.min.css" id="hl-light" />
   <link rel="stylesheet" href="libs/github-dark.min.css" id="hl-dark" disabled />
   <link rel="stylesheet" href="css/app.css" />
-
-  <link rel="stylesheet" href="css/diff-modal.css" />
-  <link rel="stylesheet" href="css/margin-notes.css" />
 </head>
 <body data-theme="light">
   <div id="boot-splash" class="boot-splash" aria-hidden="true"></div>
@@ -657,10 +654,13 @@
   <script src="libs/markdown-it-task-lists.min.js"></script>
   <script src="libs/katex.min.js"></script>
   <script src="libs/auto-render.min.js"></script>
+  <script src="libs/dompurify.min.js"></script>
   <script src="js/core/tauri-bridge.js"></script>
   <script src="js/core/open-policy.js"></script>
   <script src="js/core/settings-schema.js"></script>
   <script src="js/core/doc-stats.js"></script>
+  <script src="js/core/html-sanitize.js"></script>
+  <script src="js/core/write-coord.js"></script>
   <script src="js/core/agent-api.js"></script>
   <script src="js/core/ai-context.js"></script>
   <script src="js/core/ai-client.js"></script>

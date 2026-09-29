@@ -361,12 +361,16 @@
   function fillProviders(sel, ai, selectedId) {
     if (!sel) return;
     const list = (ai && ai.providers) || [];
-    sel.innerHTML = list
-      .map((p) => {
-        const mark = p.key_set ? "" : " · 未配Key";
-        return `<option value="${p.id}" ${p.id === selectedId ? "selected" : ""}>${(p.label || p.id) + mark}</option>`;
-      })
-      .join("");
+    // Build options via DOM APIs — never interpolate p.id/p.label into HTML.
+    while (sel.firstChild) sel.removeChild(sel.firstChild);
+    for (const p of list) {
+      const opt = document.createElement("option");
+      opt.value = String(p.id == null ? "" : p.id);
+      if (p.id === selectedId) opt.selected = true;
+      const mark = p.key_set ? "" : " · 未配Key";
+      opt.textContent = String((p.label || p.id) + mark);
+      sel.appendChild(opt);
+    }
   }
 
   function currentProvider(ai) {

@@ -1,8 +1,7 @@
-// StuartMD sample plugin — adds ==highlight== markdown syntax
+// StuartMD sample plugin — adds ==highlight== markdown syntax.
+// Runs under the consent-gated StuartPlugin API (see docs/PLUGINS.md).
+StuartPlugin.log("sample-highlight loaded");
 StuartPlugin.addStyle("mark.plugin-mark { background: #fff59d; }");
-StuartPlugin.onAppReady(() => {
-  console.log("[sample-plugin] ready");
-});
 StuartPlugin.registerMarkdownIt((md) => {
   md.inline.ruler.before("emphasis", "md_eq_highlight", (state, silent) => {
     const src = state.src;

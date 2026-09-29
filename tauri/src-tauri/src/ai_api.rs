@@ -195,7 +195,11 @@ pub fn stuart_search_md(root: String, query: String, limit: Option<usize>) -> Va
     if q.is_empty() {
         return json!({"error": "查询为空"});
     }
-    let root_path = Path::new(&root);
+    let root_path = match crate::fs_api::ensure_dir_allowed(&root) {
+        Ok(p) => p,
+        Err(e) => return json!({"error": e}),
+    };
+    let root_disp = crate::fs_api::display_path(&root_path);
     if !root_path.is_dir() {
         return json!({"error": "目录不存在"});
     }
@@ -238,7 +242,7 @@ pub fn stuart_search_md(root: String, query: String, limit: Option<usize>) -> Va
                 if line.to_lowercase().contains(&needle.as_str()) {
                     let preview: String = line.trim().chars().take(160).collect();
                     hits.push(json!({
-                        "path": p.to_string_lossy(),
+                        "path": crate::fs_api::display_path(&p),
                         "name": p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(),
                         "line": i + 1,
                         "preview": preview
@@ -253,7 +257,7 @@ pub fn stuart_search_md(root: String, query: String, limit: Option<usize>) -> Va
     json!({
         "ok": true,
         "query": q,
-        "root": root_path.to_string_lossy(),
+        "root": root_disp,
         "scanned_files": scanned,
         "hits": hits,
         "truncated": hits.len() >= max_hits || scanned >= SEARCH_MAX_FILES
@@ -263,14 +267,14 @@ pub fn stuart_search_md(root: String, query: String, limit: Option<usize>) -> Va
 /// List Markdown files under a workspace root (depth-limited via walk_md).
 #[tauri::command]
 pub fn stuart_workspace_files(root: String) -> Value {
-    let p = Path::new(&root);
-    if !p.is_dir() {
-        return json!({"error": "目录不存在"});
-    }
-    let items = crate::fs_api::walk_md_public(p);
+    let p = match crate::fs_api::ensure_dir_allowed(&root) {
+        Ok(p) => p,
+        Err(e) => return json!({"error": e}),
+    };
+    let items = crate::fs_api::walk_md_public(&p);
     json!({
         "ok": true,
-        "root": p.to_string_lossy(),
+        "root": crate::fs_api::display_path(&p),
         "items": items
     })
 }

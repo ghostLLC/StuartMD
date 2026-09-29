@@ -274,7 +274,7 @@
       return DOMPurify.sanitize(rawHtml, {
         // svg/mathMl required for Mermaid diagrams and KaTeX visual twins
         USE_PROFILES: { html: true, svg: true, mathMl: true },
-        FORBID_TAGS: ["script", "iframe", "object", "embed", "base", "form", "meta", "link", "style", "applet", "animate", "set"],
+        FORBID_TAGS: ["script", "iframe", "object", "embed", "base", "form", "meta", "link", "style", "applet", "animate", "set", "foreignObject"],
         FORBID_ATTR: ["style"],
         ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
         ADD_ATTR: ["target"],
@@ -363,8 +363,10 @@
         continue;
       }
 
-      // SVG <style> is presentation CSS from mermaid — keep text, drop if it has html
+      // Drop <style> from untrusted markdown HTML (CSS exfil / UI redress).
+      // Mermaid diagrams never pass through this whitelist (see sanitizeMermaidSvg).
       if (tagName === "STYLE") {
+        el.remove();
         continue;
       }
 
@@ -1093,10 +1095,10 @@
         <button type="button" data-bm="ul" title="无序列表">•</button>
         <button type="button" data-bm="task" title="任务列表">☑</button>
         <button type="button" data-bm="code" title="代码块">{ }</button>
-        <button type="button" data-bm="quote" title="引用">❝</button>
+        <button type="button" data-bm="quote" title="引用">引</button>
         <button type="button" data-bm="indent-" title="减少缩进">⇤</button>
         <button type="button" data-bm="indent+" title="增加缩进">⇥</button>
-        <button type="button" data-bm="copy-block" title="复制">⧉</button>
+        <button type="button" data-bm="copy-block" title="复制">复</button>
       </div>
       <div class="menu-sep"></div>
       <button type="button" class="menu-row" data-bm-sub="indent">
@@ -1110,10 +1112,10 @@
         <button type="button" data-bm="align-right">右对齐</button>
       </div>
       <div class="menu-sep"></div>
-      <button type="button" class="menu-row" data-bm="cut-block"><span class="mr-ico">✂</span><span>剪切</span></button>
-      <button type="button" class="menu-row" data-bm="copy-block"><span class="mr-ico">⧉</span><span>复制</span></button>
-      <button type="button" class="menu-row" data-bm="duplicate-block"><span class="mr-ico">⧉</span><span>创建副本</span></button>
-      <button type="button" class="menu-row danger" data-bm="delete-block"><span class="mr-ico">🗑</span><span>删除</span></button>
+      <button type="button" class="menu-row" data-bm="cut-block"><span class="mr-ico">剪</span><span>剪切</span></button>
+      <button type="button" class="menu-row" data-bm="copy-block"><span class="mr-ico">复</span><span>复制</span></button>
+      <button type="button" class="menu-row" data-bm="duplicate-block"><span class="mr-ico">复</span><span>创建副本</span></button>
+      <button type="button" class="menu-row danger" data-bm="delete-block"><span class="mr-ico">×</span><span>删除</span></button>
     `;
     menu.hidden = false;
     const w = menu.offsetWidth || 168;
@@ -1485,6 +1487,34 @@
     if (el.preview.dataset.delegated === "1") return;
     el.preview.dataset.delegated = "1";
 
+    // Paste must never inject raw HTML (XSS via contenteditable)
+    el.preview.addEventListener(
+      "paste",
+      (e) => {
+        const target = e.target;
+        if (!target || !(target.isContentEditable || target.closest?.(".md-block.editing"))) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const cd = e.clipboardData;
+        const html = cd ? cd.getData("text/html") : "";
+        const text = cd ? cd.getData("text/plain") : "";
+        const sanitize = globalThis.StuartCore?.htmlSanitize?.sanitizeHtml;
+        if (html && typeof sanitize === "function") {
+          try {
+            document.execCommand("insertHTML", false, sanitize(html));
+            return;
+          } catch (_) {}
+        }
+        // Safe fallback: plain text only
+        try {
+          document.execCommand("insertText", false, text || html.replace(/<[^>]+>/g, ""));
+        } catch (_) {
+          if (text) document.execCommand("insertText", false, text);
+        }
+      },
+      true
+    );
+
     // Outline: one delegated listener (avoids per-heading closures on every rebuild)
     if (el.outlineList && el.outlineList.dataset.delegated !== "1") {
       el.outlineList.dataset.delegated = "1";
@@ -1819,8 +1849,15 @@
     const o = opts || {};
     const all = splitMarkdownBlocks(el.source.value || "");
     if (!Number.isFinite(idx) || idx < 0 || idx >= all.length) {
-      // Index drift after re-render — abort rather than corrupt the document
-      return false;
+      // Index drift — try recover by original snapshot before giving up
+      const snap = originalText != null ? String(originalText) : "";
+      const hit = snap.trim() ? all.findIndex((b) => b === snap) : -1;
+      if (hit >= 0) {
+        idx = hit;
+      } else {
+        toast("编辑未能定位原块，已保留原文（请撤销后重试）");
+        return false;
+      }
     }
     let next = nextText == null ? "" : String(nextText);
     const original = originalText == null ? all[idx] || "" : String(originalText);
@@ -2994,6 +3031,26 @@
   const AUTOSAVE_MS = 1500;
   let autosaveTimer = null;
 
+  /** Per-path write queue — prevents autosave vs manual save reordering. */
+  function enqueueWrite(path, fn) {
+    const coord = globalThis.StuartCore?.writeCoord;
+    if (coord && typeof coord.enqueue === "function") {
+      return coord.enqueue(path, fn);
+    }
+    const key = String(path || "");
+    const prev = (enqueueWrite._q && enqueueWrite._q.get(key)) || Promise.resolve();
+    const next = prev.then(() => fn()).catch((e) => {
+      console.warn("[write]", key, e);
+      return { error: String(e && e.message ? e.message : e) };
+    });
+    if (!enqueueWrite._q) enqueueWrite._q = new Map();
+    enqueueWrite._q.set(key, next);
+    next.finally(() => {
+      if (enqueueWrite._q.get(key) === next) enqueueWrite._q.delete(key);
+    });
+    return next;
+  }
+
   function scheduleAutoSave() {
     if (!state.autosaveEnabled) return;
     clearTimeout(autosaveTimer);
@@ -3008,24 +3065,32 @@
       const path = state.path;
       const tabId = state.activeTabId;
       const content = el.source.value;
-      const res = await window.pywebview.api.write_file(path, content);
+      const tab = state.tabs.find((t) => t.id === tabId);
+      const saveRev = tab ? tab.rev || 0 : 0;
+      const res = await enqueueWrite(path, () => window.pywebview.api.write_file(path, content));
       if (res?.error) {
+        toast("自动保存失败：" + res.error);
         return;
       }
       // Stale write: user switched document/tab while IO was in flight
       if (state.path !== path) return;
+      if (el.source.value !== content) {
+        // newer typing landed during IO — keep dirty
+        return;
+      }
       state.content = content;
       state.lastAutosaveAt = Date.now();
-      if (el.source.value === content) {
+      if (!tab || tab.rev === saveRev) {
         state.dirty = false;
         el.dirtyDot.hidden = true;
-        const tab = state.tabs.find((t) => t.id === tabId && t.path === path);
         if (tab) tab.dirty = false;
         updateWindowTitle();
       }
       updateAutosaveStatus();
       emitAgentEvent("document-saved", { path });
-    } catch (_) {}
+    } catch (e) {
+      toast("自动保存失败");
+    }
   }
 
   function updateAutosaveStatus() {
@@ -3086,6 +3151,7 @@
     if (!state.activeTabId) return;
     const tab = state.tabs.find((t) => t.id === state.activeTabId);
     if (!tab || tab.kind === "pdf") return;
+    flushHistory();
     tab.content = el.source.value;
     tab.dirty = state.dirty;
     tab.path = state.path;
@@ -3417,7 +3483,7 @@
       }
       const path = e.dataTransfer.getData("text/plain");
       if (path && path.match(/\.(md|markdown|txt|pdf)$/i)) {
-        await openDocumentRespectingMode(path, { forceTab: true });
+        await openDocumentSmart(path, { forceTab: true });
       }
     });
     // drag tab out of window → new window
@@ -3731,7 +3797,9 @@
     const saveRev = tab ? (tab.rev || 0) : 0;
 
     if (targetPath) {
-      const res = await window.pywebview.api.write_file(targetPath, contentToSave);
+      const res = await enqueueWrite(targetPath, () =>
+        window.pywebview.api.write_file(targetPath, contentToSave)
+      );
       if (res?.error) {
         toast("保存失败: " + res.error);
         return;
@@ -3771,6 +3839,7 @@
     const targetTabId = state.activeTabId;
     const tab = state.tabs.find((t) => t.id === targetTabId);
     const content = el.source.value;
+    const saveRev = tab ? tab.rev || 0 : 0;
     const defaultName = tab?.name || state.name || "未命名.md";
 
     const res = await window.pywebview.api.save_file_dialog(content, defaultName);
@@ -3780,27 +3849,30 @@
     }
 
     const newName = res.path.split(/[\\/]/).pop();
+    // User may have typed while the dialog was open
+    const stillMatches = !tab || tab.rev === saveRev;
+    const finalContent = stillMatches ? content : el.source.value;
 
     if (tab) {
       tab.path = res.path;
       tab.name = newName;
-      tab.content = content;
-      tab.dirty = false;
+      tab.content = finalContent;
+      tab.dirty = !stillMatches;
     }
 
     if (state.activeTabId === targetTabId) {
       state.path = res.path;
       state.name = newName;
-      state.content = content;
-      state.dirty = false;
-      el.dirtyDot.hidden = true;
+      state.content = finalContent;
+      state.dirty = !stillMatches;
+      el.dirtyDot.hidden = stillMatches;
       el.fileTitle.textContent = state.name;
       el.statusPath.textContent = res.path;
       updateWindowTitle();
     }
 
     renderTabs();
-    toast("已保存为: " + newName);
+    toast(stillMatches ? "已保存为: " + newName : "已保存为: " + newName + "（对话框期间有新输入，仍标记为未保存）");
     updateAutosaveStatus();
     await refreshRecents();
     if (state.folder) await loadFolder(state.folder);
@@ -4506,8 +4578,8 @@ ${previewHtml}
     if (!menu) return;
     menu.innerHTML = `
       <div class="menu-label">插入</div>
-      <button type="button" class="menu-row" data-ins="image"><span class="mr-ico">🖼</span><span>图像</span><span class="mr-caret" style="margin-left:auto;opacity:.45;font-size:11px">Ctrl+Shift+I</span></button>
-      <button type="button" class="menu-row" data-ins="linkref"><span class="mr-ico">🔗</span><span>链接引用</span></button>
+      <button type="button" class="menu-row" data-ins="image"><span class="mr-ico">图</span><span>图像</span><span class="mr-caret" style="margin-left:auto;opacity:.45;font-size:11px">Ctrl+Shift+I</span></button>
+      <button type="button" class="menu-row" data-ins="linkref"><span class="mr-ico">链</span><span>链接引用</span></button>
       <button type="button" class="menu-row" data-ins="hr"><span class="mr-ico">—</span><span>水平分割线</span></button>
       <button type="button" class="menu-row" data-ins="table"><span class="mr-ico">▦</span><span>表格</span><span class="mr-caret" style="margin-left:auto;opacity:.45;font-size:11px">Ctrl+T</span></button>
       <button type="button" class="menu-row" data-ins="code"><span class="mr-ico">{ }</span><span>代码块</span><span class="mr-caret" style="margin-left:auto;opacity:.45;font-size:11px">Ctrl+Shift+K</span></button>
@@ -5777,7 +5849,7 @@ ${previewHtml}
       btn.addEventListener("click", () => {
         if (window.StuartI18n) window.StuartI18n.setLang(btn.dataset.lang);
         refreshSettingsModal();
-        toast(`Language: ${btn.dataset.lang}`);
+        toast(`已切换语言：${btn.dataset.lang === "zh-CN" ? "简体中文" : btn.dataset.lang === "zh-TW" ? "繁體中文" : "English"}`);
       });
     });
     const wpInput = $("#wallpaper-input");
@@ -5907,19 +5979,39 @@ ${previewHtml}
       const list = (res && res.plugins) || [];
       box.innerHTML = "";
       if (!list.length) {
-        box.innerHTML = `<div class="empty-hint">暂无插件</div>`;
+        box.innerHTML = `<div class="empty-hint">暂无插件。将 .js 放入插件目录后，启用前需确认源码哈希。</div>`;
         return;
       }
+      const live = window.StuartPlugins;
+      const discovered = live?.list?.() || [];
       list.forEach((p) => {
         const row = document.createElement("div");
         row.className = "plugin-item";
         const name = document.createElement("span");
-        name.textContent = p.name || p.id;
+        const disc = discovered.find((d) => d.id === p.id);
+        const pending = !!(disc && disc.pending_consent);
+        name.textContent = (p.name || p.id) + (pending ? "（待确认）" : "");
         const btn = document.createElement("button");
         btn.className = "btn sm";
-        btn.textContent = p.enabled ? "已启用" : "已禁用";
+        btn.textContent = p.enabled && !pending ? "已启用" : pending ? "确认并启用" : "已禁用";
         btn.addEventListener("click", async () => {
-          await window.pywebview.api.set_plugin_enabled(p.id, !p.enabled);
+          if (!p.enabled || pending) {
+            const ok = confirm(`启用插件「${p.name || p.id}」？\n将执行该目录下的脚本，仅在信任来源时启用。`);
+            if (!ok) return;
+            await window.pywebview.api.set_plugin_enabled(p.id, true);
+            if (live?.consentAndEnable) {
+              try {
+                await live.consentAndEnable(p.id);
+              } catch (_) {}
+            }
+          } else {
+            await window.pywebview.api.set_plugin_enabled(p.id, false);
+            if (live?.disablePlugin) {
+              try {
+                await live.disablePlugin(p.id);
+              } catch (_) {}
+            }
+          }
           refreshPluginList();
         });
         row.appendChild(name);
@@ -6372,26 +6464,6 @@ ${previewHtml}
       console.error("[openFileByPath] Error opening:", filePath, e);
     }
   };
-
-  document.addEventListener("DOMContentLoaded", () => {
-    const btnInspiration = document.getElementById("btn-inspiration");
-    if (btnInspiration) {
-      btnInspiration.addEventListener("click", () => {
-        if (window.StuartInspirationSidebar) {
-          window.StuartInspirationSidebar.toggle();
-        }
-      });
-    }
-
-    window.addEventListener("keydown", (e) => {
-      if (e.altKey && (e.key === "i" || e.key === "I")) {
-        e.preventDefault();
-        if (window.StuartInspirationSidebar) {
-          window.StuartInspirationSidebar.toggle();
-        }
-      }
-    });
-  });
 
   // expose for debugging + AI/plugins
   window.StuartMD = {

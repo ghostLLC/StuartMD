@@ -56,6 +56,13 @@ fn main() {
             fs_api::stuart_export_html,
             fs_api::stuart_open_welcome,
             fs_api::stuart_file_exists,
+            // Path capability model (C2): dialog-backed grants + session allowlist
+            fs_api::stuart_register_allowed_path,
+            fs_api::stuart_dialog_open_file,
+            fs_api::stuart_dialog_save_file,
+            fs_api::stuart_dialog_open_folder,
+            fs_api::stuart_save_draft,
+            fs_api::stuart_clear_draft,
             win_api::stuart_open_data_dir,
             win_api::stuart_open_sample,
             win_api::stuart_resolve_asset,

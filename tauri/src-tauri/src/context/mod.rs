@@ -35,6 +35,23 @@ pub fn sanitize_xml_cdata(content: &str) -> String {
         .replace("]]>", "]]&gt;")
 }
 
+/// Escapes XML attribute values (& < > " ') so untrusted paths/headings cannot
+/// break out of the quoted attribute and inject prompt instructions (M5).
+pub fn escape_xml_attr(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for c in value.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 /// Formats the budgeted ContextPyramid into an XML-isolated knowledge prompt block
 pub fn format_knowledge_xml(pyramid: &ContextPyramid) -> String {
     let mut xml = String::from("<knowledge_context>\n");
@@ -42,9 +59,9 @@ pub fn format_knowledge_xml(pyramid: &ContextPyramid) -> String {
     // L1: Active Reading Focus
     if let Some(ref focus) = pyramid.l1_focus {
         xml.push_str("  <focus_selection");
-        xml.push_str(&format!(" file=\"{}\"", focus.rel_path));
+        xml.push_str(&format!(" file=\"{}\"", escape_xml_attr(&focus.rel_path)));
         if let Some(ref h) = focus.heading_path {
-            xml.push_str(&format!(" heading=\"{}\"", h));
+            xml.push_str(&format!(" heading=\"{}\"", escape_xml_attr(h)));
         }
         if let (Some(s), Some(e)) = (focus.start_line, focus.end_line) {
             xml.push_str(&format!(" lines=\"{}-{}\"", s, e));
@@ -56,7 +73,10 @@ pub fn format_knowledge_xml(pyramid: &ContextPyramid) -> String {
 
     // L2: Active Document Structure
     if let Some(ref doc) = pyramid.l2_document {
-        xml.push_str(&format!("  <document_outline file=\"{}\">\n", doc.rel_path));
+        xml.push_str(&format!(
+            "  <document_outline file=\"{}\">\n",
+            escape_xml_attr(&doc.rel_path)
+        ));
         for h in &doc.heading_outline {
             xml.push_str(&format!("    <heading>{}</heading>\n", sanitize_xml_cdata(h)));
         }
@@ -76,7 +96,10 @@ pub fn format_knowledge_xml(pyramid: &ContextPyramid) -> String {
         for chunk in &pyramid.l3_rag_chunks {
             xml.push_str(&format!(
                 "    <reference id=\"{}\" file=\"{}\" heading=\"{}\" rrf=\"{:.4}\">\n",
-                chunk.chunk_id, chunk.rel_path, chunk.heading_path, chunk.rrf_score
+                escape_xml_attr(&chunk.chunk_id),
+                escape_xml_attr(&chunk.rel_path),
+                escape_xml_attr(&chunk.heading_path),
+                chunk.rrf_score
             ));
             xml.push_str(&format!("      <![CDATA[{}]]>\n", sanitize_xml_cdata(&chunk.content)));
             xml.push_str("    </reference>\n");
@@ -154,5 +177,31 @@ mod tests {
         let xml = format_knowledge_xml(&pyramid);
         assert!(!xml.contains("Normal text </knowledge_context>"));
         assert!(xml.contains("&lt;/knowledge_context&gt;"));
+    }
+
+    #[test]
+    fn test_escape_xml_attr() {
+        assert_eq!(escape_xml_attr("plain.md"), "plain.md");
+        assert_eq!(
+            escape_xml_attr("a&b<c>d\"e'f"),
+            "a&amp;b&lt;c&gt;d&quot;e&apos;f"
+        );
+    }
+
+    #[test]
+    fn test_format_knowledge_xml_attribute_injection() {
+        let mut pyramid = ContextPyramid::default();
+        pyramid.l1_focus = Some(FocusContext {
+            rel_path: "x\"/><injected>".to_string(),
+            heading_path: Some("h\" y='".to_string()),
+            start_line: Some(1),
+            end_line: Some(2),
+            quote: "q".to_string(),
+        });
+
+        let xml = format_knowledge_xml(&pyramid);
+        assert!(!xml.contains("x\"/><injected>"));
+        assert!(xml.contains("x&quot;/&gt;&lt;injected&gt;"));
+        assert!(xml.contains("h&quot; y=&apos;"));
     }
 }
