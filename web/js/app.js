@@ -4211,6 +4211,12 @@ ${previewHtml}
     window.addEventListener("keydown", (e) => {
       try {
         if (window.StuartAIUI?.handleShortcutKeydown?.(e)) return;
+        // Alt+I — companion sidebar
+        if (e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "i" || e.key === "I")) {
+          e.preventDefault();
+          window.StuartCompanion?.toggle?.();
+          return;
+        }
       } catch (_) {}
       // Don't hijack typing in form fields (AI model/key/search inputs)
       const typingEl = e.target;
@@ -4754,6 +4760,8 @@ ${previewHtml}
 | 查找 | Ctrl+F | 文档内搜索 |
 | 切换主题 | Ctrl+T | 浅色 / 深色 / 羊皮纸 / 小黄人 |
 | 导出 HTML | Ctrl+E | 生成可分享页面 |
+| AI 问答 | Alt+E | 选中文字后结合上下文问答 |
+| 伴读 | Alt+I | 问答 / 知识 / 记忆侧栏 |
 | 新窗口 | 工具栏 | 同时打开多个文档 |
 
 ## 代码高亮
@@ -5227,6 +5235,13 @@ flowchart LR
     }
     try {
       window.StuartAIUI?.bindAll?.();
+      try {
+        const sc = document.getElementById("btn-companion");
+        if (sc && sc.dataset.bound !== "1") {
+          sc.dataset.bound = "1";
+          sc.addEventListener("click", () => window.StuartCompanion?.toggle?.());
+        }
+      } catch (_) {}
     } catch (err) {
       console.error(err);
     }
