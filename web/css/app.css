@@ -1674,6 +1674,58 @@ body[data-theme="wallpaper"] #preview *::selection {
   margin: 0;
 }
 
+/* In-place code edit: keep reading chrome, edit body only */
+.md-block.code-edit .code-edit-wrap {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-soft);
+}
+.md-block.code-edit .code-edit-lang {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  color: var(--text-2);
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+}
+.md-block.code-edit .code-edit-area {
+  display: block;
+  width: 100%;
+  min-height: 80px;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  line-height: 1.65;
+  padding: 12px;
+  box-sizing: border-box;
+  white-space: pre;
+  overflow-wrap: normal;
+  overflow-x: auto;
+}
+
+/* Table cell edit: quiet focus ring on the cell only */
+.md-block.table-edit table {
+  table-layout: auto;
+}
+.md-block.table-edit td[contenteditable="true"],
+.md-block.table-edit th[contenteditable="true"] {
+  cursor: text;
+  background: color-mix(in srgb, var(--accent, #1a73e8) 6%, transparent);
+}
+.md-block.table-edit td[contenteditable="true"]:focus,
+.md-block.table-edit th[contenteditable="true"]:focus {
+  outline: 1.5px solid var(--accent, #1a73e8);
+  outline-offset: -1px;
+  background: color-mix(in srgb, var(--accent, #1a73e8) 10%, transparent);
+}
+
 .markdown-body > :first-child {
   margin-top: 0;
 }

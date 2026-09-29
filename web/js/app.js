@@ -568,6 +568,31 @@
     return !!(bar && !bar.hidden);
   }
 
+  /** True when preview still has a non-empty text selection. */
+  function hasLivePreviewSelection() {
+    try {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !sel.rangeCount) return false;
+      const text = String(sel.toString() || "").trim();
+      if (!text) return false;
+      if (!el.preview) return false;
+      return (
+        el.preview.contains(sel.anchorNode) ||
+        el.preview.contains(sel.focusNode) ||
+        !!(sel.anchorNode && sel.anchorNode.parentElement && el.preview.contains(sel.anchorNode.parentElement))
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /** Selection was captured within maxAgeMs (double-click / drag-select grace). */
+  function recentlyHadSelection(maxAgeMs) {
+    const at = state._selCache && state._selCache.at ? state._selCache.at : 0;
+    if (!at) return false;
+    return Date.now() - at < (maxAgeMs == null ? 1500 : maxAgeMs);
+  }
+
   function pointerNearSelToolbar(x, y, pad) {
     const bar = document.getElementById("sel-toolbar");
     if (!bar || bar.hidden) return false;
@@ -1410,24 +1435,15 @@
       }
       if (state.mode === "source") return;
       // Never steal an active selection (or the AI selection bar) by entering block edit
-      try {
-        const selNow = window.getSelection();
-        const live =
-          selNow &&
-          !selNow.isCollapsed &&
-          String(selNow.toString() || "").trim().length > 0 &&
-          el.preview &&
-          (el.preview.contains(selNow.anchorNode) || el.preview.contains(selNow.focusNode));
-        if (live || isSelToolbarVisible()) {
-          clearTimeout(bindPreviewDelegates._clickTimer);
-          return;
-        }
-        // Drag-select just ended: click event fires on the block — do not edit for a moment
-        if (Date.now() - (state._selCache && state._selCache.at ? state._selCache.at : 0) < 600) {
-          clearTimeout(bindPreviewDelegates._clickTimer);
-          return;
-        }
-      } catch (_) {}
+      if (hasLivePreviewSelection() || isSelToolbarVisible()) {
+        clearTimeout(bindPreviewDelegates._clickTimer);
+        return;
+      }
+      // Drag / double-click select just ended: click fires on the block — do not edit
+      if (recentlyHadSelection(1500)) {
+        clearTimeout(bindPreviewDelegates._clickTimer);
+        return;
+      }
       const node = e.target.closest(".md-block");
       if (!node || node.classList.contains("editing")) return;
       if (e.detail > 1) return;
@@ -1435,26 +1451,23 @@
       bindPreviewDelegates._clickTimer = setTimeout(() => {
         if (!document.contains(node)) return;
         if (node.classList.contains("editing")) return;
-        try {
-          const sel2 = window.getSelection();
-          if (
-            isSelToolbarVisible() ||
-            (sel2 &&
-              !sel2.isCollapsed &&
-              String(sel2.toString() || "").trim() &&
-              el.preview &&
-              el.preview.contains(sel2.anchorNode))
-          ) {
-            return;
-          }
-          if (Date.now() - (state._selCache && state._selCache.at ? state._selCache.at : 0) < 600) {
-            return;
-          }
-        } catch (_) {}
-        // Code / math / mermaid: single-click must NOT enter WYSIWYG edit.
-        // KaTeX DOM (MathML + HTML twins) gets destroyed by contenteditable + htmlToMarkdown.
-        // Double-click → source edit preserves $...$ / $$...$$.
-        if (node.querySelector("pre, .katex, .katex-display, .mermaid-diagram")) {
+        if (hasLivePreviewSelection() || isSelToolbarVisible()) return;
+        if (recentlyHadSelection(1500)) return;
+        // Typora-like: single-click enters the right edit surface in reading mode
+        if (node.querySelector(".mermaid-diagram")) {
+          enterBlockSourceEdit(node);
+          return;
+        }
+        if (node.querySelector(".katex, .katex-display")) {
+          enterBlockSourceEdit(node);
+          return;
+        }
+        if (node.querySelector("table")) {
+          enterTableEdit(node);
+          return;
+        }
+        if (node.querySelector("pre")) {
+          enterCodeEdit(node);
           return;
         }
         enterBlockEdit(node);
@@ -1462,17 +1475,14 @@
     });
 
     el.preview.addEventListener("dblclick", (e) => {
-      // Allow code / KaTeX / mermaid / tables — enter source edit
+      // Double-click = native word selection only. Never convert the block to
+      // markdown source here — that wiped the live selection and looked like a delete.
       if (e.target.closest("a, button, input, textarea, .md-block-source")) {
         return;
       }
-      if (state.mode === "source") return;
-      const node = e.target.closest(".md-block");
-      if (!node) return;
-      e.preventDefault();
       clearTimeout(bindPreviewDelegates._clickTimer);
-      if (node.classList.contains("editing")) return;
-      enterBlockSourceEdit(node);
+      // If already editing, leave native selection alone.
+      if (e.target.closest(".md-block.editing")) return;
     });
   }
 
@@ -1691,7 +1701,55 @@
   }
 
   function blockNeedsSourceEdit(node) {
-    return !!(node.querySelector(".katex, .mermaid-diagram, pre"));
+    return !!(node.querySelector(".katex, .mermaid-diagram"));
+  }
+
+  /**
+   * Write one block back into the source model with undo + accidental-wipe guards.
+   * Never silently replace non-empty source with empty conversion output.
+   */
+  function commitBlockSource(idx, nextText, originalText, opts) {
+    const o = opts || {};
+    const all = splitMarkdownBlocks(el.source.value || "");
+    if (!Number.isFinite(idx) || idx < 0 || idx >= all.length) {
+      // Index drift after re-render — abort rather than corrupt the document
+      return false;
+    }
+    let next = nextText == null ? "" : String(nextText);
+    const original = originalText == null ? all[idx] || "" : String(originalText);
+    // Accidental wipe: empty conversion of a non-empty block (contenteditable +
+    // selection collapse / structure loss). Allow empty only when user was in
+    // source-edit and explicitly cleared, or caller opts out of the guard.
+    if (o.allowEmpty !== true && !String(next).trim() && String(original).trim()) {
+      next = original;
+    }
+    // Heuristic loss guard for WYSIWYG → markdown: if visual text is substantial
+    // but markdown came back gutted, keep the original source.
+    if (o.domText && o.domText.length > 24) {
+      const plain = String(next)
+        .replace(/[*_`~\[\]()#|\\>-]/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      const domPlain = String(o.domText)
+        .replace(/\s+/g, " ")
+        .trim();
+      if (plain.length < Math.min(24, domPlain.length * 0.45)) {
+        next = original;
+      }
+    }
+    if (next === all[idx]) {
+      return true;
+    }
+    const prev = el.source.value || "";
+    if (prev) pushHistory(prev);
+    all[idx] = next;
+    const joined = joinBlocks(all);
+    el.source.value = joined;
+    state.content = joined;
+    markDirty();
+    scheduleAutoSave();
+    pushHistory(joined);
+    return true;
   }
 
   function enterBlockSourceEdit(node) {
@@ -1730,20 +1788,13 @@
       done = true;
       cleanupDocDown();
       const next = ta.value;
-      const all = splitMarkdownBlocks(el.source.value || "");
-      all[idx] = next;
-      const joined = joinBlocks(all);
+      commitBlockSource(idx, next, original, { allowEmpty: true });
+      const joined = el.source.value || "";
       lastPreviewSource = "";
       node.classList.remove("editing", "source-edit");
       node.innerHTML = "";
-      el.source.value = joined;
-      state.content = joined;
-      markDirty();
-      scheduleAutoSave();
-      // Incremental path: applyBlockEditing diffs against lastPreviewBlocks
       renderMarkdown(joined);
       lastPreviewSource = joined;
-      pushHistory(joined);
       emitAgentEvent("document-changed", { source: "block-edit" });
       try {
         document.getSelection()?.removeAllRanges();
@@ -1786,9 +1837,18 @@
 
   function enterBlockEdit(node) {
     if (node.classList.contains("editing")) return;
-    // Math / diagram / code: WYSIWYG edit corrupts structure — use source editor
-    if (blockNeedsSourceEdit(node)) {
+    // Math / diagram: WYSIWYG edit corrupts KaTeX / mermaid DOM — source editor
+    if (node.querySelector(".katex, .katex-display, .mermaid-diagram")) {
       enterBlockSourceEdit(node);
+      return;
+    }
+    // Table / code: dedicated in-place editors (never contenteditable the shell)
+    if (node.querySelector("table")) {
+      enterTableEdit(node);
+      return;
+    }
+    if (node.querySelector("pre")) {
+      enterCodeEdit(node);
       return;
     }
     // exit any other editing block first
@@ -1796,8 +1856,13 @@
       exitBlockEditVisual(n);
     });
     const idx = Number(node.dataset.index || 0);
+    const originalBlock = (splitMarkdownBlocks(el.source.value || "")[idx] ?? "");
     node.classList.add("editing");
-    const editableRoots = [...node.children].filter(Boolean);
+    // Never make table/pre shells contenteditable — browsers restructure them
+    // and htmlToMarkdown then drops cells/code.
+    const editableRoots = [...node.children].filter(
+      (c) => c && !c.matches?.("table, pre, .katex-display, .mermaid-diagram")
+    );
     const hosts = editableRoots.length ? editableRoots : [node];
     hosts.forEach((h) => {
       h.setAttribute("contenteditable", "true");
@@ -1820,17 +1885,13 @@
       done = true;
       clearDoc();
       let mdText = htmlToMarkdown(node).trim();
-      const all = splitMarkdownBlocks(el.source.value || "");
-      const original = all[idx] || "";
+      const original = originalBlock;
       const hadMath = /\$\$[\s\S]+\$|\$[^$\n]+\$/.test(original);
       const hasMath = /\$\$[\s\S]+\$|\$[^$\n]+\$/.test(mdText);
       if (hadMath && !hasMath) mdText = original;
-      all[idx] = mdText || all[idx] || "";
-      const joined = joinBlocks(all);
-      el.source.value = joined;
-      state.content = joined;
-      markDirty();
-      scheduleAutoSave();
+      const domText = node.textContent || "";
+      commitBlockSource(idx, mdText, original, { domText });
+      const joined = el.source.value || "";
       finishRestore(joined);
       try {
         if (document.activeElement && node.contains(document.activeElement)) {
@@ -1881,6 +1942,227 @@
         }
       }
       handleBlockEditKeydown(e, node);
+    });
+  }
+
+  /** In-place table cell editing — click a cell and type; no markdown shell. */
+  function enterTableEdit(node) {
+    if (node.classList.contains("editing")) return;
+    if (hasLivePreviewSelection() || isSelToolbarVisible()) return;
+    $$(".md-block.editing", el.preview).forEach((n) => {
+      if (typeof n._stuartCommit === "function") {
+        try {
+          n._stuartCommit();
+        } catch (_) {}
+      } else {
+        exitBlockEditVisual(n);
+      }
+    });
+    const idx = Number(node.dataset.index || 0);
+    const blocks = splitMarkdownBlocks(el.source.value || "");
+    const original = blocks[idx] ?? "";
+    node.classList.add("editing", "table-edit");
+    const cells = [...node.querySelectorAll("td, th")];
+    if (!cells.length) {
+      node.classList.remove("editing", "table-edit");
+      enterBlockSourceEdit(node);
+      return;
+    }
+    cells.forEach((c) => {
+      c.setAttribute("contenteditable", "true");
+      c.spellcheck = false;
+      c.style.outline = "none";
+    });
+    try {
+      cells[0].focus();
+      placeCaretOnClick(cells[0]);
+    } catch (_) {}
+
+    let done = false;
+    const onDocDown = (e) => {
+      if (done) return;
+      if (node.contains(e.target)) return;
+      commit();
+    };
+    const cleanupDocDown = () => document.removeEventListener("mousedown", onDocDown, true);
+    const commit = () => {
+      if (done) return;
+      done = true;
+      cleanupDocDown();
+      const mdText = htmlToMarkdown(node).trim();
+      const domText = node.textContent || "";
+      commitBlockSource(idx, mdText, original, { domText });
+      const joined = el.source.value || "";
+      lastPreviewSource = "";
+      node.classList.remove("editing", "table-edit");
+      cells.forEach((c) => {
+        c.removeAttribute("contenteditable");
+        c.removeAttribute("spellcheck");
+      });
+      renderMarkdown(joined);
+      lastPreviewSource = joined;
+      emitAgentEvent("document-changed", { source: "table-edit" });
+      try {
+        document.getSelection()?.removeAllRanges();
+      } catch (_) {}
+    };
+    const cancel = () => {
+      if (done) return;
+      done = true;
+      cleanupDocDown();
+      lastPreviewSource = "";
+      node.classList.remove("editing", "table-edit");
+      renderMarkdown(el.source.value);
+      lastPreviewSource = el.source.value;
+    };
+    node._stuartCommit = commit;
+    document.addEventListener("mousedown", onDocDown, true);
+    node.addEventListener(
+      "blur",
+      (e) => {
+        if (!node.contains(e.relatedTarget)) commit();
+      },
+      true
+    );
+    node.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        cancel();
+      } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        commit();
+      } else if (e.key === "Tab") {
+        // Move across cells so table edit feels native
+        e.preventDefault();
+        const all = [...node.querySelectorAll("td, th")];
+        const cur = all.indexOf(document.activeElement);
+        const next = e.shiftKey ? all[cur - 1] : all[cur + 1];
+        if (next) {
+          next.focus();
+          placeCaretOnClick(next);
+        }
+      } else if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+        // Enter commits (tables have no soft line breaks in GFM cells)
+        e.preventDefault();
+        commit();
+      }
+      e.stopPropagation();
+    });
+  }
+
+  /** Edit code body in place (keep the fenced chrome / language). */
+  function enterCodeEdit(node) {
+    if (node.classList.contains("editing")) return;
+    if (hasLivePreviewSelection() || isSelToolbarVisible()) return;
+    $$(".md-block.editing", el.preview).forEach((n) => {
+      if (typeof n._stuartCommit === "function") {
+        try {
+          n._stuartCommit();
+        } catch (_) {}
+      } else {
+        exitBlockEditVisual(n);
+      }
+    });
+    const idx = Number(node.dataset.index || 0);
+    const blocks = splitMarkdownBlocks(el.source.value || "");
+    const original = blocks[idx] ?? "";
+    // Mermaid: source edit preserves the diagram contract
+    if (node.querySelector(".mermaid-diagram") || /```\s*mermaid/i.test(original)) {
+      enterBlockSourceEdit(node);
+      return;
+    }
+    node.classList.add("editing", "code-edit");
+    const pre = node.querySelector("pre");
+    const codeEl = node.querySelector("pre code") || pre;
+    if (!codeEl) {
+      node.classList.remove("editing", "code-edit");
+      enterBlockSourceEdit(node);
+      return;
+    }
+    const fenceLang = original.match(/^\s*```([\w+-]+)/);
+    const classLang = (codeEl.className || "").match(/language-([\w+-]+)/);
+    const lang = (fenceLang && fenceLang[1]) || (classLang && classLang[1]) || "";
+    // Prefer body from source fence so whitespace is exact
+    let body = original;
+    const fence = original.match(/^\s*```[\w+-]*\r?\n([\s\S]*?)\r?\n?```\s*$/);
+    if (fence) body = fence[1];
+    else body = codeEl.textContent || "";
+
+    const prevScroll = el.previewPane.scrollTop;
+    node.innerHTML = "";
+    const wrap = document.createElement("div");
+    wrap.className = "code-edit-wrap";
+    const label = document.createElement("div");
+    label.className = "code-edit-lang";
+    label.textContent = lang || "code";
+    const ta = document.createElement("textarea");
+    ta.className = "md-block-source code-edit-area";
+    ta.value = body;
+    ta.spellcheck = false;
+    wrap.appendChild(label);
+    wrap.appendChild(ta);
+    node.appendChild(wrap);
+    const fit = () => {
+      ta.style.height = "auto";
+      ta.style.height = ta.scrollHeight + "px";
+    };
+    fit();
+    ta.addEventListener("input", fit);
+    ta.focus();
+    ta.setSelectionRange(0, 0);
+    el.previewPane.scrollTop = prevScroll;
+
+    let done = false;
+    const onDocDown = (e) => {
+      if (done) return;
+      if (node.contains(e.target)) return;
+      commit();
+    };
+    const cleanupDocDown = () => document.removeEventListener("mousedown", onDocDown, true);
+    const commit = () => {
+      if (done) return;
+      done = true;
+      cleanupDocDown();
+      const nextBody = ta.value.replace(/\s+$/, "");
+      const next = "```" + lang + "\n" + nextBody + (nextBody ? "\n" : "") + "```";
+      // Empty body is legitimate for code (user cleared the snippet)
+      commitBlockSource(idx, next, original, { allowEmpty: true });
+      const joined = el.source.value || "";
+      lastPreviewSource = "";
+      node.classList.remove("editing", "code-edit");
+      node.innerHTML = "";
+      renderMarkdown(joined);
+      lastPreviewSource = joined;
+      emitAgentEvent("document-changed", { source: "code-edit" });
+      try {
+        document.getSelection()?.removeAllRanges();
+      } catch (_) {}
+    };
+    const cancel = () => {
+      if (done) return;
+      done = true;
+      cleanupDocDown();
+      lastPreviewSource = "";
+      node.classList.remove("editing", "code-edit");
+      node.innerHTML = "";
+      renderMarkdown(el.source.value);
+      lastPreviewSource = el.source.value;
+    };
+    node._stuartCommit = commit;
+    ta._stuartCommit = commit;
+    document.addEventListener("mousedown", onDocDown, true);
+    ta.addEventListener("blur", commit);
+    ta.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        cancel();
+      } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        commit();
+      }
+      e.stopPropagation();
     });
   }
 
@@ -4756,6 +5038,8 @@ ${previewHtml}
   }
 
   function applySourceText(text) {
+    const prev = el.source.value || "";
+    if (prev && prev !== text) pushHistory(prev);
     el.source.value = text;
     state.content = text;
     markDirty();
