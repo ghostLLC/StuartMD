@@ -195,22 +195,25 @@
 .mermaid-diagram {
   margin: 0.75em auto;
   text-align: center;
-  overflow-x: auto;
+  overflow: auto;
   padding: 6px 8px;
   background: var(--bg-soft);
   border: 1px solid var(--border);
   border-radius: 6px;
-  max-width: 100%;
+  /* Cap as a document figure — never fill the whole column with a poster. */
+  max-width: min(100%, 560px);
+  max-height: 320px;
   box-sizing: border-box;
 }
 
 .mermaid-diagram svg {
-  max-width: 100% !important;
-  width: auto;
-  height: auto;
+  /* Never scale UP to the container — hug intrinsic size, then clamp. */
+  max-width: min(100%, 540px) !important;
+  max-height: 300px !important;
+  width: auto !important;
+  height: auto !important;
   display: block;
   margin: 0 auto;
-  /* em-based mermaid labels inherit this; keep diagram type compact */
   font-size: 11px;
 }
 

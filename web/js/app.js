@@ -3312,7 +3312,19 @@
           // Keep htmlLabels so node text (incl. CJK) lives in foreignObject;
           // sanitizeMermaidSvg keeps that foreignObject alive.
           htmlLabels: true,
-          flowchart: { htmlLabels: true },
+          themeVariables: {
+            fontSize: "11px",
+            fontFamily: "Segoe UI, PingFang SC, Microsoft YaHei, sans-serif",
+          },
+          flowchart: {
+            htmlLabels: true,
+            useMaxWidth: true,
+            fontSize: 11,
+            padding: 2,
+            nodeSpacing: 28,
+            rankSpacing: 32,
+            curve: "basis",
+          },
         });
         return true;
       } catch (_) {
@@ -3372,7 +3384,9 @@
           sanitizeMermaidSvg(wrap);
           const svgEl = wrap.querySelector("svg");
           if (svgEl) {
-            svgEl.style.maxWidth = "100%";
+            svgEl.style.maxWidth = "min(100%, 540px)";
+            svgEl.style.maxHeight = "300px";
+            svgEl.style.width = "auto";
             svgEl.style.height = "auto";
           }
           pre.replaceWith(wrap);
@@ -6403,9 +6417,8 @@ ${previewHtml}
       lines[lineIdx] = stripListMarker(lines[lineIdx]);
     }
     let nextBlock = lines.join("\n");
-    // Stripping the only marker of a lone empty bullet must yield a real empty
-    // paragraph — never a residual "looks like a bullet" block.
-    if (mode === "strip-marker" && !String(nextBlock).trim()) nextBlock = "";
+    // Enter on empty list item: only remove the marker. Keep a normal empty
+    // line (do not delete the line / collapse the block away).
     all[idx] = nextBlock;
     const joined = joinBlocks(all);
     if (joined === prev) {
@@ -6510,8 +6523,8 @@ ${previewHtml}
       !x.querySelector("img, input, button, video, audio, iframe, svg");
     if (!liEmpty(li)) return false;
     if (e.key === "Enter" || e.key === "Delete" || e.key === "Backspace") {
-      // Enter and Delete/Backspace on an empty list item both just strip the
-      // marker (exit list). A later erase on the plain empty line removes it.
+      // Empty list item: Enter / Delete / Backspace only strip the marker
+      // (become a normal empty line). Later erase removes that empty line.
       rewriteListLine(block, li, "strip-marker");
       return true;
     }
@@ -6567,7 +6580,7 @@ ${previewHtml}
       return;
     }
 
-    // Enter on empty list item: strip the marker (exit list), do NOT spawn another bullet
+    // Enter on empty list item: strip marker only → normal empty line (no new bullet)
     if (e.key === "Enter" && noMod && liAtCaret && liEmpty(liAtCaret)) {
       e.preventDefault();
       e.stopPropagation();

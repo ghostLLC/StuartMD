@@ -4,7 +4,7 @@
 
 **项目仓库：** [https://github.com/ghostLLC/StuartMD](https://github.com/ghostLLC/StuartMD)
 
-**当前版本：** 3.5.4
+**当前版本：** 3.5.5
 
 - 顶栏 **伴读**（Alt+I）：问答 / 知识 / 记忆
 - 选中文字后点 **问答** 或按 Alt+E：快速问答
@@ -76,17 +76,14 @@ $$
 ### 图表
 
 ```mermaid
-flowchart TD
-  A[打开文档] --> B{阅读/编辑?}
-  B -->|阅读| C[预览渲染]
-  B -->|编辑| D[原位编辑]
+flowchart LR
+  A[打开] --> B{阅读/编辑}
+  B -->|读| C[预览]
+  B -->|改| D[原位编辑]
   C --> E[PDF 标注]
-  D --> F{块类型}
-  F --> G[代码/公式]
-  F --> H[表格/列表]
-  G --> I[自动保存]
-  H --> I
-  E --> I
+  D --> F[代码/表格]
+  E --> I[自动保存]
+  F --> I
   I --> J[(完成)]
 ```
 
@@ -148,7 +145,7 @@ flowchart TD
 ## 安装说明
 
 - 默认安装：`%LOCALAPPDATA%\StuartMD`（可向导自定义路径）  
-- 静默安装：`StuartMD-Setup-3.5.4.exe /S`  
+- 静默安装：`StuartMD-Setup-3.5.5.exe /S`  
 - 设置中可**检查更新**；升级时配置、插件、壁纸会自动迁移  
 - 欢迎与问题反馈：[GitHub Issues](https://github.com/ghostLLC/StuartMD/issues)  
 
