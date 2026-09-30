@@ -191,20 +191,25 @@
   border-color: #d4b84a;
 }
 
-/* Mermaid */
+/* Mermaid — document figure, not poster (S2.3 compact) */
 .mermaid-diagram {
-  margin: 1.2em auto;
+  margin: 1em auto;
   text-align: center;
   overflow-x: auto;
-  padding: 12px;
+  padding: 10px 12px;
   background: var(--bg-soft);
   border: 1px solid var(--border);
   border-radius: 8px;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .mermaid-diagram svg {
-  max-width: 100%;
+  max-width: 100% !important;
+  width: auto;
   height: auto;
+  display: block;
+  margin: 0 auto;
   /* em-based mermaid labels inherit this; keep diagram type compact */
   font-size: 12px;
 }
@@ -232,7 +237,38 @@
 .mermaid-diagram svg foreignObject > div > span,
 .mermaid-diagram svg :is(text, tspan) {
   font-size: 12px !important;
-  line-height: 1.35;
+  line-height: 1.25;
+}
+
+/* Unscoped on purpose: mermaid's layout pass measures .nodeLabel/.edgeLabel
+   BEFORE the .mermaid-diagram wrapper exists. Same metrics at measure and
+   paint → node rects come out ~36–40px tall instead of poster-sized. */
+.nodeLabel,
+.edgeLabel {
+  font-size: 12px !important;
+  line-height: 1.25 !important;
+  padding: 2px 6px !important;
+  margin: 0 !important;
+}
+
+.mermaid-diagram :is(.nodeLabel, .edgeLabel),
+.mermaid-diagram svg foreignObject > div,
+.mermaid-diagram svg foreignObject > div > span {
+  padding: 2px 6px !important;
+  margin: 0 !important;
+}
+
+/* Thinner edges + node outlines (arrowheads stay readable) */
+.mermaid-diagram :is(.edgePath path, .flowchart-link, path.path, .edgePath .path) {
+  stroke-width: 1.25px !important;
+}
+
+.mermaid-diagram :is(g.node rect, g.node polygon, g.node circle, g.node ellipse, g.node path) {
+  stroke-width: 1.2px;
+}
+
+.mermaid-diagram marker :is(path, polygon) {
+  stroke-width: 1px;
 }
 
 pre.mermaid-fallback,
@@ -1771,7 +1807,8 @@ body[data-theme="wallpaper"] #preview *::selection {
 
 /* Table cell edit: pixel-identical to reading mode — restore the borders and
    header/row backgrounds that generic [contenteditable] rules strip, and keep
-   only a hairline focus cue on the active cell (no block frame). */
+   only a hairline focus cue on the active cell (no block frame).
+   Chrome must match .markdown-body table 1:1 or enter/exit reflows (S2.4 jitter). */
 .md-block.table-edit {
   outline: none;
   border: none;
@@ -1779,25 +1816,45 @@ body[data-theme="wallpaper"] #preview *::selection {
   background: transparent;
 }
 .md-block.table-edit table {
+  /* same geometry as .markdown-body table — no size jump editing ↔ reading */
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1.2em 0;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  display: block;
+  overflow-x: auto;
   table-layout: auto;
+  box-sizing: border-box;
+}
+/* Style all cells (not only [contenteditable]) so the frame is identical
+   before attrs land and after they are stripped on commit. */
+.md-block.table-edit td,
+.md-block.table-edit th {
+  cursor: text;
+  outline: none;
+  box-shadow: none;
+  /* same chrome as .markdown-body table th/td */
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+  text-align: left;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  box-sizing: border-box;
+  vertical-align: inherit;
 }
 .md-block.table-edit td[contenteditable="true"],
 .md-block.table-edit th[contenteditable="true"] {
   cursor: text;
   outline: none;
   box-shadow: none;
-  /* same chrome as .markdown-body table th/td */
-  border: 1px solid var(--border);
-  font-family: var(--font-ui);
-  font-size: 14px;
-  padding: 8px 12px;
-  text-align: left;
 }
-.md-block.table-edit td[contenteditable="true"] {
+.md-block.table-edit td {
   /* transparent lets tr:nth-child(2n) stripes show through, same as reading */
   background: transparent;
 }
-.md-block.table-edit th[contenteditable="true"] {
+.md-block.table-edit th {
   background: var(--bg-soft);
   font-weight: 600;
 }
@@ -1807,7 +1864,7 @@ body[data-theme="wallpaper"] #preview *::selection {
 .md-block.table-edit td[contenteditable="true"]:focus,
 .md-block.table-edit th[contenteditable="true"]:focus {
   outline: none;
-  /* hairline inset cue on the active cell only */
+  /* hairline inset cue on the active cell only — box-shadow never affects layout */
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent, #1a73e8) 32%, transparent);
 }
 
@@ -1912,6 +1969,38 @@ body[data-theme="wallpaper"] #preview *::selection {
 
 [data-theme="gray"] .markdown-body pre code {
   color: #b4b4b8;
+}
+
+/* S2.2 — language badge on code chrome (data-lang set at render).
+   Decorative only: pointer-events none so click still enters code edit. */
+.markdown-body pre[data-lang]:not([data-lang=""]),
+.md-block pre[data-lang]:not([data-lang=""]),
+.md-block.code-edit .code-edit-wrap[data-lang]:not([data-lang=""]) {
+  position: relative;
+}
+
+.markdown-body pre[data-lang]:not([data-lang=""])::before,
+.md-block pre[data-lang]:not([data-lang=""])::before,
+.md-block.code-edit .code-edit-wrap[data-lang]:not([data-lang=""])::before {
+  content: attr(data-lang);
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  z-index: 1;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  color: var(--text-2);
+  opacity: 0.55;
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+  border-radius: 999px;
+  padding: 3px 8px;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  white-space: nowrap;
 }
 
 .markdown-body ul,

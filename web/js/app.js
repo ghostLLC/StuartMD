@@ -410,6 +410,40 @@
     return container.innerHTML;
   }
 
+  /**
+   * S2.2: stamp reading-mode code blocks with data-lang for the chrome badge.
+   * Lang = code.language-* (fence info) or the fence info string on the block
+   * source (```js / ```language-js). Empty → no attribute → no badge.
+   * CSS draws the pill via ::before; no extra DOM, clicks still reach the pre.
+   */
+  function attachCodeLangBadges(root) {
+    if (!root || !root.querySelectorAll) return;
+    const src = root._stuartSrc != null ? String(root._stuartSrc) : "";
+    let fenceLang = "";
+    const fence = src.match(/^[ \t]{0,3}```([^\n`]*)/);
+    if (fence) {
+      const info = String(fence[1] || "").trim().split(/\s+/)[0] || "";
+      fenceLang = info;
+    }
+    const pres = root.querySelectorAll("pre");
+    for (let i = 0; i < pres.length; i++) {
+      const pre = pres[i];
+      if (pre.classList.contains("mermaid-src") || pre.classList.contains("mermaid-fallback")) continue;
+      if (pre.closest(".code-edit-wrap") || pre.closest(".md-block-source")) continue;
+      if (pre.hasAttribute("data-lang")) continue;
+      const code = pre.querySelector("code");
+      const classLang = ((code && code.className) || "").match(/(?:^|\s)language-([\w#+.-]+)/i);
+      const codeAttr = code && code.getAttribute("data-language");
+      let lang = (classLang && classLang[1]) || codeAttr || fenceLang || "";
+      lang = String(lang)
+        .replace(/^language[-_]/i, "")
+        .toLowerCase()
+        .split(/[^a-z0-9#+._-]/)[0];
+      if (!lang) continue;
+      pre.setAttribute("data-lang", lang);
+    }
+  }
+
   function createBlockNode(block, index) {
     const wrap = document.createElement("div");
     wrap.className = "md-block";
@@ -423,6 +457,7 @@
     }
     const html = renderBlockHtml(src);
     wrap.innerHTML = sanitizeHtmlStrict(html);
+    attachCodeLangBadges(wrap);
     return wrap;
   }
 
@@ -729,16 +764,18 @@
    * True only for a short grace after a drag-select gesture ends.
    * NOT a blanket "any cached selection means never edit" — that over-suppressed
    * caret placement and re-enter after the P0 content-loss fix.
+   * Window ≤ 300ms (S2.1): long enough to swallow the gesture's own click,
+   * short enough that the next intentional click still edits.
    */
   function recentlyHadSelection(maxAgeMs) {
     const at = state._dragSelAt || 0;
     if (!at) return false;
-    return Date.now() - at < (maxAgeMs == null ? 500 : maxAgeMs);
+    return Date.now() - at < (maxAgeMs == null ? 300 : maxAgeMs);
   }
 
   function markDragSelectGrace(maxAgeMs) {
     state._dragSelAt = Date.now();
-    return maxAgeMs == null ? 500 : maxAgeMs;
+    return maxAgeMs == null ? 300 : maxAgeMs;
   }
 
   /** Drop every enter-edit lock after commit/cancel so the next click can edit. */
@@ -1738,44 +1775,35 @@
         return;
       }
 
-      // No live selection: Typora-like delayed single-click enter.
-      // Structured blocks (table/code/math/mermaid): 320ms — dblclick also enters
-      // edit on its own path, so an early fire just lands in the same editor.
-      // Plain text / headings: 460ms — stays under the OS double-click gap so the
-      // second click can cancel and leave native word-selection intact.
+      // No live selection: enter edit IMMEDIATELY (S2.1 Typora feel).
+      // No 320–460ms timer as the primary path — caret must appear within 1 frame.
+      // Drag-select is already filtered above (moved > 4px OR selection created
+      // during this gesture). Residual grace only blocks a follow-up click while
+      // a fresh drag-select selection is still live.
+      if (hasLivePreviewSelection() && recentlyHadSelection(300)) return;
       bindPreviewDelegates._suppressEditUntil = 0;
-      const isStructured =
-        !!(node.querySelector && node.querySelector("table, pre, .katex, .katex-display, .mermaid-diagram")) ||
-        /```\s*mermaid/i.test(node._stuartSrc || "");
-      const delayMs = isStructured ? 320 : 460;
-      const mySeq = bindPreviewDelegates._clickSeq;
-      bindPreviewDelegates._clickTimer = setTimeout(() => {
-        if (bindPreviewDelegates._clickSeq !== mySeq) return;
-        if (Date.now() < (bindPreviewDelegates._suppressEditUntil || 0)) return;
-        // Node may have been rebuilt by a commit on this same click-away gesture.
-        let liveNode = node;
-        if (!document.contains(liveNode)) {
-          try {
-            const hit = document.elementFromPoint(clickX, clickY);
-            liveNode = (hit && hit.closest && hit.closest(".md-block")) || null;
-          } catch (_) {
-            liveNode = null;
-          }
-        }
-        if (!liveNode || !el.preview.contains(liveNode)) return;
-        if (liveNode.classList.contains("editing")) return;
-        if (hasLivePreviewSelection() && recentlyHadSelection(500)) return;
-        if (isSelToolbarVisible()) return;
-        enterEditSurfaceFor(liveNode, clickX, clickY);
-      }, delayMs);
+      enterEditSurfaceFor(node, clickX, clickY);
     });
 
     /**
-     * Enter the right edit surface for a block. Shared by delayed single-click,
+     * Enter the right edit surface for a block. Shared by immediate single-click,
      * selection-click caret placement, and dblclick on structured blocks.
+     * Re-resolves the node under (clickX, clickY) after commit re-renders.
      */
     function enterEditSurfaceFor(node, clickX, clickY) {
-      if (!node || node.classList.contains("editing")) return false;
+      // Commit-on-mousedown rebuilds the preview DOM; the captured node may be
+      // detached. Re-resolve the block under the pointer so click-away can
+      // immediately start editing the block the user actually clicked.
+      if ((!node || !document.contains(node)) && clickX != null && clickY != null) {
+        try {
+          const hit = document.elementFromPoint(clickX, clickY);
+          node = (hit && hit.closest && hit.closest(".md-block")) || null;
+        } catch (_) {
+          node = null;
+        }
+      }
+      if (!node || !el.preview.contains(node)) return false;
+      if (node.classList.contains("editing")) return false;
       hideSelToolbar();
       try {
         const sel = window.getSelection();
@@ -1892,6 +1920,21 @@
     return display ? `\n$$\n${tex}\n$$\n` : `$${tex}$`;
   }
 
+  /**
+   * Wrap inline mark content without eating boundary whitespace.
+   * `hello<strong> world </strong>bye` must stay `hello **world** bye`,
+   * not `hello**world**bye` — dropped spaces made commits look "blocked"
+   * for em/strong/s/del mixed lines.
+   */
+  function wrapInlineMark(token, inner) {
+    const t = inner == null ? "" : String(inner);
+    if (!t) return "";
+    if (!t.trim()) return t;
+    const lead = t.match(/^\s*/)[0];
+    const tail = t.match(/\s*$/)[0];
+    return lead + token + t.trim() + token + tail;
+  }
+
   function htmlToMarkdown(root) {
     const walk = (node) => {
       if (node.nodeType === Node.TEXT_NODE) return node.nodeValue || "";
@@ -1907,14 +1950,14 @@
           return "\n";
         case "strong":
         case "b":
-          return `**${kids().trim()}**`;
+          return wrapInlineMark("**", kids());
         case "em":
         case "i":
-          return `*${kids().trim()}*`;
+          return wrapInlineMark("*", kids());
         case "del":
         case "s":
         case "strike":
-          return `~~${kids().trim()}~~`;
+          return wrapInlineMark("~~", kids());
         case "u":
         case "ins":
           return kids();
@@ -2008,25 +2051,60 @@
     return out;
   }
 
+  /** Range at (x, y) — Chrome/WebView caretRangeFromPoint, or the standard API. */
+  function caretRangeFromXY(x, y) {
+    try {
+      if (typeof document.caretRangeFromPoint === "function") {
+        return document.caretRangeFromPoint(x, y);
+      }
+      if (typeof document.caretPositionFromPoint === "function") {
+        const pos = document.caretPositionFromPoint(x, y);
+        if (pos && pos.offsetNode) {
+          const r = document.createRange();
+          const max = pos.offsetNode.nodeType === 3 ? (pos.offsetNode.nodeValue || "").length : pos.offsetNode.childNodes.length;
+          r.setStart(pos.offsetNode, Math.min(pos.offset || 0, max));
+          r.collapse(true);
+          return r;
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /** True when the caret range lives inside target (inline em/strong/code/span included). */
+  function rangeInsideTarget(r, target) {
+    if (!r || !target) return false;
+    const n = r.startContainer;
+    if (!n) return false;
+    if (target === n) return true;
+    if (target.contains && target.contains(n)) return true;
+    // Element startContainer whose parent chain reaches target
+    if (n.parentElement && target.contains(n.parentElement)) return true;
+    return false;
+  }
+
   function placeCaretOnClick(target, x, y) {
     try {
       const sel = window.getSelection();
       if (!sel) return;
-      // Prefer the real click point so heading/list edits feel immediate
-      if (x != null && y != null && typeof document.caretRangeFromPoint === "function") {
-        const r = document.caretRangeFromPoint(x, y);
-        if (r && (target === r.startContainer || target.contains(r.startContainer))) {
+      // Prefer the real click point so heading/list/rich-text edits feel immediate
+      // and land BETWEEN letters even inside em/strong/s/del/code/span.
+      if (x != null && y != null) {
+        const r = caretRangeFromXY(x, y);
+        if (r && rangeInsideTarget(r, target)) {
           sel.removeAllRanges();
           sel.addRange(r);
           return;
         }
-        // Click is inside the target but caretRangeFromPoint resolved outside it
-        // (padding / nested chrome). Snap to the nearest text position in target.
+        // Click is inside the target but caret resolved outside it
+        // (padding / nested chrome / inline background). Snap to the nearest
+        // text position in target at the click point.
         const rect = target.getBoundingClientRect();
         if (x >= rect.left - 1 && x <= rect.right + 1 && y >= rect.top - 1 && y <= rect.bottom + 1) {
           const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT);
           let bestNode = null;
           let bestDist = Infinity;
+          let bestOffset = 0;
           while (walker.nextNode()) {
             const tn = walker.currentNode;
             if (!tn.nodeValue) continue;
@@ -2041,13 +2119,16 @@
               if (d < bestDist) {
                 bestDist = d;
                 bestNode = tn;
+                // Estimate character offset at click X within this text node.
+                bestOffset = estimateTextOffset(tn, x);
               }
             }
           }
           if (bestNode) {
             const rr = document.createRange();
-            rr.selectNodeContents(bestNode);
-            rr.collapse(x < (rect.left + rect.right) / 2);
+            const max = (bestNode.nodeValue || "").length;
+            rr.setStart(bestNode, Math.min(bestOffset, max));
+            rr.collapse(true);
             sel.removeAllRanges();
             sel.addRange(rr);
             return;
@@ -2060,6 +2141,34 @@
       sel.removeAllRanges();
       sel.addRange(range);
     } catch (_) {}
+  }
+
+  /** Binary-search the character offset in a text node nearest to client X. */
+  function estimateTextOffset(tn, x) {
+    const text = tn.nodeValue || "";
+    if (!text.length) return 0;
+    try {
+      let lo = 0;
+      let hi = text.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        const rg = document.createRange();
+        rg.setStart(tn, mid);
+        rg.setEnd(tn, Math.min(mid + 1, text.length));
+        const rects = rg.getClientRects();
+        if (!rects.length) {
+          lo = mid + 1;
+          continue;
+        }
+        const cr = rects[0];
+        if (x < cr.left) hi = mid;
+        else if (x > cr.right) lo = mid + 1;
+        else return mid;
+      }
+      return lo;
+    } catch (_) {
+      return text.length;
+    }
   }
 
   function exitBlockEditVisual(node) {
@@ -2142,7 +2251,7 @@
         idx = hit;
       } else {
         toast("编辑未能定位原块，已保留原文（请撤销后重试）");
-        return false;
+        return { ok: false, index: -1 };
       }
     }
     // Slot must still hold what we opened; otherwise the index drifted onto
@@ -2154,7 +2263,7 @@
         idx = hit;
       } else if (current.trim()) {
         toast("编辑未能定位原块，已保留原文（请撤销后重试）");
-        return false;
+        return { ok: false, index: -1 };
       }
     }
     let next = nextText == null ? "" : String(nextText);
@@ -2194,7 +2303,7 @@
       }
     }
     if (next === all[idx]) {
-      return true;
+      return { ok: true, index: idx };
     }
     const prev = el.source.value || "";
     if (prev) pushHistory(prev);
@@ -2205,7 +2314,7 @@
     markDirty();
     scheduleAutoSave();
     pushHistory(joined);
-    return true;
+    return { ok: true, index: idx };
   }
 
   /** Force the next applyBlockEditing pass to rebuild every node (no incremental skip). */
@@ -2227,6 +2336,76 @@
     try {
       document.getSelection()?.removeAllRanges();
     } catch (_) {}
+  }
+
+  /** Drop table-edit chrome without touching the surrounding preview tree. */
+  function exitTableEditChrome(node, cells) {
+    if (!node) return;
+    node.classList.remove("editing", "source-edit", "code-edit", "table-edit");
+    const list = cells && cells.length ? cells : [...node.querySelectorAll("td, th")];
+    list.forEach((c) => {
+      try {
+        c.removeAttribute("contenteditable");
+        c.removeAttribute("spellcheck");
+        c.style.outline = "";
+      } catch (_) {}
+    });
+    if (node.getAttribute && node.getAttribute("contenteditable")) {
+      node.removeAttribute("contenteditable");
+    }
+  }
+
+  /**
+   * Re-render one preview block in place. Table commit used to call
+   * invalidatePreviewBlocks + renderMarkdown, which takes the heavy path and
+   * remounts the whole preview — that remount is the exit jitter.
+   */
+  function rebuildBlockNodeInPlace(node, sourceValue, index) {
+    if (!node) return;
+    const scrollTop = el.previewPane ? el.previewPane.scrollTop : 0;
+    const all = splitMarkdownBlocks(sourceValue || "");
+    const src =
+      index >= 0 && index < all.length
+        ? String(all[index] == null ? "" : all[index])
+        : String(node._stuartSrc || "");
+    exitTableEditChrome(node);
+    node._stuartSrc = src;
+    if (!src.trim()) {
+      node.classList.add("md-empty");
+      node.innerHTML = '<p class="md-empty-line"><br></p>';
+    } else {
+      node.classList.remove("md-empty");
+      node.innerHTML = sanitizeHtmlStrict(renderBlockHtml(src));
+      try {
+        attachCodeLangBadges(node);
+      } catch (_) {}
+      if (blockNeedsPostProcess(src)) {
+        try {
+          postProcessBlock(node);
+        } catch (_) {}
+      }
+    }
+    if (index >= 0) node.dataset.index = String(index);
+    lastPreviewSource = sourceValue || "";
+    lastPreviewBlocks = all;
+    if (el.previewPane) el.previewPane.scrollTop = scrollTop;
+    try {
+      updateOutline();
+      updateStats();
+    } catch (_) {}
+  }
+
+  /** Restore the exact pre-edit DOM of a block (unedited session / cancel). */
+  function restoreBlockDomQuiet(node, cells) {
+    if (!node) return;
+    exitTableEditChrome(node, cells);
+    try {
+      if (node._stuartSnapshotHtml != null) {
+        node.innerHTML = node._stuartSnapshotHtml;
+        return true;
+      }
+    } catch (_) {}
+    return false;
   }
 
   function enterBlockSourceEdit(node) {
@@ -2293,11 +2472,11 @@
       if (!userEdited) {
         next = original;
       }
-      const ok = commitBlockSource(idx, next, original, {
+      const written = commitBlockSource(idx, next, original, {
         allowEmpty: !!userEdited,
         userEdited: !!userEdited,
       });
-      if (!ok) {
+      if (!written.ok) {
         restoreBlockSnapshot(node);
         clearEditEnterGates();
         return;
@@ -2362,7 +2541,7 @@
     }
     // Table / code: dedicated in-place editors (never contenteditable the shell)
     if (node.querySelector("table")) {
-      enterTableEdit(node);
+      enterTableEdit(node, clickX, clickY);
       return;
     }
     if (node.querySelector("pre")) {
@@ -2387,16 +2566,21 @@
     node.classList.add("editing");
     // Never make table/pre shells contenteditable — browsers restructure them
     // and htmlToMarkdown then drops cells/code.
+    // Inline-only children (rich text: em/strong/s/del/code/span mix) must edit
+    // the whole block — a per-inline host freezes every text node outside those tags.
+    const INLINE_HOST_RE = /^(em|strong|s|del|code|span|a|b|i|u|ins|strike|abbr|mark|small|sub|sup|kbd|samp|var|cite|q)$/i;
     const editableRoots = [...node.children].filter(
       (c) => c && !c.matches?.("table, pre, .katex-display, .mermaid-diagram")
     );
-    const hosts = editableRoots.length ? editableRoots : [node];
+    const onlyInline = editableRoots.length > 0 && editableRoots.every((c) => INLINE_HOST_RE.test(c.tagName || ""));
+    const hosts = !editableRoots.length || onlyInline ? [node] : editableRoots;
     hosts.forEach((h) => {
       h.setAttribute("contenteditable", "true");
       h.spellcheck = false;
       h.style.outline = "none";
     });
-    // Place caret in the host under the pointer (heading letters / list rows).
+    // Place caret in the host under the pointer (heading letters / list rows /
+    // rich-text inline runs). Focus first so the caret is visible this frame.
     let caretHost = hosts[0];
     if (clickX != null && clickY != null) {
       for (const h of hosts) {
@@ -2407,7 +2591,16 @@
         }
       }
     }
+    const prevScroll = el.previewPane ? el.previewPane.scrollTop : 0;
+    try {
+      caretHost.focus({ preventScroll: true });
+    } catch (_) {
+      try {
+        caretHost.focus();
+      } catch (_) {}
+    }
     placeCaretOnClick(caretHost, clickX, clickY);
+    if (el.previewPane) el.previewPane.scrollTop = prevScroll;
 
     let done = false;
     let userEdited = false;
@@ -2438,12 +2631,12 @@
       const domText = node.textContent || "";
       // Unedited session must write the exact opened source — never a lossy
       // htmlToMarkdown reconstruction (footnotes / ref-links / raw HTML).
-      const ok = commitBlockSource(idx, userEdited ? mdText : original, original, {
+      const written = commitBlockSource(idx, userEdited ? mdText : original, original, {
         domText,
         userEdited: !!userEdited,
         allowEmpty: !!userEdited,
       });
-      if (!ok) {
+      if (!written.ok) {
         restoreBlockSnapshot(node);
         finishRestore(el.source.value);
         clearEditEnterGates();
@@ -2579,25 +2772,30 @@
       const domText = node.textContent || "";
       // Unedited session must write the exact opened source — htmlToMarkdown
       // drops alignment / cell newlines / raw HTML and must not be sole truth.
-      const ok = commitBlockSource(idx, userEdited ? mdText : original, original, {
+      const written = commitBlockSource(idx, userEdited ? mdText : original, original, {
         domText,
         userEdited: !!userEdited,
         allowEmpty: !!userEdited,
       });
-      if (!ok) {
+      if (!written.ok) {
         restoreBlockSnapshot(node);
         clearEditEnterGates();
         return;
       }
-      const joined = el.source.value || "";
-      invalidatePreviewBlocks();
-      node.classList.remove("editing", "table-edit");
-      cells.forEach((c) => {
-        c.removeAttribute("contenteditable");
-        c.removeAttribute("spellcheck");
-      });
-      renderMarkdown(joined);
-      lastPreviewSource = joined;
+      // Unedited exit: put back the exact pre-edit DOM. Zero remount, zero jump.
+      if (!userEdited) {
+        if (!restoreBlockDomQuiet(node, cells)) {
+          rebuildBlockNodeInPlace(node, el.source.value || "", written.index);
+        }
+        try {
+          document.getSelection()?.removeAllRanges();
+        } catch (_) {}
+        clearEditEnterGates();
+        return;
+      }
+      // Edited exit: swap THIS block only. Never invalidatePreviewBlocks +
+      // renderMarkdown (heavy path remounts the whole preview → exit jitter).
+      rebuildBlockNodeInPlace(node, el.source.value || "", written.index);
       emitAgentEvent("document-changed", { source: "table-edit" });
       try {
         document.getSelection()?.removeAllRanges();
@@ -2608,10 +2806,17 @@
       if (done) return;
       done = true;
       cleanupDocDown();
+      if (restoreBlockDomQuiet(node, cells)) {
+        clearEditEnterGates();
+        return;
+      }
+      // Fallback only when no snapshot exists — keep scroll, avoid full flash.
+      const prevScroll = el.previewPane ? el.previewPane.scrollTop : 0;
       invalidatePreviewBlocks();
       node.classList.remove("editing", "table-edit");
       renderMarkdown(el.source.value);
       lastPreviewSource = el.source.value;
+      if (el.previewPane) el.previewPane.scrollTop = prevScroll;
       clearEditEnterGates();
     };
     node._stuartCommit = commit;
@@ -2807,11 +3012,11 @@
       }
       // allowEmpty only when the user explicitly edited — empty body then means
       // intentional clear, never an extraction/blur artifact.
-      const ok = commitBlockSource(idx, next, original, {
+      const written = commitBlockSource(idx, next, original, {
         allowEmpty: !!userEdited,
         userEdited: !!userEdited,
       });
-      if (!ok) {
+      if (!written.ok) {
         restoreBlockSnapshot(node);
         clearEditEnterGates();
         return;
@@ -2875,6 +3080,7 @@
     // Fallback path replaces the whole preview — drop incremental block cache
     // or the next applyBlockEditing pass reuses stale nodes.
     invalidatePreviewBlocks();
+    attachCodeLangBadges(el.preview);
 
     // KaTeX
     if (window.renderMathInElement) {
