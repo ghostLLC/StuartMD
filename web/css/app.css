@@ -191,15 +191,15 @@
   border-color: #d4b84a;
 }
 
-/* Mermaid — document figure, not poster (S2.3 compact) */
+/* Mermaid — document figure, not poster (S2.3 compact, tighter) */
 .mermaid-diagram {
-  margin: 1em auto;
+  margin: 0.75em auto;
   text-align: center;
   overflow-x: auto;
-  padding: 10px 12px;
+  padding: 6px 8px;
   background: var(--bg-soft);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 6px;
   max-width: 100%;
   box-sizing: border-box;
 }
@@ -211,7 +211,7 @@
   display: block;
   margin: 0 auto;
   /* em-based mermaid labels inherit this; keep diagram type compact */
-  font-size: 12px;
+  font-size: 11px;
 }
 
 /* htmlLabels: mermaid v10+ puts node/edge text in foreignObject. Keep it
@@ -230,41 +230,43 @@
   fill: var(--text);
 }
 
-/* Compact label type (~12px, CJK still legible). Non-:where so we beat
+/* Compact label type (~11px, CJK still legible). Non-:where so we beat
    mermaid's theme CSS; !important only for font-size against inline styles. */
 .mermaid-diagram :is(.nodeLabel, .edgeLabel),
 .mermaid-diagram svg foreignObject > div,
 .mermaid-diagram svg foreignObject > div > span,
 .mermaid-diagram svg :is(text, tspan) {
-  font-size: 12px !important;
-  line-height: 1.25;
+  font-size: 11px !important;
+  line-height: 1.2;
 }
 
 /* Unscoped on purpose: mermaid's layout pass measures .nodeLabel/.edgeLabel
    BEFORE the .mermaid-diagram wrapper exists. Same metrics at measure and
-   paint → node rects come out ~36–40px tall instead of poster-sized. */
+   paint → node rects hug text instead of poster-sized boxes. */
 .nodeLabel,
 .edgeLabel {
-  font-size: 12px !important;
-  line-height: 1.25 !important;
-  padding: 2px 6px !important;
+  font-size: 11px !important;
+  line-height: 1.2 !important;
+  padding: 1px 4px !important;
   margin: 0 !important;
+  min-height: 0 !important;
 }
 
 .mermaid-diagram :is(.nodeLabel, .edgeLabel),
 .mermaid-diagram svg foreignObject > div,
 .mermaid-diagram svg foreignObject > div > span {
-  padding: 2px 6px !important;
+  padding: 1px 4px !important;
   margin: 0 !important;
+  min-height: 0 !important;
 }
 
 /* Thinner edges + node outlines (arrowheads stay readable) */
 .mermaid-diagram :is(.edgePath path, .flowchart-link, path.path, .edgePath .path) {
-  stroke-width: 1.25px !important;
+  stroke-width: 1px !important;
 }
 
 .mermaid-diagram :is(g.node rect, g.node polygon, g.node circle, g.node ellipse, g.node path) {
-  stroke-width: 1.2px;
+  stroke-width: 1px;
 }
 
 .mermaid-diagram marker :is(path, polygon) {

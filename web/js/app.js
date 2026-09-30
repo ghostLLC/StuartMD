@@ -788,6 +788,39 @@
     } catch (_) {}
   }
 
+  /**
+   * Fully commit every in-flight block editor (never a half-edit visual exit).
+   * Returns true when at least one editor was torn down — callers must re-hit-test
+   * because commit can remount the whole preview.
+   */
+  function commitActiveEditingBlocks(exceptNode) {
+    const eds = $$(".md-block.editing", el.preview);
+    if (!eds.length) return false;
+    let committed = false;
+    eds.forEach((n) => {
+      // Same surface as the enter target — leave it to the .editing guard.
+      if (exceptNode && (n === exceptNode || n.contains(exceptNode))) return;
+      if (typeof n._stuartCommit === "function") {
+        try {
+          n._stuartCommit();
+          committed = true;
+          return;
+        } catch (_) {}
+      }
+      const ta = n.querySelector?.("textarea.md-block-source");
+      if (ta && typeof ta._stuartCommit === "function") {
+        try {
+          ta._stuartCommit();
+          committed = true;
+          return;
+        } catch (_) {}
+      }
+      exitBlockEditVisual(n);
+      committed = true;
+    });
+    return committed;
+  }
+
   function pointerNearSelToolbar(x, y, pad) {
     const bar = document.getElementById("sel-toolbar");
     if (!bar || bar.hidden) return false;
@@ -1721,10 +1754,10 @@
       if (state.mode === "source") return;
 
       // Commit-on-mousedown rebuilds the preview DOM; e.target may already be
-      // detached. Re-resolve the block under the pointer so click-away can
-      // immediately start editing the block the user actually clicked.
+      // detached or stale. After a same-gesture switch (A editing → click B)
+      // ALWAYS re-hit-test — not only when the captured node is detached.
       let clickTarget = e.target;
-      if (!el.preview.contains(clickTarget)) {
+      if (bindPreviewDelegates._gestureForcePoint || !el.preview.contains(clickTarget)) {
         try {
           clickTarget = document.elementFromPoint(e.clientX, e.clientY) || clickTarget;
         } catch (_) {}
@@ -1761,6 +1794,17 @@
           return;
         }
       }
+      // Same-gesture switch + drag (>4px): mouseup already consumed the gesture —
+      // never convert that drag into enter-edit on the trailing click.
+      if (bindPreviewDelegates._gestureSwitchHandled && bindPreviewDelegates._gestureMoved) {
+        markDragSelectGrace();
+        return;
+      }
+      // Same-gesture switch already entered B on mouseup — the trailing click
+      // (possibly retargeted after remount) must not steal focus to another block.
+      if (bindPreviewDelegates._gestureSwitchHandled && !bindPreviewDelegates._gestureMoved) {
+        return;
+      }
 
       // Intentional click on text (optionally into an existing selection):
       // never a dead click — clear the selection, place the caret, enter edit.
@@ -1787,14 +1831,22 @@
 
     /**
      * Enter the right edit surface for a block. Shared by immediate single-click,
-     * selection-click caret placement, and dblclick on structured blocks.
-     * Re-resolves the node under (clickX, clickY) after commit re-renders.
+     * selection-click caret placement, dblclick on structured blocks, and the
+     * same-gesture switch path (mouseup after commit of a different block).
+     * Always re-resolves via elementFromPoint after a switch/commit remount.
      */
     function enterEditSurfaceFor(node, clickX, clickY) {
-      // Commit-on-mousedown rebuilds the preview DOM; the captured node may be
-      // detached. Re-resolve the block under the pointer so click-away can
-      // immediately start editing the block the user actually clicked.
-      if ((!node || !document.contains(node)) && clickX != null && clickY != null) {
+      const switching =
+        !!bindPreviewDelegates._gestureSwitchPending || !!bindPreviewDelegates._gestureForcePoint;
+      // Commit any other in-flight editor FIRST (never leave A half-edit).
+      // Commit may remount the preview, so the captured node must be dropped.
+      if (commitActiveEditingBlocks(node)) {
+        node = null;
+        clearEditEnterGates();
+      }
+      // After commit-on-mousedown / leftover commit, prefer the live node under
+      // the pointer — not a captured (possibly detached or stale) reference.
+      if ((switching || !node || !document.contains(node)) && clickX != null && clickY != null) {
         try {
           const hit = document.elementFromPoint(clickX, clickY);
           node = (hit && hit.closest && hit.closest(".md-block")) || null;
@@ -1810,6 +1862,7 @@
         if (sel && !sel.isCollapsed) sel.removeAllRanges();
       } catch (_) {}
       bindPreviewDelegates._suppressEditUntil = 0;
+      if (switching) clearEditEnterGates();
       // Typora-like: pick the right in-place editor for the block kind
       if (node.querySelector(".mermaid-diagram") || /```\s*mermaid/i.test(node._stuartSrc || "")) {
         enterBlockSourceEdit(node, clickX, clickY);
@@ -1845,6 +1898,91 @@
     };
     el.preview.addEventListener("mousedown", onPreviewPointerDown, true);
     el.preview.addEventListener("pointerdown", onPreviewPointerDown, true);
+
+    // Same-gesture switch detector. MUST be document-capture and registered at
+    // bind time so it runs BEFORE editor commit-on-mousedown (those register
+    // later at enter-edit). Records "A editing, pointerdown on B" so mouseup
+    // can enter B even after commit remounts and kills the click event.
+    const onDocDownSwitch = (e) => {
+      bindPreviewDelegates._gestureSwitchPending = false;
+      bindPreviewDelegates._gestureSwitchHandled = false;
+      bindPreviewDelegates._gestureForcePoint = false;
+      if (state.mode === "source") return;
+      if (!e.target || !e.target.closest) return;
+      const eds = $$(".md-block.editing", el.preview);
+      if (!eds.length) return;
+      // Chrome / handle / toolbar clicks are not content switches.
+      if (
+        e.target.closest(
+          "button, input, textarea, a, .md-block-source, #sel-toolbar, #sel-dropdown, #block-handle, #block-menu, #ai-panel"
+        )
+      ) {
+        return;
+      }
+      const downBlock = e.target.closest(".md-block");
+      if (!downBlock || !el.preview.contains(downBlock)) return;
+      // Pointerdown inside the currently editing surface is not a switch.
+      for (const ed of eds) {
+        if (ed === downBlock || ed.contains(downBlock) || ed.contains(e.target)) return;
+      }
+      bindPreviewDelegates._gestureSwitchPending = true;
+      bindPreviewDelegates._gestureForcePoint = true;
+      bindPreviewDelegates._gestureSwitchX = e.clientX;
+      bindPreviewDelegates._gestureSwitchY = e.clientY;
+    };
+    document.addEventListener("mousedown", onDocDownSwitch, true);
+
+    // Enter B on the SAME gesture (mouseup), because commit-on-mousedown may
+    // remount the preview and the subsequent click never reaches the preview
+    // delegate (mousedown target was detached → no common ancestor click).
+    const onDocUpSwitch = (e) => {
+      if (!bindPreviewDelegates._gestureSwitchPending) return;
+      if (bindPreviewDelegates._gestureSwitchHandled) return;
+      if (e.button != null && e.button !== 0) return;
+      const consume = () => {
+        bindPreviewDelegates._gestureSwitchPending = false;
+        bindPreviewDelegates._gestureForcePoint = false;
+        bindPreviewDelegates._gestureSwitchHandled = true;
+      };
+      if (state.mode === "source") {
+        consume();
+        return;
+      }
+      // Drag-select protection (delta > 4px) — never convert a drag into edit.
+      const swX = bindPreviewDelegates._gestureSwitchX;
+      const swY = bindPreviewDelegates._gestureSwitchY;
+      const dx = e.clientX - (swX != null ? swX : e.clientX);
+      const dy = e.clientY - (swY != null ? swY : e.clientY);
+      if (bindPreviewDelegates._gestureMoved || dx * dx + dy * dy > 16) {
+        markDragSelectGrace();
+        consume();
+        return;
+      }
+      // Never steal a click that landed on chrome.
+      if (
+        e.target &&
+        e.target.closest &&
+        e.target.closest(
+          "button, input, textarea, a, .md-block-source, #sel-toolbar, #sel-dropdown, #block-handle, #block-menu, #ai-panel"
+        )
+      ) {
+        consume();
+        return;
+      }
+      clearEditEnterGates();
+      bindPreviewDelegates._suppressEditUntil = 0;
+      // Always elementFromPoint — commit may have replaced every block node.
+      const ok = enterEditSurfaceFor(null, e.clientX, e.clientY);
+      if (ok) {
+        consume();
+        return ok;
+      }
+      // Leave pending/force-point so the trailing click can retry.
+      return false;
+    };
+    // mouseup only (not pointerup): enter AFTER the browser finishes its own
+    // mouseup caret/selection handling so our placed caret is not overwritten.
+    document.addEventListener("mouseup", onDocUpSwitch, true);
 
     // Track drag distance so a selection gesture never becomes enter-edit.
     el.preview.addEventListener(
@@ -5631,9 +5769,10 @@ ${previewHtml}
         ta.selectionStart = ta.selectionEnd = s + 2;
         setContent(ta.value, true);
       }
-      // Empty list line: Enter strips marker; Backspace strips then deletes line
+      // Empty list line: Enter/Delete/Backspace strip marker (exit list).
+      // Plain empty line: Enter inserts one blank line; Delete/Backspace removes one.
       if (
-        (e.key === "Enter" || e.key === "Backspace") &&
+        (e.key === "Enter" || e.key === "Backspace" || e.key === "Delete") &&
         !e.ctrlKey &&
         !e.metaKey &&
         !e.altKey &&
@@ -5649,8 +5788,9 @@ ${previewHtml}
           return i < 0 ? v.length : i;
         })();
         const line = v.slice(lineStart, lineEnd);
-        const emptyList = /^\s*(?:[-*+]|\d+[.)])\s*$/.test(line) || /^\s*- \[[ xX]\]\s*$/.test(line);
+        const emptyList = listMarkerOnly(line);
         const caretAtStart = pos === lineStart;
+        const caretAtEnd = pos === lineEnd;
         if (e.key === "Enter" && emptyList) {
           e.preventDefault();
           const stripped = stripListMarker(line);
@@ -5659,21 +5799,39 @@ ${previewHtml}
           setContent(ta.value, true);
           return;
         }
-        if (e.key === "Backspace" && emptyList && caretAtStart) {
+        // Delete/Backspace on empty list marker: strip marker first (exit list).
+        // A second erase on the now-empty plain line deletes that empty line.
+        if ((e.key === "Backspace" || e.key === "Delete") && emptyList && (caretAtStart || caretAtEnd)) {
           e.preventDefault();
           const stripped = stripListMarker(line);
-          if (stripped.trim()) {
-            ta.value = v.slice(0, lineStart) + stripped + v.slice(lineEnd);
-            ta.selectionStart = ta.selectionEnd = lineStart;
-          } else {
-            // second backspace: delete the empty line (and its newline)
-            const delFrom = lineStart > 0 ? lineStart - 1 : lineStart;
-            const delTo = lineEnd < v.length ? lineEnd + 1 : lineEnd;
-            ta.value = v.slice(0, delFrom) + v.slice(delTo);
-            ta.selectionStart = ta.selectionEnd = delFrom;
-          }
+          ta.value = v.slice(0, lineStart) + stripped + v.slice(lineEnd);
+          ta.selectionStart = ta.selectionEnd = lineStart + stripped.length;
           setContent(ta.value, true);
           return;
+        }
+        // Plain empty line erase: remove one empty line (normal logic).
+        if ((e.key === "Backspace" || e.key === "Delete") && !String(line).trim()) {
+          if (e.key === "Backspace" && caretAtStart && lineStart > 0) {
+            e.preventDefault();
+            const delFrom = lineStart - 1;
+            ta.value = v.slice(0, delFrom) + v.slice(lineEnd);
+            ta.selectionStart = ta.selectionEnd = delFrom;
+            setContent(ta.value, true);
+            return;
+          }
+          if (e.key === "Delete" && caretAtEnd && lineEnd < v.length) {
+            e.preventDefault();
+            const delTo = lineEnd + 1;
+            ta.value = v.slice(0, lineStart) + v.slice(delTo);
+            ta.selectionStart = ta.selectionEnd = lineStart;
+            setContent(ta.value, true);
+            return;
+          }
+        }
+        // Plain empty line Enter: insert another empty line (blank line).
+        if (e.key === "Enter" && !String(line).trim()) {
+          // Default textarea Enter already inserts a newline (= one more empty
+          // line when the current line is empty). Keep default behavior.
         }
       }
       // Ctrl+B bold
@@ -5723,6 +5881,24 @@ ${previewHtml}
       const mod = e.ctrlKey || e.metaKey;
       if (!mod) {
         if (e.key === "Escape" && !el.findBar.hidden) closeFind();
+        // Reading-mode empty list item / empty line keys (no block-edit required).
+        if (
+          (e.key === "Enter" || e.key === "Delete" || e.key === "Backspace") &&
+          !e.ctrlKey &&
+          !e.metaKey &&
+          !e.altKey &&
+          !e.shiftKey &&
+          state.mode !== "source"
+        ) {
+          const ae = document.activeElement;
+          if (ae !== el.source && !(ae && (ae.isContentEditable || ae.closest?.(".md-block.editing")))) {
+            if (handleReadingEmptyListKeys(e)) {
+              e.preventDefault();
+              e.stopPropagation();
+              return;
+            }
+          }
+        }
         // Reading-mode bulk delete: handle selection delete in one shot
         if (
           (e.key === "Delete" || e.key === "Backspace") &&
@@ -6138,7 +6314,7 @@ ${previewHtml}
   function findListLineIndex(lines, liOrdinal) {
     let n = 0;
     for (let i = 0; i < lines.length; i++) {
-      if (/^\s*(?:[-*+]|\d+[.)])\s+/.test(lines[i]) || /^\s*- \[[ xX]\]\s+/.test(lines[i]) || /^\s*(?:[-*+]|\d+[.)])\s*$/.test(lines[i]) || /^\s*- \[[ xX]\]\s*$/.test(lines[i])) {
+      if (isListMarkerLine(lines[i])) {
         if (n === liOrdinal) return i;
         n++;
       }
@@ -6146,14 +6322,32 @@ ${previewHtml}
     return -1;
   }
 
+  /** Blank for edit purposes: ignore whitespace and zero-width / BOM chars. */
+  function isBlankEditorText(s) {
+    return !String(s == null ? "" : s).replace(/[\s\u200b\u200c\u200d\u2060\ufeff]/g, "").length;
+  }
+
+  /** True when the source line starts a list marker (with or without item text). */
+  function isListMarkerLine(line) {
+    return (
+      /^\s*(?:[-*+]|\d+[.)])(?:\s|$)/.test(line) ||
+      /^\s*[-*+] \[[ xX]\](?:\s|$)/.test(line)
+    );
+  }
+
   function listMarkerOnly(line) {
-    return /^\s*(?:[-*+]|\d+[.)])\s*$/.test(line) || /^\s*- \[[ xX]\]\s*$/.test(line) || /^\s*(?:[-*+]|\d+[.)])\s+$/.test(line) || /^\s*- \[[ xX]\]\s+$/.test(line);
+    return (
+      /^\s*(?:[-*+]|\d+[.)])\s*$/.test(line) ||
+      /^\s*[-*+] \[[ xX]\]\s*$/.test(line) ||
+      /^\s*(?:[-*+]|\d+[.)])\s+$/.test(line) ||
+      /^\s*[-*+] \[[ xX]\]\s+$/.test(line)
+    );
   }
 
   function stripListMarker(line) {
-    return line
-      .replace(/^\s*- \[[ xX]\]\s+/, "")
-      .replace(/^\s*- \[[ xX]\]\s*$/, "")
+    return String(line == null ? "" : line)
+      .replace(/^\s*[-*+] \[[ xX]\]\s+/, "")
+      .replace(/^\s*[-*+] \[[ xX]\]\s*$/, "")
       .replace(/^\s*(?:[-*+]|\d+[.)])\s+/, "")
       .replace(/^\s*(?:[-*+]|\d+[.)])\s*$/, "");
   }
@@ -6172,14 +6366,86 @@ ${previewHtml}
       // fallback: first marker-only line
       lineIdx = lines.findIndex((l) => listMarkerOnly(l));
     }
-    if (lineIdx < 0) return false;
+    if (lineIdx < 0) {
+      // fallback: any list-marker line
+      lineIdx = lines.findIndex((l) => isListMarkerLine(l));
+    }
     const prev = el.source.value || "";
+    if (lineIdx < 0) {
+      // Source has no marker line (DOM-only empty bullet). Clear the marker
+      // from the live DOM so the bullet is never stuck undeletable.
+      try {
+        if (li && li.parentNode) {
+          if (mode === "delete-line") {
+            li.remove();
+          } else {
+            const p = document.createElement("p");
+            p.className = "md-empty-line";
+            p.innerHTML = "<br>";
+            const ul = li.closest("ul, ol");
+            if (ul) {
+              ul.replaceWith(p);
+            } else {
+              li.replaceWith(p);
+            }
+          }
+          const stillList = node.querySelector("ul, ol, li");
+          if (!stillList) {
+            node.classList.add("md-empty");
+          }
+        }
+      } catch (_) {}
+      return true;
+    }
     if (mode === "delete-line") {
       lines.splice(lineIdx, 1);
     } else {
       lines[lineIdx] = stripListMarker(lines[lineIdx]);
     }
-    all[idx] = lines.join("\n");
+    let nextBlock = lines.join("\n");
+    // Stripping the only marker of a lone empty bullet must yield a real empty
+    // paragraph — never a residual "looks like a bullet" block.
+    if (mode === "strip-marker" && !String(nextBlock).trim()) nextBlock = "";
+    all[idx] = nextBlock;
+    const joined = joinBlocks(all);
+    if (joined === prev) {
+      // Source unchanged (already empty) but DOM may still show a bullet.
+      try {
+        node._stuartCommit = null;
+        exitBlockEditVisual(node);
+        node.innerHTML = '<p class="md-empty-line"><br></p>';
+        node.classList.add("md-empty");
+      } catch (_) {}
+      return true;
+    }
+    pushHistory(prev);
+    el.source.value = joined;
+    state.content = joined;
+    markDirty();
+    scheduleAutoSave();
+    lastPreviewSource = "";
+    node._stuartCommit = null;
+    exitBlockEditVisual(node);
+    node.innerHTML = "";
+    renderMarkdown(joined);
+    lastPreviewSource = joined;
+    lastPreviewBlocks = splitMarkdownBlocks(joined);
+    pushHistory(joined);
+    return true;
+  }
+
+  /** Insert one empty line after the active empty-line block (or delete it). */
+  function rewriteEmptyLineBlock(node, mode) {
+    // mode: "insert-empty" | "delete-empty"
+    const idx = Number(node.dataset.index || 0);
+    const all = splitMarkdownBlocks(el.source.value || "");
+    const prev = el.source.value || "";
+    if (mode === "delete-empty") {
+      if (idx >= 0 && idx < all.length) all.splice(idx, 1);
+    } else {
+      const at = Math.min(Math.max(0, idx + 1), all.length);
+      all.splice(at, 0, "");
+    }
     const joined = joinBlocks(all);
     if (joined === prev) return true;
     pushHistory(prev);
@@ -6198,62 +6464,151 @@ ${previewHtml}
     return true;
   }
 
+  /** True when the block is a plain empty-line block (not a list / table / code). */
+  function isEmptyLineBlock(node) {
+    if (!node) return false;
+    if (node.classList.contains("md-empty")) return true;
+    if (node.querySelector("li, ul, ol, table, pre, .katex, .katex-display, .mermaid-diagram")) return false;
+    return isBlankEditorText(node.textContent || "");
+  }
+
+  /**
+   * Reading-mode (no block-edit) Enter/Delete/Backspace on a lone empty list
+   * item or an empty-line block. Returns true when the key was handled.
+   */
+  function handleReadingEmptyListKeys(e) {
+    if (state.mode === "source") return false;
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount || !el.preview) return false;
+    const anchor = sel.anchorNode;
+    if (!anchor) return false;
+    const inPreview = el.preview.contains(anchor) || el.preview.contains(anchor.parentElement || null);
+    if (!inPreview) return false;
+    const a = anchor.nodeType === 1 ? anchor : anchor.parentElement;
+    const block = a?.closest?.(".md-block");
+    if (!block || !el.preview.contains(block)) return false;
+
+    // Empty plain-line block
+    if (isEmptyLineBlock(block)) {
+      if (e.key === "Enter") {
+        rewriteEmptyLineBlock(block, "insert-empty");
+        return true;
+      }
+      if (e.key === "Delete" || e.key === "Backspace") {
+        rewriteEmptyLineBlock(block, "delete-empty");
+        return true;
+      }
+      return false;
+    }
+
+    // Empty list item (marker-only or li with only <br> / zero-width)
+    const li = a?.closest?.("li") || (a && a.tagName === "LI" ? a : null);
+    if (!li || !block.contains(li)) return false;
+    const liEmpty = (x) =>
+      !!x &&
+      isBlankEditorText(x.textContent || "") &&
+      !x.querySelector("img, input, button, video, audio, iframe, svg");
+    if (!liEmpty(li)) return false;
+    if (e.key === "Enter" || e.key === "Delete" || e.key === "Backspace") {
+      // Enter and Delete/Backspace on an empty list item both just strip the
+      // marker (exit list). A later erase on the plain empty line removes it.
+      rewriteListLine(block, li, "strip-marker");
+      return true;
+    }
+    return false;
+  }
+
   /** WYSIWYG block: execCommand + convert via htmlToMarkdown on blur. */
   function handleBlockEditKeydown(e, node) {
     const sel = window.getSelection();
-    const liAtCaret = (() => {
+    // Empty li includes <br>-only / zero-width / nbsp placeholders.
+    const liEmpty = (li) => {
+      if (!li) return false;
+      if (!isBlankEditorText(li.textContent || "")) return false;
+      return !li.querySelector("img, input, button, video, audio, iframe, svg");
+    };
+    const findLiAtCaret = () => {
       if (!sel || !sel.anchorNode) return null;
       const a = sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement;
-      const li = a?.closest?.("li");
-      return li && node.contains(li) ? li : null;
-    })();
+      if (!a || !node.contains(a)) return null;
+      const li = a.closest?.("li");
+      if (li && node.contains(li)) return li;
+      // Caret landed on ul/ol (e.g. click on the bullet chrome): use the empty li
+      // in that list, or the sole empty li of the block.
+      const list = a.closest?.("ul, ol");
+      if (list && node.contains(list)) {
+        const empty = [...list.querySelectorAll("li")].find((x) => liEmpty(x));
+        if (empty) return empty;
+        const items = list.querySelectorAll("li");
+        if (items.length === 1) return items[0];
+      }
+      const allLis = [...node.querySelectorAll("li")];
+      if (allLis.length === 1) return allLis[0];
+      return null;
+    };
+    const liAtCaret = findLiAtCaret();
     const caretAtStartOfLi = (li) => {
       if (!sel || !sel.rangeCount || !li) return false;
       const range = sel.getRangeAt(0);
       const pre = range.cloneRange();
       pre.selectNodeContents(li);
       pre.setEnd(range.startContainer, range.startOffset);
-      return pre.toString().length === 0;
+      return isBlankEditorText(pre.toString());
     };
-    const liEmpty = (li) => !!li && !String(li.textContent || "").replace(/\s+/g, "").length;
+
+    const noMod = !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
+    const isEraseKey = e.key === "Delete" || e.key === "Backspace";
+
+    // Empty plain-line block: Enter adds one empty line; Delete/Backspace removes one.
+    if (noMod && isEmptyLineBlock(node) && (e.key === "Enter" || isEraseKey)) {
+      e.preventDefault();
+      e.stopPropagation();
+      rewriteEmptyLineBlock(node, e.key === "Enter" ? "insert-empty" : "delete-empty");
+      return;
+    }
 
     // Enter on empty list item: strip the marker (exit list), do NOT spawn another bullet
-    if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && liAtCaret && liEmpty(liAtCaret)) {
+    if (e.key === "Enter" && noMod && liAtCaret && liEmpty(liAtCaret)) {
       e.preventDefault();
       e.stopPropagation();
       rewriteListLine(node, liAtCaret, "strip-marker");
       return;
     }
 
-    // Backspace on empty list item: 1) strip marker  2) delete the empty line
-    if (e.key === "Backspace" && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey && liAtCaret && caretAtStartOfLi(liAtCaret)) {
-      if (liEmpty(liAtCaret)) {
-        e.preventDefault();
-        e.stopPropagation();
-        // If this line is still a marker-only source line → strip marker first
-        const idx = Number(node.dataset.index || 0);
-        const all = splitMarkdownBlocks(el.source.value || "");
-        const src = all[idx] || "";
-        const lines = src.split("\n");
-        const lis = [...node.querySelectorAll("li")];
-        const ord = Math.max(0, lis.indexOf(liAtCaret));
-        let lineIdx = findListLineIndex(lines, ord);
-        if (lineIdx < 0) lineIdx = lines.findIndex((l) => listMarkerOnly(l));
-        const srcLine = lineIdx >= 0 ? lines[lineIdx] : "";
-        if (srcLine && listMarkerOnly(srcLine)) {
-          rewriteListLine(node, liAtCaret, "strip-marker");
-        } else {
-          rewriteListLine(node, liAtCaret, "delete-line");
-        }
-        return;
-      }
-      // Non-empty item, caret at start: strip marker only (keep text as paragraph)
-      if (caretAtStartOfLi(liAtCaret)) {
-        e.preventDefault();
-        e.stopPropagation();
+    // Delete/Backspace on empty list item: strip marker first; if the source
+    // line is already an empty plain line, delete that empty line.
+    if (isEraseKey && noMod && liAtCaret && liEmpty(liAtCaret)) {
+      e.preventDefault();
+      e.stopPropagation();
+      const idx = Number(node.dataset.index || 0);
+      const all = splitMarkdownBlocks(el.source.value || "");
+      const src = all[idx] || "";
+      const lines = src.split("\n");
+      const lis = [...node.querySelectorAll("li")];
+      const ord = Math.max(0, lis.indexOf(liAtCaret));
+      let lineIdx = findListLineIndex(lines, ord);
+      if (lineIdx < 0) lineIdx = lines.findIndex((l) => listMarkerOnly(l));
+      if (lineIdx < 0) lineIdx = lines.findIndex((l) => isListMarkerLine(l));
+      const srcLine = lineIdx >= 0 ? lines[lineIdx] : null;
+      if (srcLine == null || listMarkerOnly(srcLine)) {
+        // Marker-only bullet → leave the list (empty paragraph).
         rewriteListLine(node, liAtCaret, "strip-marker");
-        return;
+      } else if (isBlankEditorText(srcLine)) {
+        // Already an empty plain line → remove one empty line.
+        rewriteListLine(node, liAtCaret, "delete-line");
+      } else {
+        // Marker with text that rendered empty (e.g. only <br>): strip marker.
+        rewriteListLine(node, liAtCaret, "strip-marker");
       }
+      return;
+    }
+
+    // Backspace at start of a non-empty list item: strip marker only (keep text)
+    if (e.key === "Backspace" && noMod && liAtCaret && caretAtStartOfLi(liAtCaret) && !liEmpty(liAtCaret)) {
+      e.preventDefault();
+      e.stopPropagation();
+      rewriteListLine(node, liAtCaret, "strip-marker");
+      return;
     }
 
     const mod = e.ctrlKey || e.metaKey;
