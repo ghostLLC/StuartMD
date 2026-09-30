@@ -3385,7 +3385,8 @@
           sanitizeMermaidSvg(wrap);
           const svgEl = wrap.querySelector("svg");
           if (svgEl) {
-            // Document figure size: scale viewBox into ≤480×240, never upscale.
+            // Adaptive figure size: simple diagrams get a comfortable box;
+            // complex ones use more space but stay document-scale (not poster).
             let w = 0;
             let h = 0;
             try {
@@ -3399,7 +3400,26 @@
               w = Number(svgEl.getAttribute("width")) || 640;
               h = Number(svgEl.getAttribute("height")) || 480;
             }
-            const scale = Math.min(1, 480 / w, 240 / h);
+            const area = w * h;
+            // Size budget grows with content amount.
+            let maxW = 520;
+            let maxH = 300;
+            if (area > 180000 || w > 700 || h > 420) {
+              maxW = 700;
+              maxH = 420;
+            } else if (area > 90000 || w > 520 || h > 320) {
+              maxW = 620;
+              maxH = 360;
+            }
+            let scale = Math.min(maxW / w, maxH / h);
+            // Tiny diagram: grow a bit so labels are not a stamp (never beyond 1.25×).
+            if (scale > 1 && (w < 420 || h < 220)) {
+              scale = Math.min(scale, 1.25);
+            } else if (scale > 1) {
+              scale = 1;
+            }
+            // Don't crush complex diagrams into unreadable type — scroll instead.
+            if (scale < 0.7) scale = 0.7;
             const dw = Math.round(w * scale);
             const dh = Math.round(h * scale);
             svgEl.setAttribute("width", String(dw));
@@ -3407,7 +3427,7 @@
             svgEl.style.width = dw + "px";
             svgEl.style.height = dh + "px";
             svgEl.style.maxWidth = "100%";
-            svgEl.style.maxHeight = "240px";
+            svgEl.style.maxHeight = maxH + "px";
           }
           pre.replaceWith(wrap);
         } catch (e) {
@@ -6386,6 +6406,103 @@ ${previewHtml}
       .replace(/^\s*(?:[-*+]|\d+[.)])\s*$/, "");
   }
 
+  /** task | ol | ul for a marker line, else null. */
+  function listItemMarkerKind(line) {
+    const s = String(line == null ? "" : line);
+    if (/^\s*[-*+] \[[ xX]\]/.test(s)) return "task";
+    if (/^\s*\d+[.)](\s|$)/.test(s)) return "ol";
+    if (/^\s*[-*+](\s|$)/.test(s)) return "ul";
+    return null;
+  }
+
+  /** Next sibling item line of the SAME kind (task/ol/ul) as `refLine`. */
+  function makeListItemLine(refLine) {
+    const s = String(refLine == null ? "" : refLine);
+    const indent = (s.match(/^\s*/) || [""])[0];
+    const kind = listItemMarkerKind(s) || "ul";
+    if (kind === "task") return indent + "- [ ] ";
+    if (kind === "ol") {
+      const m = s.match(/^\s*(\d+)([.)])/);
+      const n = m ? parseInt(m[1], 10) + 1 : 1;
+      const sep = m ? m[2] : ".";
+      return indent + n + sep + " ";
+    }
+    const m = s.match(/^\s*([-*+])/);
+    return indent + (m ? m[1] : "-") + " ";
+  }
+
+  /** Map a DOM `li` to its source marker-line index (text match, then ordinal). */
+  function findListLineForLi(lines, li) {
+    const markerIdxs = [];
+    for (let i = 0; i < lines.length; i++) {
+      if (isListMarkerLine(lines[i])) markerIdxs.push(i);
+    }
+    if (!markerIdxs.length) return -1;
+    const raw = li && li.textContent != null ? li.textContent : "";
+    const text = isBlankEditorText(raw)
+      ? ""
+      : String(raw).replace(/\s+/g, " ").trim().slice(0, 48);
+    if (text) {
+      for (const i of markerIdxs) {
+        const t = stripListMarker(lines[i]).replace(/\s+/g, " ").trim().slice(0, 48);
+        if (t && t === text) return i;
+      }
+    }
+    const host = (li && li.closest && li.closest(".md-block")) || null;
+    const lis = host ? [...host.querySelectorAll("li")] : li && li.parentNode ? [li] : [];
+    let ord = li ? lis.indexOf(li) : -1;
+    if (ord < 0) ord = markerIdxs.length - 1;
+    if (ord < markerIdxs.length) return markerIdxs[ord];
+    return -1;
+  }
+
+  /**
+   * Enter in a list item (WYSIWYG / reading):
+   * - empty item → strip ONLY that line's marker (become normal empty line)
+   * - non-empty → insert a NEW item of the SAME kind (task/ol/ul)
+   * Never deletes other rows; never pops commitBlockSource toasts.
+   */
+  function listEnterOnItem(node, li) {
+    const blockIdx = Number(node.dataset.index || 0);
+    const all = splitMarkdownBlocks(el.source.value || "");
+    const src = all[blockIdx] || "";
+    const lines = src.split("\n");
+    const blank = isBlankEditorText((li && li.textContent) || "");
+    const lineIdx = findListLineForLi(lines, li);
+    if (lineIdx < 0) {
+      // DOM-only empty li from a just-inserted item — strip that li only.
+      rewriteListLine(node, li, blank ? "strip-marker" : "delete-line");
+      return;
+    }
+    const ref = lines[lineIdx];
+    if (blank || listMarkerOnly(ref)) {
+      lines[lineIdx] = stripListMarker(ref);
+    } else {
+      lines.splice(lineIdx + 1, 0, makeListItemLine(ref));
+    }
+    const prev = el.source.value || "";
+    const nextBlock = lines.join("\n");
+    all[blockIdx] = nextBlock;
+    const joined = joinBlocks(all);
+    if (joined === prev) {
+      rewriteListLine(node, li, blank ? "strip-marker" : "delete-line");
+      return;
+    }
+    pushHistory(prev);
+    el.source.value = joined;
+    state.content = joined;
+    markDirty();
+    scheduleAutoSave();
+    lastPreviewSource = "";
+    node._stuartCommit = null;
+    exitBlockEditVisual(node);
+    node.innerHTML = "";
+    renderMarkdown(joined);
+    lastPreviewSource = joined;
+    lastPreviewBlocks = splitMarkdownBlocks(joined);
+    pushHistory(joined);
+  }
+
   /** Rewrite one list line in the active block source and re-render. */
   function rewriteListLine(node, li, mode) {
     // mode: "strip-marker" | "delete-line"
@@ -6395,16 +6512,12 @@ ${previewHtml}
     const lines = src.split("\n");
     const lis = [...node.querySelectorAll("li")];
     const ord = Math.max(0, lis.indexOf(li));
-    // Map this li to its source marker line by ordinal among marker lines only.
-    // Never fall back to "first marker line" — Enter on a trailing empty li
-    // (not yet written to source) must not strip the FIRST item's bullet.
-    let lineIdx = findListLineIndex(lines, ord);
+    // Map this li to its source marker line (text first, then ordinal).
+    let lineIdx = findListLineForLi(lines, li);
     const markerIdxs = [];
     for (let i = 0; i < lines.length; i++) {
       if (isListMarkerLine(lines[i])) markerIdxs.push(i);
     }
-    // DOM may have an extra empty li that source has not absorbed yet
-    // (Enter just created it). That li is beyond markerIdxs.length.
     const liIsBlank = li && isBlankEditorText(li.textContent || "");
     if (lineIdx < 0 && liIsBlank && ord >= markerIdxs.length) {
       // Strip/delete only THIS empty li in the DOM. Do not touch earlier items.
@@ -6413,13 +6526,11 @@ ${previewHtml}
           if (mode === "delete-line") {
             li.remove();
           } else {
-            // Become a normal empty line under the list (not another bullet).
             const p = document.createElement("p");
             p.className = "md-empty-line";
             p.innerHTML = "<br>";
             li.replaceWith(p);
           }
-          // If the list is now empty, drop the shell so no leftover bullets.
           const ul = node.querySelector("ul, ol");
           if (ul && !ul.querySelector("li")) {
             const blank = document.createElement("p");
@@ -6432,18 +6543,6 @@ ${previewHtml}
       node._stuartCommit = null;
       exitBlockEditVisual(node);
       return true;
-    }
-    if (lineIdx < 0 && markerIdxs.length) {
-      // Empty trailing marker-only line is the last such line — not the first.
-      if (liIsBlank) {
-        for (let k = markerIdxs.length - 1; k >= 0; k--) {
-          if (listMarkerOnly(lines[markerIdxs[k]])) {
-            lineIdx = markerIdxs[k];
-            break;
-          }
-        }
-        if (lineIdx < 0) lineIdx = markerIdxs[markerIdxs.length - 1];
-      }
     }
     const prev = el.source.value || "";
     if (lineIdx < 0) {
@@ -6584,7 +6683,11 @@ ${previewHtml}
       !x.querySelector("img, input, button, video, audio, iframe, svg");
     if (!liEmpty(li)) return false;
     if (e.key === "Enter" || e.key === "Delete" || e.key === "Backspace") {
-      rewriteListLine(block, li, "strip-marker");
+      if (e.key === "Enter") {
+        listEnterOnItem(block, li);
+      } else {
+        rewriteListLine(block, li, "strip-marker");
+      }
       return true;
     }
     return false;
@@ -6629,27 +6732,11 @@ ${previewHtml}
       return;
     }
 
-    // Enter in a list item
+    // Enter in a list item: same-kind new item, or strip empty marker.
     if (e.key === "Enter" && noMod && liAtCaret) {
       e.preventDefault();
       e.stopPropagation();
-      if (liEmpty(liAtCaret)) {
-        // Empty item: only strip the marker → normal empty line.
-        rewriteListLine(node, liAtCaret, "strip-marker");
-        return;
-      }
-      // Non-empty item (incl. end of last item): insert a NEW empty list item.
-      // Never delete or rewrite the current line.
-      const newLi = document.createElement("li");
-      newLi.innerHTML = "<br>";
-      liAtCaret.after(newLi);
-      try {
-        const r = document.createRange();
-        r.selectNodeContents(newLi);
-        r.collapse(true);
-        sel.removeAllRanges();
-        sel.addRange(r);
-      } catch (_) {}
+      listEnterOnItem(node, liAtCaret);
       return;
     }
 
