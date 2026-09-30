@@ -58,6 +58,8 @@
     aiConfig: null,
     // Last non-empty text selection (survives accidental collapse / block-edit steal)
     _selCache: null,
+    // Timestamp of the last drag-select gesture end (short enter-edit grace only)
+    _dragSelAt: 0,
   };
 
   // AI panel local state (3.0.0)
@@ -695,7 +697,7 @@
   function getSelectionCache(maxAgeMs) {
     const c = state._selCache;
     if (!c || !c.text || !String(c.text).trim()) return null;
-    const max = maxAgeMs == null ? 120000 : maxAgeMs;
+    const max = maxAgeMs == null ? 15000 : maxAgeMs;
     if (Date.now() - (c.at || 0) > max) return null;
     return c;
   }
@@ -723,11 +725,30 @@
     }
   }
 
-  /** Selection was captured within maxAgeMs (double-click / drag-select grace). */
+  /**
+   * True only for a short grace after a drag-select gesture ends.
+   * NOT a blanket "any cached selection means never edit" — that over-suppressed
+   * caret placement and re-enter after the P0 content-loss fix.
+   */
   function recentlyHadSelection(maxAgeMs) {
-    const at = state._selCache && state._selCache.at ? state._selCache.at : 0;
+    const at = state._dragSelAt || 0;
     if (!at) return false;
-    return Date.now() - at < (maxAgeMs == null ? 1500 : maxAgeMs);
+    return Date.now() - at < (maxAgeMs == null ? 500 : maxAgeMs);
+  }
+
+  function markDragSelectGrace(maxAgeMs) {
+    state._dragSelAt = Date.now();
+    return maxAgeMs == null ? 500 : maxAgeMs;
+  }
+
+  /** Drop every enter-edit lock after commit/cancel so the next click can edit. */
+  function clearEditEnterGates() {
+    state._dragSelAt = 0;
+    try {
+      bindPreviewDelegates._suppressEditUntil = 0;
+      clearTimeout(bindPreviewDelegates._clickTimer);
+      bindPreviewDelegates._clickSeq = (bindPreviewDelegates._clickSeq || 0) + 1;
+    } catch (_) {}
   }
 
   function pointerNearSelToolbar(x, y, pad) {
@@ -1090,11 +1111,9 @@
       } else {
         const sel = window.getSelection();
         const hasLiveSel = !!(sel && !sel.isCollapsed && String(sel.toString() || "").trim());
-        // Accidental click near the toolbar: keep selection instead of killing it
+        // Accidental click near the toolbar: keep selection instead of killing it.
+        // Never preventDefault globally — that blocks focus/caret in source editors.
         if (pointerNearSelToolbar(e.clientX, e.clientY, 36) && (hasLiveSel || getSelectionCache(15000))) {
-          e.preventDefault();
-        } else if (!hasLiveSel && getSelectionCache(15000) && isSelToolbarVisible()) {
-          // Click outside while bar still up but selection already gone — keep bar for explain
           e.preventDefault();
         } else if (!e.target.closest("#sel-toolbar") && !e.target.closest("#sel-dropdown")) {
           hideSelToolbar();
@@ -1121,6 +1140,8 @@
   function hideBlockMenu() {
     const m = document.getElementById("block-menu");
     if (m) m.hidden = true;
+    const h = document.getElementById("block-handle");
+    if (!h || h.hidden || h.dataset.hover !== "1") clearHandleSelectedBlock();
   }
 
   /** 16px thin-stroke block-menu icons — faces stay Latin/symbol/SVG; Chinese lives in title. */
@@ -1158,6 +1179,9 @@
     state._activeBlockIndex = blockIndex;
     const menu = document.getElementById("block-menu");
     if (!menu) return;
+    const selBlock =
+      el.preview?.querySelector(`.md-block[data-index="${blockIndex}"]`) || state._handleBlock || null;
+    if (selBlock) setHandleSelectedBlock(selBlock);
     // Compact 4-col / 3-row icon grid — narrower panel, less occlusion
     menu.innerHTML = `
       <div class="menu-grid" title="块类型">
@@ -1260,6 +1284,21 @@
     };
   }
 
+  /** Highlight the .md-block the handle/menu is acting on (class toggle only). */
+  function setHandleSelectedBlock(block) {
+    if (!el.preview) return;
+    el.preview.querySelectorAll(".md-block.is-selected").forEach((n) => {
+      if (n !== block) n.classList.remove("is-selected");
+    });
+    if (block) block.classList.add("is-selected");
+  }
+  function clearHandleSelectedBlock() {
+    if (!el.preview) return;
+    el.preview.querySelectorAll(".md-block.is-selected").forEach((n) => {
+      n.classList.remove("is-selected");
+    });
+  }
+
   function hideBlockHandle() {
     const h = document.getElementById("block-handle");
     if (h) {
@@ -1267,6 +1306,8 @@
       h.classList.remove("visible");
       h.dataset.hover = "";
     }
+    const menu = document.getElementById("block-menu");
+    if (!menu || menu.hidden) clearHandleSelectedBlock();
   }
 
   let _handleHideTimer = 0;
@@ -1407,6 +1448,7 @@
     handle.style.left = left + "px";
     state._activeBlockIndex = Number(block.dataset.index || 0);
     state._handleAnchor = target;
+    state._handleBlock = block;
   }
 
   function bindBlockHandle() {
@@ -1419,11 +1461,19 @@
       handle.dataset.hover = "1";
       keepBlockHandle();
       clearTimeout(bindBlockHandle._menuLeave);
+      const b =
+        state._handleBlock && document.contains(state._handleBlock)
+          ? state._handleBlock
+          : el.preview?.querySelector(`.md-block[data-index="${activeBlockIndex()}"]`);
+      if (b) setHandleSelectedBlock(b);
     });
     handle.addEventListener("mouseleave", () => {
       handle.dataset.hover = "";
       if (menu && !menu.hidden) scheduleHideBlockMenu();
-      else scheduleHideBlockHandle(240);
+      else {
+        scheduleHideBlockHandle(240);
+        clearHandleSelectedBlock();
+      }
     });
     $("#bh-type")?.addEventListener("click", (e) => {
       const r = e.currentTarget.getBoundingClientRect();
@@ -1632,90 +1682,181 @@
         return;
       }
       if (state.mode === "source") return;
-      // Never steal an active selection (or the AI selection bar) by entering block edit
-      if (hasLivePreviewSelection() || isSelToolbarVisible()) {
-        clearTimeout(bindPreviewDelegates._clickTimer);
-        return;
+
+      // Commit-on-mousedown rebuilds the preview DOM; e.target may already be
+      // detached. Re-resolve the block under the pointer so click-away can
+      // immediately start editing the block the user actually clicked.
+      let clickTarget = e.target;
+      if (!el.preview.contains(clickTarget)) {
+        try {
+          clickTarget = document.elementFromPoint(e.clientX, e.clientY) || clickTarget;
+        } catch (_) {}
       }
-      // Drag / double-click select just ended: click fires on the block — do not edit
-      if (recentlyHadSelection(1500)) {
-        clearTimeout(bindPreviewDelegates._clickTimer);
-        return;
-      }
-      const node = e.target.closest(".md-block");
+      const node = (clickTarget && clickTarget.closest && clickTarget.closest(".md-block")) || e.target.closest(".md-block");
       if (!node || node.classList.contains("editing")) return;
-      // Multi-click (double/triple) must cancel pending enter-edit — otherwise the
-      // first click's timer fires mid-gesture and wipes the block.
+      if (!el.preview.contains(node)) return;
+
+      // Multi-click (double/triple) never schedules delayed enter-edit —
+      // dblclick owns that gesture (word-select or structured edit).
       clearTimeout(bindPreviewDelegates._clickTimer);
-      if (e.detail > 1) {
-        bindPreviewDelegates._clickSeq = (bindPreviewDelegates._clickSeq || 0) + 1;
-        bindPreviewDelegates._suppressEditUntil = Date.now() + 800;
-        return;
-      }
-      if (Date.now() < (bindPreviewDelegates._suppressEditUntil || 0)) return;
+      bindPreviewDelegates._clickSeq = (bindPreviewDelegates._clickSeq || 0) + 1;
+      if (e.detail > 1) return;
+
       const clickX = e.clientX;
       const clickY = e.clientY;
-      // Must wait past the OS double-click gap (Windows default 500ms). A 280ms
-      // timer fires BETWEEN the two clicks of a slow double-click and destroys
-      // the block before the second click can cancel it.
-      bindPreviewDelegates._clickSeq = (bindPreviewDelegates._clickSeq || 0) + 1;
+      const hadLiveSel = hasLivePreviewSelection();
+      const hadSelAtDown = !!bindPreviewDelegates._gestureSelAtStart;
+      const selBar = isSelToolbarVisible();
+
+      // Keep the AI selection bar when the click is on/near it (same policy as mousedown).
+      if (selBar && pointerNearSelToolbar(clickX, clickY, 36) && (hadLiveSel || getSelectionCache(15000))) {
+        return;
+      }
+
+      // Drag-select / selection-adjust gestures must NOT be converted into edit.
+      // Selection created during this gesture (drag end) or a move-gesture on an
+      // existing selection → leave the selection alone.
+      if (hadLiveSel || hadSelAtDown) {
+        const createdDuringGesture = hadLiveSel && !hadSelAtDown;
+        const moved = !!bindPreviewDelegates._gestureMoved;
+        if (createdDuringGesture || moved) {
+          markDragSelectGrace();
+          return;
+        }
+      }
+
+      // Intentional click on text (optionally into an existing selection):
+      // never a dead click — clear the selection, place the caret, enter edit.
+      if (hadLiveSel || selBar || hadSelAtDown) {
+        hideSelToolbar();
+        try {
+          window.getSelection()?.removeAllRanges();
+        } catch (_) {}
+        // Immediate caret + light edit so heading clicks never feel dead.
+        bindPreviewDelegates._suppressEditUntil = 0;
+        enterEditSurfaceFor(node, clickX, clickY);
+        return;
+      }
+
+      // No live selection: Typora-like delayed single-click enter.
+      // Structured blocks (table/code/math/mermaid): 320ms — dblclick also enters
+      // edit on its own path, so an early fire just lands in the same editor.
+      // Plain text / headings: 460ms — stays under the OS double-click gap so the
+      // second click can cancel and leave native word-selection intact.
+      bindPreviewDelegates._suppressEditUntil = 0;
+      const isStructured =
+        !!(node.querySelector && node.querySelector("table, pre, .katex, .katex-display, .mermaid-diagram")) ||
+        /```\s*mermaid/i.test(node._stuartSrc || "");
+      const delayMs = isStructured ? 320 : 460;
       const mySeq = bindPreviewDelegates._clickSeq;
-      bindPreviewDelegates._lastClickAt = Date.now();
       bindPreviewDelegates._clickTimer = setTimeout(() => {
-        // Superseded by a later click / double-click — never enter destructive edit.
         if (bindPreviewDelegates._clickSeq !== mySeq) return;
         if (Date.now() < (bindPreviewDelegates._suppressEditUntil || 0)) return;
-        // Quiet period: another click inside the OS double-click window wins.
-        const quiet = Date.now() - (bindPreviewDelegates._lastClickAt || 0);
-        if (quiet < 500) return;
-        if (!document.contains(node)) return;
-        if (node.classList.contains("editing")) return;
-        if (hasLivePreviewSelection() || isSelToolbarVisible()) return;
-        if (recentlyHadSelection(1500)) return;
-        // Typora-like: single-click enters the right edit surface in reading mode
-        if (node.querySelector(".mermaid-diagram") || /```\s*mermaid/i.test(node._stuartSrc || "")) {
-          enterBlockSourceEdit(node, clickX, clickY);
-          return;
+        // Node may have been rebuilt by a commit on this same click-away gesture.
+        let liveNode = node;
+        if (!document.contains(liveNode)) {
+          try {
+            const hit = document.elementFromPoint(clickX, clickY);
+            liveNode = (hit && hit.closest && hit.closest(".md-block")) || null;
+          } catch (_) {
+            liveNode = null;
+          }
         }
-        if (node.querySelector(".katex, .katex-display")) {
-          enterBlockSourceEdit(node, clickX, clickY);
-          return;
-        }
-        if (node.querySelector("table")) {
-          enterTableEdit(node);
-          return;
-        }
-        if (node.querySelector("pre")) {
-          enterCodeEdit(node);
-          return;
-        }
-        enterBlockEdit(node, clickX, clickY);
-      }, 520);
+        if (!liveNode || !el.preview.contains(liveNode)) return;
+        if (liveNode.classList.contains("editing")) return;
+        if (hasLivePreviewSelection() && recentlyHadSelection(500)) return;
+        if (isSelToolbarVisible()) return;
+        enterEditSurfaceFor(liveNode, clickX, clickY);
+      }, delayMs);
     });
 
-    // Second click of a double-click must cancel pending enter-edit on mousedown,
-    // before click/dblclick handlers run and before the timer can wipe the node.
-    const cancelPendingEnterEdit = (e) => {
-      if (e.detail > 1) {
-        clearTimeout(bindPreviewDelegates._clickTimer);
-        bindPreviewDelegates._clickSeq = (bindPreviewDelegates._clickSeq || 0) + 1;
-        bindPreviewDelegates._suppressEditUntil = Date.now() + 800;
+    /**
+     * Enter the right edit surface for a block. Shared by delayed single-click,
+     * selection-click caret placement, and dblclick on structured blocks.
+     */
+    function enterEditSurfaceFor(node, clickX, clickY) {
+      if (!node || node.classList.contains("editing")) return false;
+      hideSelToolbar();
+      try {
+        const sel = window.getSelection();
+        if (sel && !sel.isCollapsed) sel.removeAllRanges();
+      } catch (_) {}
+      bindPreviewDelegates._suppressEditUntil = 0;
+      // Typora-like: pick the right in-place editor for the block kind
+      if (node.querySelector(".mermaid-diagram") || /```\s*mermaid/i.test(node._stuartSrc || "")) {
+        enterBlockSourceEdit(node, clickX, clickY);
+        return true;
       }
-    };
-    el.preview.addEventListener("mousedown", cancelPendingEnterEdit, true);
-    el.preview.addEventListener("pointerdown", cancelPendingEnterEdit, true);
+      if (node.querySelector(".katex, .katex-display")) {
+        enterBlockSourceEdit(node, clickX, clickY);
+        return true;
+      }
+      if (node.querySelector("table")) {
+        enterTableEdit(node, clickX, clickY);
+        return true;
+      }
+      if (node.querySelector("pre")) {
+        enterCodeEdit(node);
+        return true;
+      }
+      enterBlockEdit(node, clickX, clickY);
+      return true;
+    }
 
-    el.preview.addEventListener("dblclick", (e) => {
-      // Double-click = native word selection only. Never convert the block to
-      // markdown source here — that wiped the live selection and looked like a delete.
+    // Any new pointer gesture cancels pending delayed enter-edit AND records
+    // whether this gesture started with a selection / moved (drag vs click).
+    const onPreviewPointerDown = (e) => {
       clearTimeout(bindPreviewDelegates._clickTimer);
       bindPreviewDelegates._clickSeq = (bindPreviewDelegates._clickSeq || 0) + 1;
-      bindPreviewDelegates._suppressEditUntil = Date.now() + 800;
+      bindPreviewDelegates._suppressEditUntil = 0;
+      bindPreviewDelegates._downX = e.clientX;
+      bindPreviewDelegates._downY = e.clientY;
+      bindPreviewDelegates._gestureMoved = false;
+      bindPreviewDelegates._gestureKnown = true;
+      bindPreviewDelegates._gestureSelAtStart = hasLivePreviewSelection();
+    };
+    el.preview.addEventListener("mousedown", onPreviewPointerDown, true);
+    el.preview.addEventListener("pointerdown", onPreviewPointerDown, true);
+
+    // Track drag distance so a selection gesture never becomes enter-edit.
+    el.preview.addEventListener(
+      "mousemove",
+      (e) => {
+        if (!e.buttons) return;
+        const dx = e.clientX - (bindPreviewDelegates._downX || e.clientX);
+        const dy = e.clientY - (bindPreviewDelegates._downY || e.clientY);
+        if (dx * dx + dy * dy > 16) bindPreviewDelegates._gestureMoved = true;
+      },
+      true
+    );
+
+    el.preview.addEventListener("dblclick", (e) => {
+      // dblclick is a VALID way to start table/code/math/mermaid edit — not a
+      // suppress signal. Plain text keeps native word-selection.
+      clearTimeout(bindPreviewDelegates._clickTimer);
+      bindPreviewDelegates._clickSeq = (bindPreviewDelegates._clickSeq || 0) + 1;
+      bindPreviewDelegates._suppressEditUntil = 0;
       if (e.target.closest("a, button, input, textarea, .md-block-source")) {
         return;
       }
       // If already editing, leave native selection alone.
-      if (e.target.closest(".md-block.editing")) return;
+      const editingNode = e.target.closest(".md-block.editing");
+      if (editingNode) return;
+      const node = e.target.closest(".md-block");
+      if (!node) return;
+      if (state.mode === "source") return;
+
+      const isMermaid =
+        !!(node.querySelector && node.querySelector(".mermaid-diagram")) ||
+        /```\s*mermaid/i.test(node._stuartSrc || "");
+      const isMath = !isMermaid && !!(node.querySelector && node.querySelector(".katex, .katex-display"));
+      const isTable = !!(node.querySelector && node.querySelector("table"));
+      const isCode = !!(node.querySelector && node.querySelector("pre"));
+      // Structured blocks: double-click enters in-place edit immediately.
+      // Plain text / heading: keep native word-selection only.
+      if (isMermaid || isMath || isTable || isCode) {
+        enterEditSurfaceFor(node, e.clientX, e.clientY);
+      }
     });
   }
 
@@ -1874,10 +2015,43 @@
       // Prefer the real click point so heading/list edits feel immediate
       if (x != null && y != null && typeof document.caretRangeFromPoint === "function") {
         const r = document.caretRangeFromPoint(x, y);
-        if (r && target.contains(r.startContainer)) {
+        if (r && (target === r.startContainer || target.contains(r.startContainer))) {
           sel.removeAllRanges();
           sel.addRange(r);
           return;
+        }
+        // Click is inside the target but caretRangeFromPoint resolved outside it
+        // (padding / nested chrome). Snap to the nearest text position in target.
+        const rect = target.getBoundingClientRect();
+        if (x >= rect.left - 1 && x <= rect.right + 1 && y >= rect.top - 1 && y <= rect.bottom + 1) {
+          const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT);
+          let bestNode = null;
+          let bestDist = Infinity;
+          while (walker.nextNode()) {
+            const tn = walker.currentNode;
+            if (!tn.nodeValue) continue;
+            const rg = document.createRange();
+            rg.selectNodeContents(tn);
+            const rects = rg.getClientRects();
+            for (let i = 0; i < rects.length; i++) {
+              const cr = rects[i];
+              const dx = x < cr.left ? cr.left - x : x > cr.right ? x - cr.right : 0;
+              const dy = y < cr.top ? cr.top - y : y > cr.bottom ? y - cr.bottom : 0;
+              const d = dx * dx + dy * dy;
+              if (d < bestDist) {
+                bestDist = d;
+                bestNode = tn;
+              }
+            }
+          }
+          if (bestNode) {
+            const rr = document.createRange();
+            rr.selectNodeContents(bestNode);
+            rr.collapse(x < (rect.left + rect.right) / 2);
+            sel.removeAllRanges();
+            sel.addRange(rr);
+            return;
+          }
         }
       }
       const range = document.createRange();
@@ -2072,6 +2246,7 @@
     }
     // Never open a destructive editor over live content without a resolvable source.
     if (!String(original).trim()) {
+      toast("无法解析该块源文，已保留原文");
       return;
     }
     const snapshotHtml = node.innerHTML;
@@ -2124,6 +2299,7 @@
       });
       if (!ok) {
         restoreBlockSnapshot(node);
+        clearEditEnterGates();
         return;
       }
       const joined = el.source.value || "";
@@ -2136,6 +2312,7 @@
       try {
         document.getSelection()?.removeAllRanges();
       } catch (_) {}
+      clearEditEnterGates();
     };
     const cancel = () => {
       if (done) return;
@@ -2150,6 +2327,7 @@
       renderMarkdown(el.source.value);
       lastPreviewSource = el.source.value;
       pushHistory(el.source.value || "");
+      clearEditEnterGates();
     };
     ta._stuartCommit = commit;
     node._stuartCommit = commit;
@@ -2200,6 +2378,7 @@
     if (!String(originalBlock).trim()) {
       const structured = node.querySelector && node.querySelector("pre, table, .katex, .katex-display, .mermaid-diagram");
       if (structured || String(node.textContent || "").trim()) {
+        toast("无法解析该块源文，已保留原文");
         return;
       }
     }
@@ -2217,9 +2396,28 @@
       h.spellcheck = false;
       h.style.outline = "none";
     });
-    placeCaretOnClick(hosts[0], clickX, clickY);
+    // Place caret in the host under the pointer (heading letters / list rows).
+    let caretHost = hosts[0];
+    if (clickX != null && clickY != null) {
+      for (const h of hosts) {
+        const hr = h.getBoundingClientRect();
+        if (clickX >= hr.left - 1 && clickX <= hr.right + 1 && clickY >= hr.top - 1 && clickY <= hr.bottom + 1) {
+          caretHost = h;
+          break;
+        }
+      }
+    }
+    placeCaretOnClick(caretHost, clickX, clickY);
 
     let done = false;
+    let userEdited = false;
+    node.addEventListener(
+      "input",
+      () => {
+        userEdited = true;
+      },
+      true
+    );
     const clearDoc = () => document.removeEventListener("mousedown", onDocDown, true);
     const finishRestore = (text) => {
       invalidatePreviewBlocks();
@@ -2238,10 +2436,17 @@
       const hasMath = /\$\$[\s\S]+\$|\$[^$\n]+\$/.test(mdText);
       if (hadMath && !hasMath) mdText = original;
       const domText = node.textContent || "";
-      const ok = commitBlockSource(idx, mdText, original, { domText, userEdited: true });
+      // Unedited session must write the exact opened source — never a lossy
+      // htmlToMarkdown reconstruction (footnotes / ref-links / raw HTML).
+      const ok = commitBlockSource(idx, userEdited ? mdText : original, original, {
+        domText,
+        userEdited: !!userEdited,
+        allowEmpty: !!userEdited,
+      });
       if (!ok) {
         restoreBlockSnapshot(node);
         finishRestore(el.source.value);
+        clearEditEnterGates();
         return;
       }
       const joined = el.source.value || "";
@@ -2252,6 +2457,7 @@
         }
         document.getSelection()?.removeAllRanges();
       } catch (_) {}
+      clearEditEnterGates();
     };
     const cancel = () => {
       if (done) return;
@@ -2261,6 +2467,7 @@
       try {
         document.getSelection()?.removeAllRanges();
       } catch (_) {}
+      clearEditEnterGates();
     };
 
     node._stuartCommit = commit;
@@ -2299,9 +2506,14 @@
   }
 
   /** In-place table cell editing — click a cell and type; no markdown shell. */
-  function enterTableEdit(node) {
+  function enterTableEdit(node, clickX, clickY) {
     if (node.classList.contains("editing")) return;
-    if (hasLivePreviewSelection() || isSelToolbarVisible()) return;
+    // Intentional enter (dblclick / delayed click) may replace a live selection —
+    // clear selection chrome instead of refusing to edit (P0 over-suppression).
+    hideSelToolbar();
+    try {
+      window.getSelection()?.removeAllRanges();
+    } catch (_) {}
     $$(".md-block.editing", el.preview).forEach((n) => {
       if (typeof n._stuartCommit === "function") {
         try {
@@ -2313,9 +2525,11 @@
     });
     const { index: idx, original } = resolveBlockSource(node);
     if (!String(original).trim() && node.querySelector("table")) {
+      toast("无法解析该块源文，已保留原文");
       return;
     }
     node._stuartSrc = original;
+    node._stuartSnapshotHtml = node.innerHTML;
     node.classList.add("editing", "table-edit");
     const cells = [...node.querySelectorAll("td, th")];
     if (!cells.length) {
@@ -2328,12 +2542,29 @@
       c.spellcheck = false;
       c.style.outline = "none";
     });
+    // Prefer the cell under the pointer so double-click lands where the user aimed.
+    let focusCell = cells[0];
+    if (clickX != null && clickY != null && typeof document.elementFromPoint === "function") {
+      try {
+        const hit = document.elementFromPoint(clickX, clickY);
+        const cell = hit && hit.closest ? hit.closest("td, th") : null;
+        if (cell && node.contains(cell)) focusCell = cell;
+      } catch (_) {}
+    }
     try {
-      cells[0].focus();
-      placeCaretOnClick(cells[0]);
+      focusCell.focus();
+      placeCaretOnClick(focusCell, clickX, clickY);
     } catch (_) {}
 
     let done = false;
+    let userEdited = false;
+    node.addEventListener(
+      "input",
+      () => {
+        userEdited = true;
+      },
+      true
+    );
     const onDocDown = (e) => {
       if (done) return;
       if (node.contains(e.target)) return;
@@ -2346,9 +2577,16 @@
       cleanupDocDown();
       const mdText = htmlToMarkdown(node).trim();
       const domText = node.textContent || "";
-      const ok = commitBlockSource(idx, mdText, original, { domText, userEdited: true });
+      // Unedited session must write the exact opened source — htmlToMarkdown
+      // drops alignment / cell newlines / raw HTML and must not be sole truth.
+      const ok = commitBlockSource(idx, userEdited ? mdText : original, original, {
+        domText,
+        userEdited: !!userEdited,
+        allowEmpty: !!userEdited,
+      });
       if (!ok) {
         restoreBlockSnapshot(node);
+        clearEditEnterGates();
         return;
       }
       const joined = el.source.value || "";
@@ -2364,6 +2602,7 @@
       try {
         document.getSelection()?.removeAllRanges();
       } catch (_) {}
+      clearEditEnterGates();
     };
     const cancel = () => {
       if (done) return;
@@ -2373,6 +2612,7 @@
       node.classList.remove("editing", "table-edit");
       renderMarkdown(el.source.value);
       lastPreviewSource = el.source.value;
+      clearEditEnterGates();
     };
     node._stuartCommit = commit;
     document.addEventListener("mousedown", onDocDown, true);
@@ -2464,7 +2704,12 @@
 
   function enterCodeEdit(node) {
     if (node.classList.contains("editing")) return;
-    if (hasLivePreviewSelection() || isSelToolbarVisible()) return;
+    // Intentional enter (dblclick / delayed click) may replace a live selection —
+    // clear selection chrome instead of refusing to edit (P0 over-suppression).
+    hideSelToolbar();
+    try {
+      window.getSelection()?.removeAllRanges();
+    } catch (_) {}
     $$(".md-block.editing", el.preview).forEach((n) => {
       if (typeof n._stuartCommit === "function") {
         try {
@@ -2482,6 +2727,7 @@
     }
     // Never open a destructive editor without a non-empty resolvable source.
     if (!String(original).trim()) {
+      toast("无法解析该块源文，已保留原文");
       return;
     }
     const snapshotHtml = node.innerHTML;
@@ -2516,11 +2762,16 @@
     ta.className = "md-block-source code-edit-area";
     ta.value = body;
     ta.spellcheck = false;
+    // Baseline rows = content lines (min 1). Never the HTML default of 2.
+    ta.rows = Math.max(1, String(body).split("\n").length);
     ta.setAttribute("aria-label", lang ? `代码 · ${lang}` : "代码");
     wrap.appendChild(ta);
     node.appendChild(wrap);
     const fit = () => {
-      ta.style.height = "auto";
+      // Collapse first so scrollHeight is content-driven. Using "auto" alone
+      // leaves the rows/min-height floor in place and scrollHeight reports that
+      // floor instead of the text, which is why 1-line blocks looked ~80px tall.
+      ta.style.height = "0px";
       ta.style.height = ta.scrollHeight + "px";
     };
     fit();
@@ -2562,6 +2813,7 @@
       });
       if (!ok) {
         restoreBlockSnapshot(node);
+        clearEditEnterGates();
         return;
       }
       const joined = el.source.value || "";
@@ -2574,6 +2826,7 @@
       try {
         document.getSelection()?.removeAllRanges();
       } catch (_) {}
+      clearEditEnterGates();
     };
     const cancel = () => {
       if (done) return;
@@ -2584,6 +2837,7 @@
       node.innerHTML = "";
       renderMarkdown(el.source.value);
       lastPreviewSource = el.source.value;
+      clearEditEnterGates();
     };
     node._stuartCommit = commit;
     ta._stuartCommit = commit;
@@ -2618,6 +2872,9 @@
       html = `<pre>${escapeHtml(String(e))}</pre>`;
     }
     el.preview.innerHTML = sanitizeHtmlStrict(html);
+    // Fallback path replaces the whole preview — drop incremental block cache
+    // or the next applyBlockEditing pass reuses stale nodes.
+    invalidatePreviewBlocks();
 
     // KaTeX
     if (window.renderMathInElement) {
@@ -3060,6 +3317,8 @@
 
   // ---------- Document ----------
   function setDocument(payload) {
+    // Last line of defense: never swap documents under an open block editor.
+    commitActiveEditsForHistory();
     if (window.StuartMDPdf) window.StuartMDPdf.hidePdf();
     const { path, name, content, kind, b64, annotations } = payload || {};
     if (path && !isWelcomeOrSamplePath(path, name)) {
@@ -3405,6 +3664,9 @@
   }
 
   function saveActiveTabFromEditor() {
+    // Flush in-flight block edits first — otherwise a contenteditable session
+    // is silently dropped when this is called without a prior mousedown commit.
+    commitActiveEditsForHistory();
     if (!state.activeTabId) return;
     const tab = state.tabs.find((t) => t.id === state.activeTabId);
     if (!tab || tab.kind === "pdf") return;
@@ -5637,9 +5899,13 @@ ${previewHtml}
         // Mutate live DOM once, then convert back to markdown
         range.deleteContents();
         const mdText = htmlToMarkdown(blockEl).replace(/^\n+|\n+$/g, "");
-        next[from] = mdText;
+        // Conversion failure/emptiness must not wipe the unselected remainder:
+        // keep the opened source when the round-trip comes back empty.
+        if (String(mdText).trim() || !String(srcBlocks[from] || "").trim()) {
+          next[from] = mdText;
+        }
       } catch (_) {
-        next[from] = "";
+        // Leave next[from] as the original block — never blank it on error.
       }
     }
 

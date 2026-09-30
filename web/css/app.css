@@ -205,6 +205,8 @@
 .mermaid-diagram svg {
   max-width: 100%;
   height: auto;
+  /* em-based mermaid labels inherit this; keep diagram type compact */
+  font-size: 12px;
 }
 
 /* htmlLabels: mermaid v10+ puts node/edge text in foreignObject. Keep it
@@ -221,6 +223,16 @@
 
 .mermaid-diagram :where(text, tspan) {
   fill: var(--text);
+}
+
+/* Compact label type (~12px, CJK still legible). Non-:where so we beat
+   mermaid's theme CSS; !important only for font-size against inline styles. */
+.mermaid-diagram :is(.nodeLabel, .edgeLabel),
+.mermaid-diagram svg foreignObject > div,
+.mermaid-diagram svg foreignObject > div > span,
+.mermaid-diagram svg :is(text, tspan) {
+  font-size: 12px !important;
+  line-height: 1.35;
 }
 
 pre.mermaid-fallback,
@@ -1699,13 +1711,14 @@ body[data-theme="wallpaper"] #preview *::selection {
   border: none;
   outline: none;
   resize: none;
-  background: var(--bg-soft);
+  /* Match reading chrome — no editor frame (same rule as table-edit). */
+  background: transparent;
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 14px;
-  line-height: 1.7;
+  font-size: 13px;
+  line-height: 1.6;
   padding: 0 2px;
-  caret-color: #6b7280;
+  caret-color: var(--accent);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   border-radius: 2px;
@@ -1731,7 +1744,8 @@ body[data-theme="wallpaper"] #preview *::selection {
 .md-block.code-edit .code-edit-area {
   display: block;
   width: 100%;
-  min-height: 80px;
+  /* One line of 13px/1.6 code — never a multi-line floor (was 80px). */
+  min-height: 1.6em;
   margin: 0;
   border: none;
   outline: none;
@@ -1755,20 +1769,46 @@ body[data-theme="wallpaper"] #preview *::selection {
   color: #b4b4b8;
 }
 
-/* Table cell edit: look identical to reading; only a soft focus cue */
+/* Table cell edit: pixel-identical to reading mode — restore the borders and
+   header/row backgrounds that generic [contenteditable] rules strip, and keep
+   only a hairline focus cue on the active cell (no block frame). */
+.md-block.table-edit {
+  outline: none;
+  border: none;
+  box-shadow: none;
+  background: transparent;
+}
 .md-block.table-edit table {
   table-layout: auto;
 }
 .md-block.table-edit td[contenteditable="true"],
 .md-block.table-edit th[contenteditable="true"] {
   cursor: text;
+  outline: none;
+  box-shadow: none;
+  /* same chrome as .markdown-body table th/td */
+  border: 1px solid var(--border);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  padding: 8px 12px;
+  text-align: left;
+}
+.md-block.table-edit td[contenteditable="true"] {
+  /* transparent lets tr:nth-child(2n) stripes show through, same as reading */
   background: transparent;
+}
+.md-block.table-edit th[contenteditable="true"] {
+  background: var(--bg-soft);
+  font-weight: 600;
+}
+.md-block.table-edit tr:nth-child(2n) {
+  background: var(--table-stripe);
 }
 .md-block.table-edit td[contenteditable="true"]:focus,
 .md-block.table-edit th[contenteditable="true"]:focus {
   outline: none;
-  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent, #1a73e8) 55%, transparent);
-  background: transparent;
+  /* hairline inset cue on the active cell only */
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent, #1a73e8) 32%, transparent);
 }
 
 .markdown-body > :first-child {
@@ -2520,6 +2560,24 @@ body[data-theme="wallpaper"] #preview *::selection {
   outline: none;
   border: none;
   box-shadow: none;
+}
+
+/* Active block while the block handle / block menu is engaged.
+   Subtle: accent tint + left bar + soft ring — quiet when idle.
+   Outer ring stays visible over opaque pre/table children. */
+.md-block.is-selected {
+  background: color-mix(in srgb, var(--accent, #1a73e8) 5%, transparent);
+  border-radius: 3px;
+  box-shadow:
+    inset 2px 0 0 0 color-mix(in srgb, var(--accent, #1a73e8) 55%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--accent, #1a73e8) 28%, transparent);
+}
+
+.md-block.is-selected.editing {
+  background: color-mix(in srgb, var(--accent, #1a73e8) 5%, transparent);
+  box-shadow:
+    inset 2px 0 0 0 color-mix(in srgb, var(--accent, #1a73e8) 55%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--accent, #1a73e8) 28%, transparent);
 }
 
 .md-block [contenteditable="true"] {
@@ -4110,7 +4168,7 @@ body.ai-shortcut-recording #ai-shortcut-input {
 
 .sc-detail-edit {
   width: 100%;
-  min-height: 200px;
+  min-height: 4.8em;
   margin-top: 8px;
   padding: 8px;
   border: 1px solid var(--border);
@@ -4144,7 +4202,6 @@ body.ai-shortcut-recording #ai-shortcut-input {
   border: none;
   background: transparent;
   color: var(--text-2);
-  min-height: 180px;
 }
 .sc-mem-body .sc-detail-edit:not(.is-active) {
   cursor: default;
@@ -4188,4 +4245,10 @@ body.ai-shortcut-recording #ai-shortcut-input {
   color: var(--text);
   font-size: 12.5px;
   box-sizing: border-box;
+}
+
+/* Keyboard focus affordance (was missing globally). */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }

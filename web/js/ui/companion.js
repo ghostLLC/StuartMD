@@ -95,6 +95,8 @@
     $("#sc-send", el)?.addEventListener("click", () => send());
     $("#sc-cancel", el)?.addEventListener("click", async () => {
       await global.StuartAIService?.cancel?.();
+      // cancel() does not emit "done" — unlock here or Send stays dead forever.
+      finishStream({ error: "已取消生成" });
     });
     $("#sc-attach", el)?.addEventListener("click", () => attachSelection());
     $("#sc-input", el)?.addEventListener("keydown", (e) => {
@@ -248,6 +250,7 @@
   }
 
   async function send() {
+    if (state.busy) return;
     const input = $("#sc-input");
     const q = (input?.value || "").trim();
     if (!q && !state.quote) {
@@ -270,26 +273,31 @@
     if (sendBtn) sendBtn.disabled = true;
 
     let res;
-    if (state.quote && !q) {
-      res = await AI.explainSelection({ quote: state.quote });
-    } else if (AI.messages && AI.messages.length) {
-      res = await AI.followUp(text);
-    } else {
-      const cfg = await AI.ensureConfig();
-      const style = global.StuartAI?.getStyle?.(cfg) || {};
-      const C = global.StuartAIContext;
-      const built = C.buildMarkdownExplain(global.StuartMD, {
-        quote: state.quote || text,
-        scope: "neighborhood",
-      });
-      const messages = [
-        { role: "system", content: C.systemPrompt(style) },
-        {
-          role: "user",
-          content: built.promptUser + (q && state.quote ? `\n\n【追问】${q}` : ""),
-        },
-      ];
-      res = await AI.send({ messages });
+    try {
+      if (state.quote && !q) {
+        res = await AI.explainSelection({ quote: state.quote });
+      } else if (AI.messages && AI.messages.length) {
+        res = await AI.followUp(text);
+      } else {
+        const cfg = await AI.ensureConfig();
+        const style = global.StuartAI?.getStyle?.(cfg) || {};
+        const C = global.StuartAIContext;
+        const built = C.buildMarkdownExplain(global.StuartMD, {
+          quote: state.quote || text,
+          scope: "neighborhood",
+        });
+        const messages = [
+          { role: "system", content: C.systemPrompt(style) },
+          {
+            role: "user",
+            content: built.promptUser + (q && state.quote ? `\n\n【追问】${q}` : ""),
+          },
+        ];
+        res = await AI.send({ messages });
+      }
+    } catch (e) {
+      // Thrown errors must unlock Send — same class as a stuck interaction lock.
+      res = { error: String((e && e.message) || e) };
     }
     if (res && res.error) {
       state.busy = false;

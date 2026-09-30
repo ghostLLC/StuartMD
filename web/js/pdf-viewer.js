@@ -1103,6 +1103,7 @@
       page: Number(wrap.dataset.page || 1),
       clientX: ev ? ev.clientX : null,
       clientY: ev ? ev.clientY : null,
+      at: Date.now(),
     };
     // Mirror into host selection cache so AI can read after chrome steals focus
     try {
@@ -1132,6 +1133,11 @@
 
   function getSelection() {
     const ctx = state._pendingSel;
+    // Expire stale pending selection so AI/annotate never quote a dead highlight.
+    if (ctx && ctx.at && Date.now() - ctx.at > 15000) {
+      state._pendingSel = null;
+      return null;
+    }
     if (ctx && ctx.text) {
       return {
         text: ctx.text,
