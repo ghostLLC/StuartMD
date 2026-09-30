@@ -4,7 +4,7 @@
 
 **项目仓库：** [https://github.com/ghostLLC/StuartMD](https://github.com/ghostLLC/StuartMD)
 
-**当前版本：** 3.5.2
+**当前版本：** 3.5.3
 
 - 顶栏 **伴读**（Alt+I）：问答 / 知识 / 记忆
 - 选中文字后点 **问答** 或按 Alt+E：快速问答
@@ -140,7 +140,7 @@ flowchart LR
 ## 安装说明
 
 - 默认安装：`%LOCALAPPDATA%\StuartMD`（可向导自定义路径）  
-- 静默安装：`StuartMD-Setup-3.5.2.exe /S`  
+- 静默安装：`StuartMD-Setup-3.5.3.exe /S`  
 - 设置中可**检查更新**；升级时配置、插件、壁纸会自动迁移  
 - 欢迎与问题反馈：[GitHub Issues](https://github.com/ghostLLC/StuartMD/issues)  
 
