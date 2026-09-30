@@ -3318,7 +3318,8 @@
           },
           flowchart: {
             htmlLabels: true,
-            useMaxWidth: true,
+            // NEVER stretch to container width — that blows up small diagrams.
+            useMaxWidth: false,
             fontSize: 11,
             padding: 2,
             nodeSpacing: 28,
@@ -3374,20 +3375,39 @@
         const holder = document.createElement("div");
         holder.className = "mermaid";
         holder.id = id;
+        holder.style.cssText = "position:absolute;left:-9999px;top:0;visibility:hidden;height:0;overflow:hidden";
         holder.textContent = code;
         try {
           const { svg } = await window.mermaid.render(id + "-svg", code);
           const wrap = document.createElement("div");
           wrap.className = "mermaid-diagram";
           wrap.innerHTML = svg;
-          // Keep mermaid's own SVG styling — HTML whitelist strips <style>/fill/stroke
           sanitizeMermaidSvg(wrap);
           const svgEl = wrap.querySelector("svg");
           if (svgEl) {
-            svgEl.style.maxWidth = "min(100%, 540px)";
-            svgEl.style.maxHeight = "300px";
-            svgEl.style.width = "auto";
-            svgEl.style.height = "auto";
+            // Document figure size: scale viewBox into ≤480×240, never upscale.
+            let w = 0;
+            let h = 0;
+            try {
+              const vb = svgEl.viewBox && svgEl.viewBox.baseVal;
+              if (vb && vb.width > 0 && vb.height > 0) {
+                w = vb.width;
+                h = vb.height;
+              }
+            } catch (_) {}
+            if (!w || !h) {
+              w = Number(svgEl.getAttribute("width")) || 640;
+              h = Number(svgEl.getAttribute("height")) || 480;
+            }
+            const scale = Math.min(1, 480 / w, 240 / h);
+            const dw = Math.round(w * scale);
+            const dh = Math.round(h * scale);
+            svgEl.setAttribute("width", String(dw));
+            svgEl.setAttribute("height", String(dh));
+            svgEl.style.width = dw + "px";
+            svgEl.style.height = dh + "px";
+            svgEl.style.maxWidth = "100%";
+            svgEl.style.maxHeight = "240px";
           }
           pre.replaceWith(wrap);
         } catch (e) {
@@ -6555,7 +6575,7 @@ ${previewHtml}
       return false;
     }
 
-    // Empty list item (marker-only or li with only <br> / zero-width)
+    // Empty list item under the caret only (never another empty li).
     const li = a?.closest?.("li") || (a && a.tagName === "LI" ? a : null);
     if (!li || !block.contains(li)) return false;
     const liEmpty = (x) =>
@@ -6564,8 +6584,6 @@ ${previewHtml}
       !x.querySelector("img, input, button, video, audio, iframe, svg");
     if (!liEmpty(li)) return false;
     if (e.key === "Enter" || e.key === "Delete" || e.key === "Backspace") {
-      // Empty list item: Enter / Delete / Backspace only strip the marker
-      // (become a normal empty line). Later erase removes that empty line.
       rewriteListLine(block, li, "strip-marker");
       return true;
     }
@@ -6585,20 +6603,10 @@ ${previewHtml}
       if (!sel || !sel.anchorNode) return null;
       const a = sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement;
       if (!a || !node.contains(a)) return null;
+      // ONLY the li that actually contains the caret. Never steal another li
+      // (e.g. the first empty one) — that deleted the wrong list row on Enter.
       const li = a.closest?.("li");
-      if (li && node.contains(li)) return li;
-      // Caret landed on ul/ol (e.g. click on the bullet chrome): use the empty li
-      // in that list, or the sole empty li of the block.
-      const list = a.closest?.("ul, ol");
-      if (list && node.contains(list)) {
-        const empty = [...list.querySelectorAll("li")].find((x) => liEmpty(x));
-        if (empty) return empty;
-        const items = list.querySelectorAll("li");
-        if (items.length === 1) return items[0];
-      }
-      const allLis = [...node.querySelectorAll("li")];
-      if (allLis.length === 1) return allLis[0];
-      return null;
+      return li && node.contains(li) ? li : null;
     };
     const liAtCaret = findLiAtCaret();
     const caretAtStartOfLi = (li) => {
@@ -6621,11 +6629,27 @@ ${previewHtml}
       return;
     }
 
-    // Enter on empty list item: strip marker only → normal empty line (no new bullet)
-    if (e.key === "Enter" && noMod && liAtCaret && liEmpty(liAtCaret)) {
+    // Enter in a list item
+    if (e.key === "Enter" && noMod && liAtCaret) {
       e.preventDefault();
       e.stopPropagation();
-      rewriteListLine(node, liAtCaret, "strip-marker");
+      if (liEmpty(liAtCaret)) {
+        // Empty item: only strip the marker → normal empty line.
+        rewriteListLine(node, liAtCaret, "strip-marker");
+        return;
+      }
+      // Non-empty item (incl. end of last item): insert a NEW empty list item.
+      // Never delete or rewrite the current line.
+      const newLi = document.createElement("li");
+      newLi.innerHTML = "<br>";
+      liAtCaret.after(newLi);
+      try {
+        const r = document.createRange();
+        r.selectNodeContents(newLi);
+        r.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(r);
+      } catch (_) {}
       return;
     }
 

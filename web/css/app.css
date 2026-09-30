@@ -195,26 +195,30 @@
 .mermaid-diagram {
   margin: 0.75em auto;
   text-align: center;
-  overflow: auto;
+  overflow: hidden;
   padding: 6px 8px;
   background: var(--bg-soft);
   border: 1px solid var(--border);
   border-radius: 6px;
-  /* Cap as a document figure — never fill the whole column with a poster. */
-  max-width: min(100%, 560px);
-  max-height: 320px;
+  width: fit-content !important;
+  max-width: min(100%, 520px) !important;
+  max-height: 260px !important;
   box-sizing: border-box;
 }
 
 .mermaid-diagram svg {
-  /* Never scale UP to the container — hug intrinsic size, then clamp. */
-  max-width: min(100%, 540px) !important;
-  max-height: 300px !important;
-  width: auto !important;
-  height: auto !important;
+  /* JS sets exact px from viewBox (≤480×240). Never scale up to the column. */
+  max-width: 100% !important;
+  max-height: 240px !important;
   display: block;
   margin: 0 auto;
   font-size: 11px;
+}
+
+/* Hide mermaid's offscreen measure node if it leaks into the preview. */
+.mermaid-diagram + .mermaid,
+.preview .mermaid:not(.mermaid-diagram) {
+  display: none !important;
 }
 
 /* htmlLabels: mermaid v10+ puts node/edge text in foreignObject. Keep it
