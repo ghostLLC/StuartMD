@@ -269,6 +269,80 @@ function safeCommitNext(next, original, userEdited, allowEmpty) {
   eq(doc.joinBlocks(wiped), src, "empty code commit cannot wipe mixed doc");
 }
 
+// ---- list empty-item marker helpers (mirrors web/js/app.js) ----
+function isBlankEditorText(s) {
+  return !String(s == null ? "" : s).replace(/[\s\u200b\u200c\u200d\u2060\ufeff]/g, "").length;
+}
+function isListMarkerLine(line) {
+  return /^\s*(?:[-*+]|\d+[.)])(?:\s|$)/.test(line) || /^\s*[-*+] \[[ xX]\](?:\s|$)/.test(line);
+}
+function listMarkerOnly(line) {
+  return (
+    /^\s*(?:[-*+]|\d+[.)])\s*$/.test(line) ||
+    /^\s*[-*+] \[[ xX]\]\s*$/.test(line) ||
+    /^\s*(?:[-*+]|\d+[.)])\s+$/.test(line) ||
+    /^\s*[-*+] \[[ xX]\]\s+$/.test(line)
+  );
+}
+function stripListMarker(line) {
+  return String(line == null ? "" : line)
+    .replace(/^\s*[-*+] \[[ xX]\]\s+/, "")
+    .replace(/^\s*[-*+] \[[ xX]\]\s*$/, "")
+    .replace(/^\s*(?:[-*+]|\d+[.)])\s+/, "")
+    .replace(/^\s*(?:[-*+]|\d+[.)])\s*$/, "");
+}
+{
+  // marker-only detection (the undeletable empty bullet cases)
+  ok(listMarkerOnly("-"), "listMarkerOnly dash");
+  ok(listMarkerOnly("*"), "listMarkerOnly star");
+  ok(listMarkerOnly("+"), "listMarkerOnly plus");
+  ok(listMarkerOnly("- "), "listMarkerOnly dash+space");
+  ok(listMarkerOnly("1."), "listMarkerOnly ordered dot");
+  ok(listMarkerOnly("2)"), "listMarkerOnly ordered paren");
+  ok(listMarkerOnly("- [ ]"), "listMarkerOnly unchecked task");
+  ok(listMarkerOnly("- [x]"), "listMarkerOnly checked task");
+  ok(listMarkerOnly("  * "), "listMarkerOnly indented star");
+  ok(!listMarkerOnly("- item"), "listMarkerOnly rejects item text");
+  ok(!listMarkerOnly("- [ ] item"), "listMarkerOnly rejects task with text");
+  ok(!listMarkerOnly("plain"), "listMarkerOnly rejects plain");
+  ok(!listMarkerOnly(""), "listMarkerOnly rejects empty");
+
+  // strip marker → empty plain line (exit list, no residual bullet)
+  eq(stripListMarker("-"), "", "strip dash");
+  eq(stripListMarker("* "), "", "strip star+space");
+  eq(stripListMarker("1."), "", "strip ordered");
+  eq(stripListMarker("- [ ]"), "", "strip unchecked task");
+  eq(stripListMarker("- [x]"), "", "strip checked task");
+  eq(stripListMarker("- item"), "item", "strip keeps item text");
+  eq(stripListMarker("1. item"), "item", "strip keeps ordered text");
+  eq(stripListMarker("- [ ] todo"), "todo", "strip keeps task text");
+  eq(stripListMarker("plain"), "plain", "strip leaves non-list");
+
+  // empty-item key contract: marker-only → strip → empty plain line
+  {
+    const line = "*";
+    ok(listMarkerOnly(line), "empty bullet is marker-only");
+    const stripped = stripListMarker(line);
+    eq(stripped, "", "empty bullet strips to empty plain");
+    ok(isBlankEditorText(stripped), "stripped bullet is blank");
+    ok(!isListMarkerLine(stripped), "stripped bullet no longer a list line");
+  }
+
+  // blank detection ignores zero-width / BOM (empty li with <br> / ZWSP)
+  ok(isBlankEditorText(""), "blank empty");
+  ok(isBlankEditorText("   \n\t"), "blank whitespace");
+  ok(isBlankEditorText("\u200b\u200c\ufeff"), "blank zero-width");
+  ok(!isBlankEditorText("a"), "blank rejects text");
+  ok(!isBlankEditorText("\u200b a"), "blank rejects zwsp+text");
+
+  // isListMarkerLine covers marker + content and task forms
+  ok(isListMarkerLine("-"), "isListMarkerLine dash");
+  ok(isListMarkerLine("- item"), "isListMarkerLine item");
+  ok(isListMarkerLine("- [ ] todo"), "isListMarkerLine task");
+  ok(!isListMarkerLine("plain"), "isListMarkerLine rejects plain");
+  ok(!isListMarkerLine(""), "isListMarkerLine rejects empty");
+}
+
 // ---- write-coord ----
 {
   const wc = core.writeCoord;
