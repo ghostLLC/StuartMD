@@ -6375,14 +6375,55 @@ ${previewHtml}
     const lines = src.split("\n");
     const lis = [...node.querySelectorAll("li")];
     const ord = Math.max(0, lis.indexOf(li));
+    // Map this li to its source marker line by ordinal among marker lines only.
+    // Never fall back to "first marker line" — Enter on a trailing empty li
+    // (not yet written to source) must not strip the FIRST item's bullet.
     let lineIdx = findListLineIndex(lines, ord);
-    if (lineIdx < 0) {
-      // fallback: first marker-only line
-      lineIdx = lines.findIndex((l) => listMarkerOnly(l));
+    const markerIdxs = [];
+    for (let i = 0; i < lines.length; i++) {
+      if (isListMarkerLine(lines[i])) markerIdxs.push(i);
     }
-    if (lineIdx < 0) {
-      // fallback: any list-marker line
-      lineIdx = lines.findIndex((l) => isListMarkerLine(l));
+    // DOM may have an extra empty li that source has not absorbed yet
+    // (Enter just created it). That li is beyond markerIdxs.length.
+    const liIsBlank = li && isBlankEditorText(li.textContent || "");
+    if (lineIdx < 0 && liIsBlank && ord >= markerIdxs.length) {
+      // Strip/delete only THIS empty li in the DOM. Do not touch earlier items.
+      try {
+        if (li && li.parentNode) {
+          if (mode === "delete-line") {
+            li.remove();
+          } else {
+            // Become a normal empty line under the list (not another bullet).
+            const p = document.createElement("p");
+            p.className = "md-empty-line";
+            p.innerHTML = "<br>";
+            li.replaceWith(p);
+          }
+          // If the list is now empty, drop the shell so no leftover bullets.
+          const ul = node.querySelector("ul, ol");
+          if (ul && !ul.querySelector("li")) {
+            const blank = document.createElement("p");
+            blank.className = "md-empty-line";
+            blank.innerHTML = "<br>";
+            ul.replaceWith(blank);
+          }
+        }
+      } catch (_) {}
+      node._stuartCommit = null;
+      exitBlockEditVisual(node);
+      return true;
+    }
+    if (lineIdx < 0 && markerIdxs.length) {
+      // Empty trailing marker-only line is the last such line — not the first.
+      if (liIsBlank) {
+        for (let k = markerIdxs.length - 1; k >= 0; k--) {
+          if (listMarkerOnly(lines[markerIdxs[k]])) {
+            lineIdx = markerIdxs[k];
+            break;
+          }
+        }
+        if (lineIdx < 0) lineIdx = markerIdxs[markerIdxs.length - 1];
+      }
     }
     const prev = el.source.value || "";
     if (lineIdx < 0) {
@@ -6600,8 +6641,8 @@ ${previewHtml}
       const lis = [...node.querySelectorAll("li")];
       const ord = Math.max(0, lis.indexOf(liAtCaret));
       let lineIdx = findListLineIndex(lines, ord);
-      if (lineIdx < 0) lineIdx = lines.findIndex((l) => listMarkerOnly(l));
-      if (lineIdx < 0) lineIdx = lines.findIndex((l) => isListMarkerLine(l));
+      // No first-line fallback: a trailing empty li missing from source must
+      // never grab the first list item's marker.
       const srcLine = lineIdx >= 0 ? lines[lineIdx] : null;
       if (srcLine == null || listMarkerOnly(srcLine)) {
         // Marker-only bullet → leave the list (empty paragraph).

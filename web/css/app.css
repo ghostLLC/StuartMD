@@ -253,6 +253,15 @@
   padding: 1px 4px !important;
   margin: 0 !important;
   min-height: 0 !important;
+  text-align: center !important;
+  display: block !important;
+}
+
+foreignObject > div {
+  text-align: center !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
 }
 
 .mermaid-diagram :is(.nodeLabel, .edgeLabel),
@@ -261,6 +270,27 @@
   padding: 1px 4px !important;
   margin: 0 !important;
   min-height: 0 !important;
+}
+
+/* Labels sit in a foreignObject that is often wider than the text — force
+   horizontal/vertical center so CJK does not drift to the right of the node. */
+.mermaid-diagram svg foreignObject {
+  text-align: center !important;
+}
+.mermaid-diagram svg foreignObject > div {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  text-align: center !important;
+  width: 100% !important;
+  height: 100% !important;
+  box-sizing: border-box !important;
+}
+.mermaid-diagram :is(.nodeLabel, .edgeLabel),
+.mermaid-diagram svg foreignObject > div > span {
+  text-align: center !important;
+  display: block !important;
+  width: 100% !important;
 }
 
 /* Thinner edges + node outlines (arrowheads stay readable) */
