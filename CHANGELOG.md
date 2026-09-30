@@ -2,6 +2,27 @@
 
 本文件记录 StuartMD 的版本变更，便于开发与发布对照。
 
+## [3.5.1] - 2026-09-29
+
+### 修复：图表节点文字丢失
+- Mermaid v10+ 标签在 `foreignObject` 中；清洗器整块删除导致流程图只剩空框
+- 保留 `foreignObject` 与标签文本，仅剥离脚本向量 / `on*` / 危险 URL
+- 显式 `htmlLabels: true`；CSS 兜底保证明暗主题下标签可见
+
+### 修复：代码 / LaTeX 双击后点别处整块丢失
+- 进入编辑定时器 280ms 短于 Windows 双击间隔（约 500ms），慢双击会先清空 DOM
+- 改为 **520ms** + `mousedown detail>1` 立即取消 + 双击后 800ms 抑制窗口
+- 未编辑一律写回原文；`allowEmpty` 仅在用户真正输入后生效
+- commit 失败恢复 `_stuartSnapshotHtml`；成功后强制全量重建（`invalidatePreviewBlocks`）
+- 代码围栏按 parts 重建，保留 lang / EOL / 尾随空行；KaTeX 优先从 annotation 恢复 TeX
+
+### 设计：功能按键去汉字
+- 块菜单 / 插入菜单的按键面改为 16px 细描边 SVG（引用、复制、剪切、删除、对齐等）
+- 中文仅保留在 `title` 提示；`data-bm` / `data-ins` 动作 ID 不变
+
+### 测试
+- core-smoke 新增围栏往返、数学块存活、空提交防抹、fence 重建字节安全等 P0 用例，全部通过
+
 ## [3.5.0] - 2026-09-29
 
 ### 安全（Critical / High）

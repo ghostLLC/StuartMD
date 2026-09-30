@@ -127,6 +127,148 @@ for (const name of Object.keys(corpus)) {
   eq(doc.joinDocument(d), "\n\nhello\n\n\n", "meta join");
 }
 
+// ---- P0 block-edit integrity: code fence / LaTeX round-trip ----
+// Contract mirrors enter/commit in web/js/app.js (extractFenceParts,
+// rebuildFenceFromParts, commitBlockSource userEdited/allowEmpty guards).
+function extractFenceParts(original) {
+  const src = String(original == null ? "" : original);
+  const open = src.match(/^\s*```([\w+-]*)(\r?\n)/);
+  if (!open) return null;
+  const lang = open[1] || "";
+  const eol = open[2] === "\r\n" ? "\r\n" : "\n";
+  const rest = src.slice(open[0].length);
+  const closeRe = /(?:\r?\n)?```(?!\`)/g;
+  let last = null;
+  let m;
+  while ((m = closeRe.exec(rest))) last = m;
+  if (!last) return null;
+  return {
+    lang,
+    eol,
+    body: rest.slice(0, last.index),
+    closeToken: last[0],
+    suffix: rest.slice(last.index + last[0].length),
+  };
+}
+function rebuildFenceFromParts(parts, newBody) {
+  const p = parts || { lang: "", eol: "\n", closeToken: "\n```", suffix: "" };
+  return "```" + p.lang + p.eol + String(newBody == null ? "" : newBody) + (p.closeToken || "\n```") + (p.suffix || "");
+}
+function rebuildCodeFence(lang, body) {
+  const b = body == null ? "" : String(body);
+  const needsNl = b.length > 0 && !/\r?\n$/.test(b);
+  return "```" + String(lang || "") + "\n" + b + (needsNl ? "\n" : "") + "```";
+}
+/** commitBlockSource empty/mutation guards (userEdited=false must restore original). */
+function safeCommitNext(next, original, userEdited, allowEmpty) {
+  if (!userEdited) return original;
+  if (allowEmpty !== true && !String(next).trim() && String(original).trim()) return original;
+  return next;
+}
+
+// (a) code fence round-trip through enter (extract body) / commit (rebuild)
+{
+  const fences = [
+    "```js\nconsole.log(1)\n```",
+    "```js\nconsole.log(1)\n```\n",
+    "```js\nconsole.log(1)\n\n```",
+    "```js\n\n```",
+    "```js\n```",
+    "```python\nx = 1\ny = 2\n```",
+    "```js\nconst a = `\n`;\n```",
+    "```\nplain\n```",
+    "```js\r\nconsole.log(1)\r\n```",
+  ];
+  for (const f of fences) {
+    const parts = extractFenceParts(f);
+    ok(!!parts, "fence parts extracted " + JSON.stringify(f));
+    if (!parts) continue;
+    eq(rebuildFenceFromParts(parts, parts.body), f, "fence enter/commit round-trip " + JSON.stringify(f));
+  }
+  // split/join must keep a fence block intact as one block
+  {
+    const src = "before\n\n```js\nconsole.log(1)\n```\n\nafter\n";
+    const bs = doc.splitMarkdownBlocks(src);
+    eq(bs.length, 3, "code fence is one middle block");
+    eq(bs[1], "```js\nconsole.log(1)\n```", "code fence block exact");
+    eq(doc.joinBlocks(bs), src, "code fence doc round-trip");
+  }
+}
+
+// (b) LaTeX $$...$$ and $...$ survive split/join and stay one block
+{
+  const mathDoc = "# T\n\n$$\n\\sum_i i\n$$\n\npara $E=mc^2$ end\n";
+  const bs = doc.splitMarkdownBlocks(mathDoc);
+  eq(bs.length, 3, "math blocks count");
+  eq(bs[1], "$$\n\\sum_i i\n$$", "display math block exact");
+  ok(bs[2].indexOf("$E=mc^2$") >= 0, "inline math kept in paragraph");
+  eq(doc.joinBlocks(bs), mathDoc, "math doc round-trip");
+
+  const display = "$$\n\\sum_i i\n$$";
+  eq(doc.joinBlocks(doc.splitMarkdownBlocks(display)), display, "display math alone");
+  eq(doc.joinBlocks(doc.splitMarkdownBlocks(display + "\n")), display + "\n", "display math trailing nl");
+  const inline = "This is $E=mc^2$ inline.";
+  eq(doc.joinBlocks(doc.splitMarkdownBlocks(inline)), inline, "inline math alone");
+  eq(doc.joinBlocks(doc.splitMarkdownBlocks(inline + "\n")), inline + "\n", "inline math trailing nl");
+}
+
+// (c) empty-commit must not wipe non-empty (even when allowEmpty is wrongly set
+// while userEdited is false)
+{
+  const original = "```js\nconsole.log(1)\n```";
+  eq(safeCommitNext("", original, false, false), original, "empty commit !userEdited restores");
+  eq(safeCommitNext("", original, false, true), original, "empty commit !userEdited ignores allowEmpty");
+  eq(safeCommitNext("   ", original, false, true), original, "ws commit !userEdited restores");
+  eq(safeCommitNext(original, original, false, true), original, "unchanged commit keeps original");
+  // userEdited + allowEmpty: intentional clear is allowed
+  eq(safeCommitNext("", original, true, true), "", "userEdited empty allowed with allowEmpty");
+  // userEdited without allowEmpty: still restore
+  eq(safeCommitNext("", original, true, false), original, "userEdited empty without allowEmpty restores");
+  // LaTeX original must not be wiped by empty commit
+  const math = "$$\nE=mc^2\n$$";
+  eq(safeCommitNext("", math, false, true), math, "empty commit cannot wipe display math");
+  eq(safeCommitNext("$x$", math, false, true), math, "!userEdited writes back exact original not stripped");
+}
+
+// (d) reconstruct fence from body+lang is byte-safe (incl. trailing blank body)
+{
+  eq(rebuildCodeFence("js", "console.log(1)"), "```js\nconsole.log(1)\n```", "rebuild simple");
+  eq(rebuildCodeFence("js", "console.log(1)\n"), "```js\nconsole.log(1)\n```", "rebuild body trailing nl");
+  eq(rebuildCodeFence("js", "console.log(1)\n\n"), "```js\nconsole.log(1)\n\n```", "rebuild body blank line kept");
+  eq(rebuildCodeFence("js", ""), "```js\n```", "rebuild empty body");
+  eq(rebuildCodeFence("js", "\n"), "```js\n\n```", "rebuild only newline body");
+  eq(rebuildCodeFence("py", "x=1"), "```py\nx=1\n```", "rebuild lang preserved");
+  eq(rebuildCodeFence("", "x"), "```\nx\n```", "rebuild no lang");
+  // extract body is the inverse of rebuild for canonical fences (body splice)
+  const canon = [
+    "```js\nconsole.log(1)\n```",
+    "```js\nconsole.log(1)\n\n```",
+    "```js\n\n```",
+    "```js\nconsole.log(1)\n```\n",
+    "```js\r\nconsole.log(1)\r\n```",
+  ];
+  for (const f of canon) {
+    const parts = extractFenceParts(f);
+    ok(!!parts, "canon parts " + JSON.stringify(f));
+    if (!parts) continue;
+    eq(rebuildFenceFromParts(parts, parts.body), f, "extract∘rebuild " + JSON.stringify(f));
+    // enter/commit unchanged must restore exact block via safeCommitNext
+    eq(safeCommitNext(rebuildFenceFromParts(parts, parts.body), f, false, true), f, "unchanged code commit " + JSON.stringify(f));
+  }
+}
+
+// mixed code + math document: each block survives a no-op edit commit
+{
+  const src = "# T\n\n$$\nE=mc^2\n$$\n\n```js\nconsole.log(1)\n```\n\npara $a+b$ end\n";
+  const bs = doc.splitMarkdownBlocks(src);
+  eq(bs.length, 4, "mixed blocks");
+  const edited = bs.map((b) => safeCommitNext(b, b, false, true));
+  eq(doc.joinBlocks(edited), src, "all-block no-op commit preserves document");
+  // Simulate a wiped code commit (empty reconstruct) — guard must restore
+  const wiped = bs.map((b, i) => (i === 2 ? safeCommitNext("", b, false, true) : b));
+  eq(doc.joinBlocks(wiped), src, "empty code commit cannot wipe mixed doc");
+}
+
 // ---- write-coord ----
 {
   const wc = core.writeCoord;

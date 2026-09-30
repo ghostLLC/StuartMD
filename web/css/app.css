@@ -207,6 +207,22 @@
   height: auto;
 }
 
+/* htmlLabels: mermaid v10+ puts node/edge text in foreignObject. Keep it
+   visible (incl. CJK) on every theme. :where() => specificity 0, so
+   mermaid's own theme CSS still wins when present; these are fallbacks. */
+.mermaid-diagram svg foreignObject {
+  overflow: visible;
+}
+
+.mermaid-diagram :where(.nodeLabel, .edgeLabel) {
+  color: var(--text);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+.mermaid-diagram :where(text, tspan) {
+  fill: var(--text);
+}
+
 pre.mermaid-fallback,
 pre.mermaid-src {
   margin: 1.1em 0;
@@ -1362,6 +1378,15 @@ kbd {
   font-size: 12px;
 }
 
+.block-menu .menu-grid button svg {
+  display: block;
+  flex-shrink: 0;
+}
+
+.block-menu .menu-grid button.danger:hover {
+  color: #dc2626;
+}
+
 .block-menu .menu-sep {
   height: 1px;
   margin: 4px 6px;
@@ -1400,9 +1425,16 @@ kbd {
 
 .block-menu .mr-ico {
   width: 18px;
-  text-align: center;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   opacity: 0.75;
-  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.block-menu .mr-ico svg {
+  display: block;
 }
 
 .block-menu .mr-label {
@@ -1415,21 +1447,33 @@ kbd {
 }
 
 .block-menu .menu-sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
   padding: 2px 6px 6px 22px;
 }
 
+.block-menu .menu-sub[hidden] {
+  display: none !important;
+}
+
 .block-menu .menu-sub button {
-  display: block;
-  width: 100%;
-  text-align: left;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 28px;
+  padding: 0;
   border: none;
   background: transparent;
   color: var(--text);
-  padding: 7px 10px;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 13px;
   font-family: var(--font-ui);
+}
+
+.block-menu .menu-sub button svg {
+  display: block;
 }
 
 .block-menu .menu-sub button:hover {
@@ -1492,7 +1536,8 @@ kbd {
 }
 
 .insert-menu {
-  min-width: 200px;
+  min-width: 168px;
+  width: 168px;
 }
 
 /* Page width (Feishu-like) */
