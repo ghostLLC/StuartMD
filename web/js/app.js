@@ -1411,12 +1411,15 @@
     return null;
   }
 
-  /** Prefer list-item / table-row / heading as the "line" unit for the handle. */
+  // 手柄只使用所在内容块或块级元素作为定位对象。
   function lineUnitFromNode(node) {
     if (!node) return null;
-    return (
-      node.closest?.("li, tr, h1, h2, h3, h4, h5, h6, pre, blockquote") || node
+    const block = closestMdBlock(node);
+    if (!block) return null;
+    const line = node.closest?.(
+      "li, tr, h1, h2, h3, h4, h5, h6, pre, blockquote, p, .mermaid-diagram, .katex-display"
     );
+    return line && block.contains(line) ? line : block;
   }
 
   function blockFromPoint(x, y) {
@@ -1501,13 +1504,20 @@
       return;
     }
     keepBlockHandle();
-    const target = lineEl && lineEl.isConnected && lineEl !== block ? lineEl : block;
+    const target = lineEl && lineEl.isConnected && block.contains(lineEl) ? lineEl : block;
     const br = target.getBoundingClientRect();
+    const blockRect = block.getBoundingClientRect();
+    const paneRect = el.previewPane.getBoundingClientRect();
     handle.hidden = false;
     handle.classList.add("visible");
     const hw = handle.offsetWidth || 52;
-    const left = Math.max(6, br.left - hw - 8);
-    const top = Math.max(6, br.top);
+    const hh = handle.offsetHeight;
+    const left = blockRect.left - hw - 8;
+    if (left < paneRect.left + 4 || br.bottom <= paneRect.top || br.top >= paneRect.bottom) {
+      hideBlockHandle();
+      return;
+    }
+    const top = Math.max(paneRect.top + 4, Math.min(br.top, paneRect.bottom - hh - 4));
     handle.style.position = "fixed";
     handle.style.top = top + "px";
     handle.style.left = left + "px";

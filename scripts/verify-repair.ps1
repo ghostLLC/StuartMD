@@ -16,6 +16,8 @@ try {
     switch ($Mode) {
         'Core' { Test-DocumentModules }
         'Browser' {
+            node "$workspace/tests/repair-block-handle.cjs"
+            if ($LASTEXITCODE -ne 0) { throw '块手柄实际鼠标悬浮与正文操作测试失败' }
             node "$workspace/tests/repair-mermaid-layout.cjs"
             if ($LASTEXITCODE -ne 0) { throw 'Mermaid实际浏览器测试失败' }
             node "$workspace/tests/repair-pdf-viewer.cjs"
