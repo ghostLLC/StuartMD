@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "version": "3.5.11",
+  "sourceCommit": "9656bdd6930ad6b6555beabe8ccebeae30046251",
+  "sourceFingerprint": "3b7c3ae892fbb4f3ec3a56802527fd6e11328fbd140079aa8f3e40ef126019dc",
+  "rustcVersion": "1.98.1",
+  "webviewVersion": "154.0.4258.62",
+  "installer": "StuartMD_3.5.11_x64-setup.exe",
+  "installerSha256": "f5c8c73dc53542e946af2ce40dc4f7c1d0249f3a0d4cf7801ec7a968a4778ef9",
+  "installedApplicationSha256": "6221f2e69f0781aa482f3b5823f5f0ef6a332be7a19d9eac4f26fb2f9f65d50c",
+  "core": "Passed",
+  "browser": "Passed",
+  "models": "Passed",
+  "providers": "Passed",
+  "native": "Failed",
+  "installerFullAcceptance": "NotVerified",
+  "publicationEligible": false
+}
