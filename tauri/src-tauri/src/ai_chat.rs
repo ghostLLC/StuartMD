@@ -1,1201 +1,199 @@
-//! AI provider config, DPAPI key storage, OpenAI-compatible streaming chat.
-//! Keys live under `%APPDATA%\StuartMD\ai\keys\` — never in settings.json.
 use serde_json::{json, Value};
-use std::collections::{HashMap, HashSet};
-use std::fs;
-use std::io::Read;
-use std::path::PathBuf;
-use std::sync::{LazyLock, Mutex};
-use std::time::Duration;
-
+use std::{fs, path::PathBuf};
 use tauri::Emitter;
+use zeroize::{Zeroize, Zeroizing};
 
-use crate::ai_api::ai_home;
-use crate::fs_api::load_settings_migrated;
-
-static CANCEL: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
-static ACTIVE: LazyLock<Mutex<HashMap<String, ()>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
-
-fn keys_dir() -> PathBuf {
-    let d = ai_home().join("keys");
-    let _ = fs::create_dir_all(&d);
-    d
+fn key_path(id:&str)->Result<PathBuf,String> {
+    let id=sanitize_provider_id(id)?;
+    let directory=crate::fs_api::data_dir().join("ai/keys");
+    fs::create_dir_all(&directory).map_err(|error|format!("创建密钥目录失败：{error}"))?;
+    Ok(directory.join(format!("{id}.bin")))
 }
-
-fn sanitize_provider_id(id: &str) -> Result<String, String> {
-    let k = id.trim();
-    if k.is_empty() || k.len() > 64 {
-        return Err("服务商 ID 非法".into());
-    }
-    if !k
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
-    {
-        return Err("服务商 ID 仅允许字母数字 - _ .".into());
-    }
-    Ok(k.to_string())
+fn sanitize_provider_id(id:&str)->Result<String,String> {
+    if id.is_empty() || id.len()>64 || id.starts_with('.') || id.contains("..") || !id.chars().all(|character|character.is_ascii_alphanumeric() || ['-','_','.'].contains(&character)) {return Err("服务商编号无效".into());}
+    Ok(id.to_owned())
 }
-
-fn key_path(id: &str) -> Result<PathBuf, String> {
-    Ok(keys_dir().join(format!("{}.bin", sanitize_provider_id(id)?)))
+fn pinned_base_url(id:&str)->Option<&'static str> {
+    match id {"deepseek"=>Some("https://api.deepseek.com/v1"),"qwen"=>Some("https://dashscope.aliyuncs.com/compatible-mode/v1"),"kimi"=>Some("https://api.moonshot.cn/v1"),"glm"=>Some("https://open.bigmodel.cn/api/paas/v4"),_=>None}
 }
-
-/// Hardcoded API roots for builtin providers (H3): base_url overrides are ignored.
-fn pinned_base_url(id: &str) -> Option<&'static str> {
-    match id {
-        "deepseek" => Some("https://api.deepseek.com/v1"),
-        "qwen" => Some("https://dashscope.aliyuncs.com/compatible-mode/v1"),
-        "kimi" => Some("https://api.moonshot.cn/v1"),
-        "glm" => Some("https://open.bigmodel.cn/api/paas/v4"),
-        _ => None,
-    }
+fn normalize_base_url(raw:&str)->String {raw.trim().trim_end_matches('/').trim_end_matches("/chat/completions").trim_end_matches('/').to_owned()}
+fn validate_base_url(raw:&str)->Result<String,String> {
+    let base=normalize_base_url(raw);let parsed=url::Url::parse(&base).map_err(|error|format!("API地址无效：{error}"))?;
+    let host=parsed.host_str().ok_or("API地址缺少主机")?;
+    if parsed.scheme()!="https" && !(parsed.scheme()=="http" && ["localhost","127.0.0.1","[::1]","::1"].contains(&host)) {return Err("API地址必须使用https，本机服务可以使用http".into());}
+    if !parsed.username().is_empty() || parsed.password().is_some() || parsed.query().is_some() || parsed.fragment().is_some() {return Err("API地址包含无效的认证或查询字段".into());}
+    Ok(base)
 }
-
-/// Extract the host that would receive the API key (for `key_sent_to` metadata).
-fn host_of(url: &str) -> String {
-    url::Url::parse(url)
-        .ok()
-        .and_then(|u| u.host_str().map(|h| h.to_string()))
-        .unwrap_or_default()
-}
-
-/// Validate a custom base_url: https required (http only for localhost).
-fn validate_base_url(u: &str) -> Result<String, String> {
-    let s = normalize_base_url(u);
-    if s.is_empty() {
-        return Err("API Base URL 不能为空".into());
-    }
-    let parsed = url::Url::parse(&s).map_err(|e| format!("API Base URL 非法: {e}"))?;
-    let host = parsed.host_str().unwrap_or("").to_ascii_lowercase();
-    let is_local = host == "localhost" || host == "127.0.0.1" || host == "::1";
-    match parsed.scheme() {
-        "https" => {}
-        "http" if is_local => {}
-        _ => {
-            return Err(
-                "API Base URL 必须使用 https（本机调试可使用 http://localhost）".into(),
-            )
-        }
-    }
-    if parsed.username() != "" || parsed.password().is_some() {
-        return Err("API Base URL 不允许携带用户名/密码".into());
-    }
-    Ok(s)
-}
-
-/// Resolve the base URL actually used for a request: builtin ids are pinned.
-fn effective_base_url(provider: &Value) -> Result<(String, String), String> {
-    let id = provider
-        .get("id")
-        .and_then(|x| x.as_str())
-        .unwrap_or("")
-        .to_string();
-    if let Some(pinned) = pinned_base_url(&id) {
-        return Ok((pinned.to_string(), host_of(pinned)));
-    }
-    let raw = provider
-        .get("base_url")
-        .and_then(|x| x.as_str())
-        .unwrap_or("");
-    if raw.trim().is_empty() {
-        return Err("请先填写 API Base URL".into());
-    }
-    let base = validate_base_url(raw)?;
-    let host = host_of(&base);
-    Ok((base, host))
+pub(crate) fn effective_base_url(provider:&Value)->Result<(String,String),String> {
+    let id=provider["id"].as_str().ok_or("服务商编号缺失")?;
+    let base=if let Some(base)=pinned_base_url(id) {base.to_owned()} else {validate_base_url(provider["base_url"].as_str().ok_or("API地址缺失")?)?};
+    let host=url::Url::parse(&base).map_err(|error|error.to_string())?.host_str().ok_or("API地址缺少主机")?.to_owned();
+    Ok((base,host))
 }
 
 #[cfg(windows)]
-fn dpapi_protect(plain: &[u8]) -> Result<Vec<u8>, String> {
+fn dpapi_protect(plain:&[u8])->Result<Vec<u8>,String> {
     use windows_sys::Win32::Foundation::LocalFree;
-    use windows_sys::Win32::Security::Cryptography::{
-        CryptProtectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
-    };
-
-    if plain.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    const APP_ENTROPY: &[u8] = b"stuartmd::secure_vault::entropy_salt_v1";
-
-    let in_blob = CRYPT_INTEGER_BLOB {
-        cbData: plain.len() as u32,
-        pbData: plain.as_ptr() as *mut u8,
-    };
-    let entropy_blob = CRYPT_INTEGER_BLOB {
-        cbData: APP_ENTROPY.len() as u32,
-        pbData: APP_ENTROPY.as_ptr() as *mut u8,
-    };
-    let mut out_blob = CRYPT_INTEGER_BLOB {
-        cbData: 0,
-        pbData: std::ptr::null_mut(),
-    };
-
-    let ok = unsafe {
-        CryptProtectData(
-            &in_blob,
-            std::ptr::null(),
-            &entropy_blob,
-            std::ptr::null_mut(),
-            std::ptr::null(),
-            CRYPTPROTECT_UI_FORBIDDEN,
-            &mut out_blob,
-        )
-    };
-    if ok == 0 {
-        let err = std::io::Error::last_os_error();
-        return Err(format!("DPAPI 加密失败: {err}"));
-    }
-
-    let out = if !out_blob.pbData.is_null() && out_blob.cbData > 0 {
-        unsafe { std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize) }.to_vec()
-    } else {
-        Vec::new()
-    };
-
-    if !out_blob.pbData.is_null() {
-        unsafe { LocalFree(out_blob.pbData as *mut core::ffi::c_void) };
-    }
-    Ok(out)
+    use windows_sys::Win32::Security::Cryptography::{CryptProtectData,CRYPTPROTECT_UI_FORBIDDEN,CRYPT_INTEGER_BLOB};
+    if plain.is_empty() {return Ok(Vec::new());}
+    let entropy=b"stuartmd::secure_vault::entropy_salt_v1";
+    let input=CRYPT_INTEGER_BLOB {cbData:plain.len() as u32,pbData:plain.as_ptr() as *mut u8};
+    let entropy=CRYPT_INTEGER_BLOB {cbData:entropy.len() as u32,pbData:entropy.as_ptr() as *mut u8};
+    let mut output=CRYPT_INTEGER_BLOB {cbData:0,pbData:std::ptr::null_mut()};
+    let status=unsafe {CryptProtectData(&input,std::ptr::null(),&entropy,std::ptr::null_mut(),std::ptr::null(),CRYPTPROTECT_UI_FORBIDDEN,&mut output)};
+    if status==0 {return Err(format!("DPAPI加密失败：{}",std::io::Error::last_os_error()));}
+    if output.pbData.is_null() || output.cbData==0 {return Err("DPAPI返回空密文".into());}
+    let result=unsafe {std::slice::from_raw_parts(output.pbData,output.cbData as usize)}.to_vec();
+    unsafe {LocalFree(output.pbData as *mut core::ffi::c_void);}
+    Ok(result)
 }
-
 #[cfg(windows)]
-fn dpapi_unprotect(blob: &[u8]) -> Result<Vec<u8>, String> {
+fn dpapi_unprotect(blob:&[u8])->Result<Vec<u8>,String> {
     use windows_sys::Win32::Foundation::LocalFree;
-    use windows_sys::Win32::Security::Cryptography::{
-        CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
-    };
-
-    if blob.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    const APP_ENTROPY: &[u8] = b"stuartmd::secure_vault::entropy_salt_v1";
-
-    let in_blob = CRYPT_INTEGER_BLOB {
-        cbData: blob.len() as u32,
-        pbData: blob.as_ptr() as *mut u8,
-    };
-    let entropy_blob = CRYPT_INTEGER_BLOB {
-        cbData: APP_ENTROPY.len() as u32,
-        pbData: APP_ENTROPY.as_ptr() as *mut u8,
-    };
-    let mut out_blob = CRYPT_INTEGER_BLOB {
-        cbData: 0,
-        pbData: std::ptr::null_mut(),
-    };
-
-    // 1. 优先尝试带应用熵解密
-    let mut ok = unsafe {
-        CryptUnprotectData(
-            &in_blob,
-            std::ptr::null_mut(),
-            &entropy_blob,
-            std::ptr::null_mut(),
-            std::ptr::null(),
-            CRYPTPROTECT_UI_FORBIDDEN,
-            &mut out_blob,
-        )
-    };
-
-    // 2. 若失败，回退尝试无熵解密（兼容旧版客户端写入的数据）
-    if ok == 0 {
-        ok = unsafe {
-            CryptUnprotectData(
-                &in_blob,
-                std::ptr::null_mut(),
-                std::ptr::null(),
-                std::ptr::null_mut(),
-                std::ptr::null(),
-                CRYPTPROTECT_UI_FORBIDDEN,
-                &mut out_blob,
-            )
-        };
-    }
-
-    if ok == 0 {
-        let err = std::io::Error::last_os_error();
-        return Err(format!("DPAPI 解密失败: {err}"));
-    }
-
-    // 严格防止空指针创建 slice 导致的 UB
-    if out_blob.pbData.is_null() || out_blob.cbData == 0 {
-        if !out_blob.pbData.is_null() {
-            unsafe { LocalFree(out_blob.pbData as *mut core::ffi::c_void) };
-        }
-        return Ok(Vec::new());
-    }
-
-    let out = unsafe { std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize) }.to_vec();
-
-    // 显式内存擦除
-    unsafe {
-        std::ptr::write_bytes(out_blob.pbData, 0, out_blob.cbData as usize);
-        LocalFree(out_blob.pbData as *mut core::ffi::c_void);
-    }
-    Ok(out)
+    use windows_sys::Win32::Security::Cryptography::{CryptUnprotectData,CRYPTPROTECT_UI_FORBIDDEN,CRYPT_INTEGER_BLOB};
+    if blob.is_empty() {return Ok(Vec::new());}
+    let entropy=b"stuartmd::secure_vault::entropy_salt_v1";
+    let input=CRYPT_INTEGER_BLOB {cbData:blob.len() as u32,pbData:blob.as_ptr() as *mut u8};
+    let entropy=CRYPT_INTEGER_BLOB {cbData:entropy.len() as u32,pbData:entropy.as_ptr() as *mut u8};
+    let mut output=CRYPT_INTEGER_BLOB {cbData:0,pbData:std::ptr::null_mut()};
+    let mut status=unsafe {CryptUnprotectData(&input,std::ptr::null_mut(),&entropy,std::ptr::null_mut(),std::ptr::null(),CRYPTPROTECT_UI_FORBIDDEN,&mut output)};
+    // 导入当前用户保存的旧版DPAPI密钥。
+    if status==0 {status=unsafe {CryptUnprotectData(&input,std::ptr::null_mut(),std::ptr::null(),std::ptr::null_mut(),std::ptr::null(),CRYPTPROTECT_UI_FORBIDDEN,&mut output)};}
+    if status==0 {return Err(format!("DPAPI解密失败：{}",std::io::Error::last_os_error()));}
+    if output.pbData.is_null() || output.cbData==0 {return Err("DPAPI返回空密钥".into());}
+    let result=unsafe {std::slice::from_raw_parts(output.pbData,output.cbData as usize)}.to_vec();
+    unsafe {std::ptr::write_bytes(output.pbData,0,output.cbData as usize);LocalFree(output.pbData as *mut core::ffi::c_void);}
+    Ok(result)
 }
-
 #[cfg(not(windows))]
-fn dpapi_protect(plain: &[u8]) -> Result<Vec<u8>, String> {
-    // Non-Windows dev fallback only (product ships Windows DPAPI)
-    let mut out = b"stmplain:".to_vec();
-    out.extend_from_slice(plain);
-    Ok(out)
-}
-
+fn dpapi_protect(_: &[u8])->Result<Vec<u8>,String> {Err("当前系统不支持Windows DPAPI密钥存储".into())}
 #[cfg(not(windows))]
-fn dpapi_unprotect(blob: &[u8]) -> Result<Vec<u8>, String> {
-    if let Some(rest) = blob.strip_prefix(b"stmplain:") {
-        return Ok(rest.to_vec());
-    }
-    Err("密钥无法解密".into())
+fn dpapi_unprotect(_: &[u8])->Result<Vec<u8>,String> {Err("当前系统不支持Windows DPAPI密钥读取".into())}
+pub(crate) fn read_api_key(id:&str)->Result<Zeroizing<String>,String> {
+    let path=key_path(id)?;let blob=fs::read(path).map_err(|error|format!("读取服务商密钥失败：{error}"))?;
+    let plain=dpapi_unprotect(&blob)?;
+    match String::from_utf8(plain) {Ok(key) if !key.is_empty()=>Ok(Zeroizing::new(key)),Ok(_)=>Err("密钥为空".into()),Err(error)=>{let mut bytes=error.into_bytes();bytes.zeroize();Err("密钥编码无效".into())}}
 }
+fn provider_has_key(id:&str)->bool {key_path(id).expect("密钥路径无效").is_file()}
 
-fn provider_has_key(id: &str) -> bool {
-    key_path(id)
-        .map(|p| p.is_file() && fs::metadata(&p).map(|m| m.len() > 0).unwrap_or(false))
-        .unwrap_or(false)
+pub fn builtin_ai_defaults()->Value {
+    json!({"enabled":true,"active_provider_id":"deepseek","explain_shortcut":"Alt+E","thinking":"balanced","context_scope":"neighborhood","max_output_tokens":2048,"memory_mode":"always",
+        "style":{"length":"normal","tone":"neutral","custom":"","length_hint":"","feedback":{"short":0,"ok":0,"long":0}},
+        "providers":[
+            {"id":"deepseek","label":"DeepSeek","kind":"openai_compat","base_url":"https://api.deepseek.com/v1","model":"deepseek-flash","enabled":true,"builtin":true},
+            {"id":"qwen","label":"通义千问 Qwen","kind":"openai_compat","base_url":"https://dashscope.aliyuncs.com/compatible-mode/v1","model":"qwen-plus","enabled":true,"builtin":true},
+            {"id":"kimi","label":"Kimi (Moonshot)","kind":"openai_compat","base_url":"https://api.moonshot.cn/v1","model":"moonshot-v1-8k","enabled":true,"builtin":true},
+            {"id":"glm","label":"智谱 GLM","kind":"openai_compat","base_url":"https://open.bigmodel.cn/api/paas/v4","model":"glm-4-air","enabled":true,"builtin":true},
+            {"id":"custom","label":"自定义 OpenAI 兼容","kind":"openai_compat","base_url":"","model":"","enabled":false,"builtin":true}]})
 }
-
-fn read_api_key(id: &str) -> Result<String, String> {
-    use zeroize::Zeroize;
-    let p = key_path(id)?;
-    if !p.is_file() {
-        return Err("尚未配置该服务商的 API Key".into());
-    }
-    let blob = fs::read(&p).map_err(|e| e.to_string())?;
-    let mut plain = dpapi_unprotect(&blob)?;
-    let key_str = String::from_utf8(plain.clone()).map_err(|_| {
-        plain.zeroize();
-        String::from("密钥编码无效")
-    })?;
-    plain.zeroize();
-    Ok(key_str)
-}
-
-pub fn builtin_ai_defaults() -> Value {
-    json!({
-        "enabled": true,
-        "active_provider_id": "deepseek",
-        "explain_shortcut": "Alt+E",
-        "thinking": "balanced",
-        "context_scope": "neighborhood",
-        "context_max_chars": 8000,
-        "max_output_tokens": 2048,
-        "memory_mode": "always",
-        "style": {
-            "length": "normal",
-            "tone": "neutral",
-            "custom": "",
-            "length_hint": "",
-            "feedback": {"short": 0, "ok": 0, "long": 0}
-        },
-        "providers": [
-            {
-                "id": "deepseek",
-                "label": "DeepSeek",
-                "kind": "openai_compat",
-                "base_url": "https://api.deepseek.com/v1",
-                "model": "deepseek-chat",
-                "enabled": true,
-                "builtin": true
-            },
-            {
-                "id": "qwen",
-                "label": "通义千问 Qwen",
-                "kind": "openai_compat",
-                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                "model": "qwen-plus",
-                "enabled": true,
-                "builtin": true
-            },
-            {
-                "id": "kimi",
-                "label": "Kimi (Moonshot)",
-                "kind": "openai_compat",
-                "base_url": "https://api.moonshot.cn/v1",
-                "model": "moonshot-v1-8k",
-                "enabled": true,
-                "builtin": true
-            },
-            {
-                "id": "glm",
-                "label": "智谱 GLM",
-                "kind": "openai_compat",
-                "base_url": "https://open.bigmodel.cn/api/paas/v4",
-                "model": "glm-4-air",
-                "enabled": true,
-                "builtin": true
-            },
-            {
-                "id": "custom",
-                "label": "自定义 OpenAI 兼容",
-                "kind": "openai_compat",
-                "base_url": "",
-                "model": "",
-                "enabled": false,
-                "builtin": true
-            }
-        ]
-    })
-}
-
-fn merge_ai_settings(mut ai: Value) -> Value {
-    let defaults = builtin_ai_defaults();
-    if !ai.is_object() {
-        return defaults;
-    }
-    if let (Some(obj), Some(def)) = (ai.as_object_mut(), defaults.as_object()) {
-        for (k, v) in def {
-            if k == "style" {
-                let cur = obj.get("style").cloned().unwrap_or(json!({}));
-                if let (Some(co), Some(do_)) = (cur.as_object(), v.as_object()) {
-                    let mut merged = co.clone();
-                    for (sk, sv) in do_ {
-                        merged.entry(sk.clone()).or_insert_with(|| sv.clone());
-                    }
-                    if let Some(fb) = merged.get_mut("feedback") {
-                        if let Some(dfb) = do_.get("feedback").and_then(|x| x.as_object()) {
-                            if let Some(fbo) = fb.as_object_mut() {
-                                for (fk, fv) in dfb {
-                                    fbo.entry(fk.clone()).or_insert_with(|| fv.clone());
-                                }
-                            }
-                        }
-                    } else if let Some(dfb) = do_.get("feedback") {
-                        merged.insert("feedback".into(), dfb.clone());
-                    }
-                    obj.insert("style".into(), json!(merged));
-                } else {
-                    obj.entry("style".to_string()).or_insert_with(|| v.clone());
-                }
-                continue;
-            }
-            obj.entry(k.clone()).or_insert_with(|| v.clone());
-        }
-        // Ensure provider list has builtin presets (keep user edits for known ids)
-        let mut providers = obj
-            .get("providers")
-            .and_then(|p| p.as_array())
-            .cloned()
-            .unwrap_or_default();
-        if let Some(def_providers) = def.get("providers").and_then(|p| p.as_array()) {
-            for dp in def_providers {
-                let id = dp.get("id").and_then(|x| x.as_str()).unwrap_or("");
-                if id.is_empty() {
-                    continue;
-                }
-                let exists = providers
-                    .iter()
-                    .any(|p| p.get("id").and_then(|x| x.as_str()) == Some(id));
-                if !exists {
-                    providers.push(dp.clone());
-                }
-            }
-        }
-        obj.insert("providers".into(), json!(providers));
-        // Never echo secrets
-        if let Some(list) = obj.get_mut("providers").and_then(|p| p.as_array_mut()) {
-            for p in list.iter_mut() {
-                if let Some(o) = p.as_object_mut() {
-                    o.remove("api_key");
-                    o.remove("key");
-                    let id = o.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string();
-                    o.insert("key_set".into(), json!(provider_has_key(&id)));
-                }
-            }
-        }
+fn merge_ai_settings(mut ai:Value)->Value {
+    let defaults=builtin_ai_defaults();let object=ai.as_object_mut().expect("AI设置必须是JSON对象");
+    for (name,value) in defaults.as_object().expect("AI默认设置无效") {object.entry(name.clone()).or_insert_with(||value.clone());}
+    let style=object.get_mut("style").and_then(Value::as_object_mut).expect("AI回答样式设置必须是对象");
+    for (name,value) in defaults["style"].as_object().expect("AI默认回答样式无效") {style.entry(name.clone()).or_insert_with(||value.clone());}
+    let providers=object.get_mut("providers").and_then(Value::as_array_mut).expect("AI服务商设置必须是数组");
+    for provider in providers {
+        let provider=provider.as_object_mut().expect("服务商设置必须是对象");provider.remove("api_key");provider.remove("key");
+        let id=provider["id"].as_str().expect("服务商编号必须是字符串");let has_key=provider_has_key(id);provider.insert("key_set".into(),json!(has_key));
     }
     ai
 }
-
-pub fn load_ai_settings() -> Value {
-    let s = load_settings_migrated();
-    let ai = s.get("ai").cloned().unwrap_or_else(|| json!({}));
-    merge_ai_settings(ai)
+pub fn load_ai_settings()->Value {
+    let settings=crate::fs_api::load_settings_migrated();merge_ai_settings(settings.get("ai").cloned().unwrap_or_else(||json!({})))
 }
-
-fn save_ai_settings(ai: &Value) -> Result<(), String> {
-    crate::fs_api::modify_settings(|s| {
-        if let Some(obj) = s.as_object_mut() {
-            obj.insert("ai".into(), ai.clone());
-        }
-        Ok(())
-    })?;
-    Ok(())
+pub(crate) fn active_provider(ai:&Value)->Result<Value,String> {
+    let id=ai["active_provider_id"].as_str().ok_or("当前服务商编号缺失")?;
+    ai["providers"].as_array().ok_or("服务商配置缺失")?.iter().find(|provider|provider["id"].as_str()==Some(id)).cloned().ok_or("当前服务商配置不存在".into())
 }
-
-fn active_provider(ai: &Value) -> Result<Value, String> {
-    let active = ai
-        .get("active_provider_id")
-        .and_then(|x| x.as_str())
-        .unwrap_or("deepseek")
-        .to_string();
-    let providers = ai
-        .get("providers")
-        .and_then(|p| p.as_array())
-        .cloned()
-        .unwrap_or_default();
-    providers
-        .iter()
-        .find(|p| p.get("id").and_then(|x| x.as_str()) == Some(active.as_str()))
-        .cloned()
-        .ok_or_else(|| "未找到当前 AI 服务商".into())
-}
-
-fn normalize_base_url(u: &str) -> String {
-    let mut s = u.trim().trim_end_matches('/').to_string();
-    if s.is_empty() {
-        return s;
-    }
-    // Accept full chat/completions path and strip to API root
-    if let Some(idx) = s.find("/chat/completions") {
-        s = s[..idx].to_string();
-        s = s.trim_end_matches('/').to_string();
-    }
-    s
-}
-
-fn thinking_to_effort(thinking: &str) -> Option<&'static str> {
-    match thinking {
-        "fast" => Some("low"),
-        "deep" => Some("high"),
-        // balanced: omit (provider default)
-        _ => None,
-    }
-}
-
-fn emit_chat(app: &tauri::AppHandle, event: &str, payload: Value) {
-    let _ = app.emit(event, payload);
-}
-
-fn is_cancelled(id: &str) -> bool {
-    CANCEL
-        .lock()
-        .map(|c| c.contains(id))
-        .unwrap_or(false)
-}
-
-fn clear_active(id: &str) {
-    if let Ok(mut a) = ACTIVE.lock() {
-        a.remove(id);
-    }
-    if let Ok(mut c) = CANCEL.lock() {
-        c.remove(id);
-    }
-}
-
-pub fn parse_sse_data_line(line: &str) -> Option<String> {
-    let t = line.trim();
-    if !t.starts_with("data:") {
-        return None;
-    }
-    let data = t[5..].trim();
-    if data.is_empty() {
-        return None;
-    }
-    // Retain [DONE] token so the stream terminates immediately instead of hanging
-    Some(data.to_string())
-}
-
-fn extract_delta_text(v: &Value) -> String {
-    // OpenAI chat completions delta
-    if let Some(d) = v
-        .pointer("/choices/0/delta/content")
-        .and_then(|x| x.as_str())
-    {
-        return d.to_string();
-    }
-    // Some providers put content in message
-    if let Some(d) = v
-        .pointer("/choices/0/message/content")
-        .and_then(|x| x.as_str())
-    {
-        return d.to_string();
-    }
-    // OpenRouter / alt reasoning fields sometimes named differently
-    if let Some(d) = v.get("delta").and_then(|x| x.as_str()) {
-        return d.to_string();
-    }
-    String::new()
-}
-
 #[tauri::command]
-pub fn stuart_ai_get_config() -> Value {
-    let ai = load_ai_settings();
-    json!({"ok": true, "ai": ai})
-}
-
+pub fn stuart_ai_get_config()->Value {json!({"ok":true,"ai":load_ai_settings()})}
 #[tauri::command]
-pub fn stuart_ai_save_config(ai: Value, confirm: Option<bool>) -> Value {
-    let prev = load_ai_settings();
-    let mut next = merge_ai_settings(ai);
-    // Strip any accidental secrets from client payload
-    if let Some(list) = next.get_mut("providers").and_then(|p| p.as_array_mut()) {
-        for p in list.iter_mut() {
-            if let Some(o) = p.as_object_mut() {
-                o.remove("api_key");
-                o.remove("key");
-                o.remove("key_set");
+pub async fn stuart_ai_save_config(app:tauri::AppHandle,ai:Value,confirm:Option<bool>)->Result<Value,String> {
+    let previous=load_ai_settings();
+    if !ai.is_object() {return Err("AI设置必须是JSON对象".into());}
+    let mut next=merge_ai_settings(ai);
+    if !["always","ask","off"].contains(&next["memory_mode"].as_str().ok_or("记忆学习方式缺失")?) {return Err("记忆学习方式无效".into());}
+    if !["fast","balanced","deep"].contains(&next["thinking"].as_str().ok_or("思考方式缺失")?) {return Err("思考方式无效".into());}
+    if next["max_output_tokens"].as_u64().is_none_or(|tokens|tokens==0) {return Err("输出Token预算必须大于零".into());}
+    let mut ids=std::collections::HashSet::new();
+    for provider in next["providers"].as_array_mut().ok_or("服务商配置必须是数组")? {
+        let object=provider.as_object_mut().ok_or("服务商配置必须是对象")?;
+        let id=sanitize_provider_id(object["id"].as_str().ok_or("服务商编号缺失")?)?;
+        if !ids.insert(id.clone()) {return Err("服务商编号重复".into());}
+        object.remove("api_key");object.remove("key");object.remove("key_set");
+        if let Some(base)=pinned_base_url(&id) {object.insert("base_url".into(),json!(base));}
+        else if let Some(raw)=object.get("base_url").and_then(Value::as_str).filter(|value|!value.trim().is_empty()) {
+            let base=validate_base_url(raw)?;
+            let old=previous["providers"].as_array().and_then(|providers|providers.iter().find(|provider|provider["id"].as_str()==Some(&id))).and_then(|provider|provider["base_url"].as_str()).unwrap_or("");
+            if normalize_base_url(old)!=base && provider_has_key(&id) && confirm!=Some(true) {
+                return Ok(json!({"ok":false,"needs_confirm":true,"reason":"修改API地址会将已保存密钥发送到新的主机","detail":{"provider_id":id,"key_sent_to":url::Url::parse(&base).map_err(|error|error.to_string())?.host_str(),"old_base_url":old,"new_base_url":base}}));
             }
+            object.insert("base_url".into(),json!(base));
         }
+        if object.contains_key("token_counting") {crate::context::model_spec::ProviderModelSpec::from_provider(&Value::Object(object.clone()))?;}
     }
-
-    // H3: pin builtin hosts, validate ids and custom base_url schemes.
-    let mut needs_confirm: Option<Value> = None;
-    if let Some(list) = next.get_mut("providers").and_then(|p| p.as_array_mut()) {
-        for p in list.iter_mut() {
-            let Some(o) = p.as_object_mut() else { continue };
-            let id = o
-                .get("id")
-                .and_then(|x| x.as_str())
-                .unwrap_or("")
-                .to_string();
-            match sanitize_provider_id(&id) {
-                Ok(clean) => {
-                    if clean != id {
-                        o.insert("id".into(), json!(clean));
-                    }
-                }
-                Err(e) => return json!({"error": format!("服务商配置非法: {e}")}),
-            }
-            let id = o
-                .get("id")
-                .and_then(|x| x.as_str())
-                .unwrap_or("")
-                .to_string();
-            if let Some(pinned) = pinned_base_url(&id) {
-                // Ignore/reject any base_url override for builtin providers.
-                let incoming = o
-                    .get("base_url")
-                    .and_then(|x| x.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let pinned_s = pinned.to_string();
-                if !incoming.is_empty() && normalize_base_url(&incoming) != pinned_s {
-                    eprintln!(
-                        "[AI Config] ignoring base_url override for builtin provider {id}: {incoming} -> {pinned_s}"
-                    );
-                }
-                o.insert("base_url".into(), json!(pinned_s));
-                continue;
-            }
-            let raw = o
-                .get("base_url")
-                .and_then(|x| x.as_str())
-                .unwrap_or("")
-                .to_string();
-            if raw.trim().is_empty() {
-                continue;
-            }
-            match validate_base_url(&raw) {
-                Ok(clean) => {
-                    o.insert("base_url".into(), json!(clean));
-                    // Changing the endpoint of a provider that already holds a key
-                    // sends that key to a new host — require explicit confirmation.
-                    let prev_base = prev
-                        .get("providers")
-                        .and_then(|p| p.as_array())
-                        .and_then(|arr| {
-                            arr.iter()
-                                .find(|x| x.get("id").and_then(|i| i.as_str()) == Some(id.as_str()))
-                        })
-                        .and_then(|x| x.get("base_url"))
-                        .and_then(|x| x.as_str())
-                        .unwrap_or("");
-                    let changed = normalize_base_url(prev_base) != clean && !prev_base.is_empty();
-                    if changed && provider_has_key(&id) {
-                        let host = host_of(&clean);
-                        eprintln!(
-                            "[AI Config] base_url changed for provider {id} (key present); key will be sent to {host}"
-                        );
-                        if confirm != Some(true) {
-                            needs_confirm = Some(json!({
-                                "provider_id": id,
-                                "key_sent_to": host,
-                                "old_base_url": prev_base,
-                                "new_base_url": clean,
-                            }));
-                        }
-                    }
-                }
-                Err(e) => return json!({"error": format!("服务商 {id}: {e}")}),
-            }
-        }
-    }
-
-    if let Some(nc) = needs_confirm {
-        return json!({
-            "ok": false,
-            "needs_confirm": true,
-            "reason": "base_url 变更将把已保存的 API Key 发往新主机",
-            "detail": nc
-        });
-    }
-
-    // Re-attach key_set flags after save merge
-    match save_ai_settings(&next) {
-        Ok(()) => {
-            let out = load_ai_settings();
-            let key_sent_to: Vec<Value> = out
-                .get("providers")
-                .and_then(|p| p.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|x| {
-                            let id = x.get("id").and_then(|i| i.as_str()).unwrap_or("");
-                            let base = x.get("base_url").and_then(|b| b.as_str()).unwrap_or("");
-                            if base.is_empty() {
-                                return None;
-                            }
-                            Some(json!({"provider_id": id, "key_sent_to": host_of(base)}))
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-            json!({"ok": true, "ai": out, "key_sent_to": key_sent_to})
-        }
-        Err(e) => json!({"error": e}),
-    }
+    active_provider(&next)?;
+    if next["enabled"].as_bool()!=Some(true) {crate::ai::cancel_all();}
+    crate::fs_api::modify_settings(|settings|{settings.as_object_mut().ok_or("设置必须是对象")?.insert("ai".into(),next.clone());Ok(())})?;
+    if next["enabled"].as_bool()!=Some(true) {crate::ai::cancel_all_and_wait().await?;}
+    app.emit("ai-config-changed",json!({"enabled":next["enabled"]})).map_err(|error|error.to_string())?;
+    Ok(json!({"ok":true,"ai":load_ai_settings()}))
 }
-
 #[tauri::command]
-pub fn stuart_ai_set_api_key(provider_id: String, api_key: String) -> Value {
-    let key = api_key.trim().to_string();
-    if key.is_empty() {
-        return json!({"error": "API Key 不能为空"});
-    }
-    if key.len() > 512 {
-        return json!({"error": "API Key 过长"});
-    }
-    let id = match sanitize_provider_id(&provider_id) {
-        Ok(id) => id,
-        Err(e) => return json!({"error": e}),
-    };
-    let p = match key_path(&id) {
-        Ok(p) => p,
-        Err(e) => return json!({"error": e}),
-    };
-    match dpapi_protect(key.as_bytes()) {
-        Ok(blob) => match fs::write(&p, blob) {
-            Ok(()) => json!({"ok": true, "provider_id": id, "key_set": true}),
-            Err(e) => json!({"error": e.to_string()}),
-        },
-        Err(e) => json!({"error": e}),
-    }
+pub async fn stuart_ai_set_api_key(provider_id:String,api_key:String)->Result<Value,String> {
+    let input=Zeroizing::new(api_key);let key=Zeroizing::new(input.trim().to_owned());
+    if key.is_empty() || key.len()>512 {return Err("API密钥为空或超过长度限制".into());}
+    let id=sanitize_provider_id(&provider_id)?;let blob=dpapi_protect(key.as_bytes())?;
+    crate::ai::cancel_all_and_wait().await?;
+    crate::fs_api::atomic_write_file(&key_path(&id)?,&blob)?;
+    Ok(json!({"ok":true,"provider_id":id,"key_set":true}))
 }
-
 #[tauri::command]
-pub fn stuart_ai_clear_api_key(provider_id: String) -> Value {
-    let id = match sanitize_provider_id(&provider_id) {
-        Ok(id) => id,
-        Err(e) => return json!({"error": e}),
-    };
-    if let Ok(p) = key_path(&id) {
-        let _ = fs::remove_file(p);
-    }
-    json!({"ok": true, "provider_id": id, "key_set": false})
+pub async fn stuart_ai_clear_api_key(provider_id:String)->Result<Value,String> {
+    let id=sanitize_provider_id(&provider_id)?;let path=key_path(&id)?;
+    crate::ai::cancel_all_and_wait().await?;
+    if path.exists() {fs::remove_file(path).map_err(|error|error.to_string())?;}
+    Ok(json!({"ok":true,"provider_id":id,"key_set":false}))
 }
-
-fn http_agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_secs(12))
-        .timeout_read(Duration::from_secs(90))
-        .timeout_write(Duration::from_secs(30))
-        .user_agent("StuartMD/3.0.0")
-        .build()
-}
-
 #[tauri::command]
-pub fn stuart_ai_test_provider(provider_id: String) -> Value {
-    let ai = load_ai_settings();
-    let providers = ai
-        .get("providers")
-        .and_then(|p| p.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let Some(p) = providers
-        .iter()
-        .find(|x| x.get("id").and_then(|i| i.as_str()) == Some(provider_id.as_str()))
-        .cloned()
-    else {
-        return json!({"error": "服务商不存在"});
-    };
-    let (base, key_sent_to) = match effective_base_url(&p) {
-        Ok(v) => v,
-        Err(e) => return json!({"error": e}),
-    };
-    let key = match read_api_key(&provider_id) {
-        Ok(k) => k,
-        Err(e) => return json!({"error": e}),
-    };
-    let url = format!("{}/models", base);
-    let resp = http_agent()
-        .get(&url)
-        .set("Authorization", &format!("Bearer {key}"))
-        .call();
-    match resp {
-        Ok(r) => {
-            let status = r.status();
-            let body = r.into_string().unwrap_or_default();
-            if !(200..300).contains(&status) {
-                return json!({"error": format!("HTTP {status}"), "key_sent_to": key_sent_to, "body": body.chars().take(200).collect::<String>()});
-            }
-            let models: Vec<String> = serde_json::from_str::<Value>(&body)
-                .ok()
-                .and_then(|v| {
-                    v.get("data")
-                        .and_then(|d| d.as_array())
-                        .map(|arr| {
-                            arr.iter()
-                                .filter_map(|m| m.get("id").and_then(|x| x.as_str()).map(|s| s.to_string()))
-                                .take(50)
-                                .collect()
-                        })
-                })
-                .unwrap_or_default();
-            json!({
-                "ok": true,
-                "provider_id": provider_id,
-                "models": models,
-                "model": p.get("model").cloned().unwrap_or(json!("")),
-                "key_sent_to": key_sent_to,
-            })
-        }
-        Err(ureq::Error::Status(code, r)) => {
-            let body = r.into_string().unwrap_or_default();
-            json!({"error": format!("HTTP {code}"), "key_sent_to": key_sent_to, "body": body.chars().take(200).collect::<String>()})
-        }
-        Err(e) => json!({"error": e.to_string(), "key_sent_to": key_sent_to}),
-    }
+pub async fn stuart_ai_test_provider(window:tauri::WebviewWindow,provider_id:String)->Result<Value,String> {
+    let probe=crate::ai::begin_probe(window.label())?;let cancellation=probe.cancellation.clone();
+    test_provider_connection(&provider_id,cancellation).await
 }
-
-#[tauri::command]
-pub fn stuart_ai_chat_cancel(request_id: String) -> Value {
-    if let Ok(mut c) = CANCEL.lock() {
-        c.insert(request_id.clone());
-    }
-    json!({"ok": true, "request_id": request_id})
-}
-
-/// Start a streaming explain/chat. Returns immediately; deltas arrive as events:
-/// `ai-chat-delta` / `ai-chat-done` / `ai-chat-error`
-#[tauri::command]
-pub fn stuart_ai_chat_start(
-    app: tauri::AppHandle,
-    request_id: String,
-    provider_id: Option<String>,
-    model: Option<String>,
-    messages: Value,
-    thinking: Option<String>,
-    max_output_tokens: Option<u64>,
-) -> Value {
-    let rid = request_id.trim().to_string();
-    if rid.is_empty() || rid.len() > 64 {
-        return json!({"error": "request_id 非法"});
-    }
-    if !messages.is_array() {
-        return json!({"error": "messages 必须是数组"});
-    }
-    if let Ok(mut a) = ACTIVE.lock() {
-        if a.contains_key(&rid) {
-            return json!({"error": "请求已在进行中", "request_id": rid});
-        }
-        a.insert(rid.clone(), ());
-    }
-    if let Ok(mut c) = CANCEL.lock() {
-        c.remove(&rid);
-    }
-
-    let ai = load_ai_settings();
-    let pid = provider_id
-        .clone()
-        .unwrap_or_else(|| {
-            ai.get("active_provider_id")
-                .and_then(|x| x.as_str())
-                .unwrap_or("deepseek")
-                .to_string()
-        });
-    let provider = match active_provider(&json!({
-        "active_provider_id": pid,
-        "providers": ai.get("providers").cloned().unwrap_or(json!([]))
-    })) {
-        Ok(p) => p,
-        Err(e) => {
-            clear_active(&rid);
-            return json!({"error": e});
-        }
-    };
-
-    let (base, key_sent_to) = match effective_base_url(&provider) {
-        Ok(v) => v,
-        Err(e) => {
-            clear_active(&rid);
-            return json!({"error": e});
-        }
-    };
-    let model_id = model
-        .clone()
-        .filter(|m| !m.trim().is_empty())
-        .unwrap_or_else(|| {
-            provider
-                .get("model")
-                .and_then(|x| x.as_str())
-                .unwrap_or("")
-                .to_string()
-        });
-    if model_id.is_empty() {
-        clear_active(&rid);
-        return json!({"error": "请先选择模型 ID"});
-    }
-    let key = match read_api_key(&pid) {
-        Ok(k) => k,
-        Err(e) => {
-            clear_active(&rid);
-            return json!({"error": e});
-        }
-    };
-
-    let think = thinking.unwrap_or_else(|| {
-        ai.get("thinking")
-            .and_then(|x| x.as_str())
-            .unwrap_or("balanced")
-            .to_string()
-    });
-    let max_out = max_output_tokens.unwrap_or_else(|| {
-        ai.get("max_output_tokens")
-            .and_then(|x| x.as_u64())
-            .unwrap_or(2048)
-    });
-
-    let mut body = json!({
-        "model": model_id,
-        "messages": messages,
-        "stream": true,
-        "max_tokens": max_out,
-    });
-    if let Some(effort) = thinking_to_effort(&think) {
-        // OpenAI-compatible path; unknown params are often ignored
-        if let Some(obj) = body.as_object_mut() {
-            obj.insert("reasoning_effort".into(), json!(effort));
-        }
-    }
-
-    let url = format!("{}/chat/completions", base);
-    let rid2 = rid.clone();
-    let key_sent_to2 = key_sent_to.clone();
-    std::thread::spawn(move || {
-        let mut acc = String::new();
-        let mut finished_ok = false;
-        let mut err_msg = String::new();
-
-        let agent = http_agent();
-        let result = agent
-            .post(&url)
-            .set("Authorization", &format!("Bearer {key}"))
-            .set("Content-Type", "application/json")
-            .set("Accept", "text/event-stream")
-            .send_json(body.clone());
-
-        match result {
-            Ok(resp) => {
-                let mut reader = resp.into_reader();
-                let mut byte_buf: Vec<u8> = Vec::with_capacity(4096);
-                let mut chunk = [0u8; 2048];
-                const MAX_LINE_BYTES: usize = 1024 * 1024; // 1MB 单行安全上限
-
-                loop {
-                    if is_cancelled(&rid2) {
-                        break;
-                    }
-                    match reader.read(&mut chunk) {
-                        Ok(0) => {
-                            if !byte_buf.is_empty() {
-                                let clean_slice = if byte_buf.ends_with(b"\r\n") {
-                                    &byte_buf[..byte_buf.len() - 2]
-                                } else if byte_buf.ends_with(b"\n") {
-                                    &byte_buf[..byte_buf.len() - 1]
-                                } else {
-                                    &byte_buf[..]
-                                };
-                                let line = String::from_utf8_lossy(clean_slice);
-                                if let Some(data) = parse_sse_data_line(&line) {
-                                    if data == "[DONE]" {
-                                        finished_ok = true;
-                                    } else if let Ok(v) = serde_json::from_str::<Value>(&data) {
-                                        if let Some(err) = v.get("error") {
-                                            err_msg = err
-                                                .get("message")
-                                                .and_then(|m| m.as_str())
-                                                .unwrap_or("上游返回错误")
-                                                .to_string();
-                                        }
-                                        let piece = extract_delta_text(&v);
-                                        if !piece.is_empty() {
-                                            acc.push_str(&piece);
-                                            emit_chat(
-                                                &app,
-                                                "ai-chat-delta",
-                                                json!({"requestId": rid2, "text": piece}),
-                                            );
-                                        }
-                                    }
-                                }
-                                byte_buf.clear();
-                            }
-                            finished_ok = finished_ok || !acc.is_empty() || err_msg.is_empty();
-                            break;
-                        }
-                        Ok(n) => {
-                            byte_buf.extend_from_slice(&chunk[..n]);
-
-                            if byte_buf.len() > MAX_LINE_BYTES {
-                                eprintln!("[AI Stream] 单行长度超过 1MB 限制，主动清空缓冲区以保护内存");
-                                byte_buf.clear();
-                                break;
-                            }
-
-                            while let Some(pos) = byte_buf.iter().position(|&b| b == b'\n') {
-                                let line_bytes: Vec<u8> = byte_buf.drain(..=pos).collect();
-                                let clean_slice = if line_bytes.ends_with(b"\r\n") {
-                                    &line_bytes[..line_bytes.len() - 2]
-                                } else if line_bytes.ends_with(b"\n") {
-                                    &line_bytes[..line_bytes.len() - 1]
-                                } else {
-                                    &line_bytes[..]
-                                };
-
-                                let line = String::from_utf8_lossy(clean_slice);
-                                if let Some(data) = parse_sse_data_line(&line) {
-                                    if data == "[DONE]" {
-                                        finished_ok = true;
-                                        break;
-                                    }
-                                    if let Ok(v) = serde_json::from_str::<Value>(&data) {
-                                        if let Some(err) = v.get("error") {
-                                            err_msg = err
-                                                .get("message")
-                                                .and_then(|m| m.as_str())
-                                                .unwrap_or("上游返回错误")
-                                                .to_string();
-                                        }
-                                        let piece = extract_delta_text(&v);
-                                        if !piece.is_empty() {
-                                            acc.push_str(&piece);
-                                            emit_chat(
-                                                &app,
-                                                "ai-chat-delta",
-                                                json!({"requestId": rid2, "text": piece}),
-                                            );
-                                        }
-                                    }
-                                }
-                            }
-                            if err_msg.is_empty() && finished_ok {
-                                break;
-                            }
-                            if !err_msg.is_empty() {
-                                break;
-                            }
-                        }
-                        Err(e) => {
-                            if acc.is_empty() {
-                                err_msg = e.to_string();
-                            } else {
-                                // partial success
-                                finished_ok = true;
-                            }
-                            break;
-                        }
-                    }
-                }
-            }
-            Err(ureq::Error::Status(code, r)) => {
-                let body_s = r.into_string().unwrap_or_default();
-                // Retry non-stream once for some gateways
-                if code == 400 || code == 404 || code == 415 {
-                    let mut nb = body.clone();
-                    if let Some(o) = nb.as_object_mut() {
-                        o.insert("stream".into(), json!(false));
-                    }
-                    if let Ok(r2) = agent
-                        .post(&url)
-                        .set("Authorization", &format!("Bearer {key}"))
-                        .set("Content-Type", "application/json")
-                        .send_json(nb)
-                    {
-                        if let Ok(text) = r2.into_string() {
-                            if let Ok(v) = serde_json::from_str::<Value>(&text) {
-                                if let Some(content) = v
-                                    .pointer("/choices/0/message/content")
-                                    .and_then(|x| x.as_str())
-                                {
-                                    acc = content.to_string();
-                                    emit_chat(
-                                        &app,
-                                        "ai-chat-delta",
-                                        json!({"requestId": rid2, "text": acc}),
-                                    );
-                                    finished_ok = true;
-                                } else if let Some(msg) = v
-                                    .pointer("/error/message")
-                                    .and_then(|x| x.as_str())
-                                {
-                                    err_msg = msg.to_string();
-                                }
-                            }
-                        }
-                    }
-                    if !finished_ok && err_msg.is_empty() {
-                        err_msg = format!(
-                            "HTTP {code}: {}",
-                            body_s.chars().take(180).collect::<String>()
-                        );
-                    }
-                } else {
-                    err_msg = format!(
-                        "HTTP {code}: {}",
-                        body_s.chars().take(180).collect::<String>()
-                    );
-                }
-            }
-            Err(e) => {
-                err_msg = e.to_string();
-            }
-        }
-
-        let cancelled = !finished_ok && is_cancelled(&rid2);
-        clear_active(&rid2);
-        if !err_msg.is_empty() && acc.is_empty() {
-            emit_chat(
-                &app,
-                "ai-chat-done",
-                json!({"requestId": rid2, "ok": false, "text": "", "error": err_msg, "cancelled": cancelled, "key_sent_to": key_sent_to2}),
-            );
-        } else {
-            emit_chat(
-                &app,
-                "ai-chat-done",
-                json!({
-                    "requestId": rid2,
-                    "ok": !acc.is_empty() || finished_ok,
-                    "text": acc,
-                    "error": if err_msg.is_empty() && cancelled { Some("已取消") } else if !err_msg.is_empty() { Some(err_msg.as_str()) } else { None },
-                    "cancelled": cancelled,
-                    "key_sent_to": key_sent_to2
-                }),
-            );
-        }
-    });
-
-    json!({"ok": true, "request_id": rid, "provider_id": pid, "model": model_id, "key_sent_to": key_sent_to})
+pub(crate) async fn test_provider_connection(provider_id:&str,cancellation:tokio_util::sync::CancellationToken)->Result<Value,String> {
+    crate::context::service::ensure_enabled(&cancellation)?;
+    let config=load_ai_settings();let provider=active_provider(&json!({"active_provider_id":provider_id,"providers":config["providers"]}))?;
+    let (base,host)=effective_base_url(&provider)?;let key=read_api_key(provider_id)?;
+    let client=reqwest::Client::builder().timeout(std::time::Duration::from_secs(30)).redirect(reqwest::redirect::Policy::none()).build().map_err(|error|error.to_string())?;
+    let response=tokio::select! {_=cancellation.cancelled()=>return Err("AI验证请求已经取消".into()),response=client.get(format!("{base}/models")).bearer_auth(key.as_str()).send()=>response.map_err(|error|error.without_url().to_string())?};
+    if !response.status().is_success() {return Err(format!("AI服务返回HTTP {}",response.status()));}
+    let response:Value=tokio::select! {_=cancellation.cancelled()=>return Err("AI验证请求已经取消".into()),response=response.json()=>response.map_err(|error|error.to_string())?};
+    let models=response["data"].as_array().ok_or("服务商响应缺少实际模型列表")?.iter().map(|model|model["id"].as_str().map(str::to_owned).ok_or("模型编号缺失")).collect::<Result<Vec<_>,_>>()?;
+    crate::context::service::ensure_enabled(&cancellation)?;
+    Ok(json!({"ok":true,"provider_id":provider_id,"models":models,"model":provider["model"],"key_sent_to":host}))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
-    fn test_parse_sse_data_line_done_preservation() {
-        // [DONE] token must be preserved, not dropped!
-        assert_eq!(parse_sse_data_line("data: [DONE]"), Some("[DONE]".to_string()));
-        assert_eq!(parse_sse_data_line("data:[DONE]"), Some("[DONE]".to_string()));
-        assert_eq!(parse_sse_data_line("data: {\"choices\":[]}"), Some("{\"choices\":[]}".to_string()));
-        assert_eq!(parse_sse_data_line("data: "), None);
-        assert_eq!(parse_sse_data_line("event: message"), None);
-        assert_eq!(parse_sse_data_line("   data:  [DONE]  "), Some("[DONE]".to_string()));
-    }
-
-    #[test]
-    fn test_pinned_builtin_base_urls() {
-        // Builtins must pin to hardcoded hosts regardless of config overrides.
-        let p = json!({"id": "deepseek", "base_url": "https://evil.example.com/v1"});
-        let (base, host) = effective_base_url(&p).unwrap();
-        assert_eq!(base, "https://api.deepseek.com/v1");
-        assert_eq!(host, "api.deepseek.com");
-        assert!(pinned_base_url("qwen").is_some());
-        assert!(pinned_base_url("kimi").is_some());
-        assert!(pinned_base_url("glm").is_some());
-        assert!(pinned_base_url("custom").is_none());
-    }
-
-    #[test]
-    fn test_validate_base_url_scheme_rules() {
-        assert!(validate_base_url("https://api.example.com/v1").is_ok());
-        assert!(validate_base_url("http://localhost:8080/v1").is_ok());
-        assert!(validate_base_url("http://127.0.0.1:1234/v1").is_ok());
-        assert!(validate_base_url("http://evil.example.com/v1").is_err());
-        assert!(validate_base_url("ftp://evil.example.com/").is_err());
-        assert!(validate_base_url("").is_err());
+    fn builtin_credentials_use_the_official_host() {
+        let (base,host)=effective_base_url(&json!({"id":"deepseek","base_url":"https://example.com/v1"})).unwrap();
+        assert_eq!(base,"https://api.deepseek.com/v1");assert_eq!(host,"api.deepseek.com");
         assert!(validate_base_url("https://user:pass@example.com/v1").is_err());
-        // Full /chat/completions URL is normalized to API root
-        assert_eq!(
-            validate_base_url("https://api.example.com/v1/chat/completions").unwrap(),
-            "https://api.example.com/v1"
-        );
+        assert!(validate_base_url("http://example.com/v1").is_err());
+        assert!(validate_base_url("http://localhost:8080/v1").is_ok());
+        assert_eq!(validate_base_url("https://api.example.com/v1/chat/completions").unwrap(),"https://api.example.com/v1");
     }
-
     #[test]
-    fn test_host_of() {
-        assert_eq!(host_of("https://api.deepseek.com/v1"), "api.deepseek.com");
-        assert_eq!(host_of("not a url"), "");
+    fn provider_id_cannot_escape_the_keys_directory() {
+        for id in ["", "..", "../key", "x/y", ".hidden"] {assert!(sanitize_provider_id(id).is_err());}
     }
-
     #[cfg(windows)]
     #[test]
-    fn test_dpapi_protect_unprotect_roundtrip_and_entropy() {
-        let secret = b"my-super-secret-api-key-12345";
-        let encrypted = dpapi_protect(secret).expect("encryption should succeed");
-        assert!(!encrypted.is_empty());
-        assert_ne!(encrypted.as_slice(), secret);
-
-        let decrypted = dpapi_unprotect(&encrypted).expect("decryption should succeed");
-        assert_eq!(decrypted.as_slice(), secret);
-
-        // Empty slice test
-        let empty_enc = dpapi_protect(b"").expect("empty slice encryption should succeed");
-        assert!(empty_enc.is_empty());
-        let empty_dec = dpapi_unprotect(b"").expect("empty slice decryption should succeed");
-        assert!(empty_dec.is_empty());
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn test_dpapi_legacy_fallback_no_entropy() {
-        use windows_sys::Win32::Foundation::LocalFree;
-        use windows_sys::Win32::Security::Cryptography::{
-            CryptProtectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
-        };
-
-        // Simulate a legacy encrypted secret without application entropy
-        let secret = b"legacy-unprotected-key-99999";
-        let in_blob = CRYPT_INTEGER_BLOB {
-            cbData: secret.len() as u32,
-            pbData: secret.as_ptr() as *mut u8,
-        };
-        let mut out_blob = CRYPT_INTEGER_BLOB {
-            cbData: 0,
-            pbData: std::ptr::null_mut(),
-        };
-
-        let ok = unsafe {
-            CryptProtectData(
-                &in_blob,
-                std::ptr::null(),
-                std::ptr::null_mut(), // null entropy (legacy)
-                std::ptr::null_mut(),
-                std::ptr::null(),
-                CRYPTPROTECT_UI_FORBIDDEN,
-                &mut out_blob,
-            )
-        };
-        assert_ne!(ok, 0);
-        let legacy_blob = unsafe { std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize) }.to_vec();
-        unsafe { LocalFree(out_blob.pbData as *mut core::ffi::c_void) };
-
-        // Test that dpapi_unprotect seamlessly decrypts legacy secret via dual-fallback!
-        let decrypted = dpapi_unprotect(&legacy_blob).expect("dual-fallback should decrypt legacy key");
-        assert_eq!(decrypted.as_slice(), secret);
+    fn windows_dpapi_protects_and_reads_the_same_user_key() {
+        let data="公开的DPAPI验证数据".as_bytes();let encrypted=dpapi_protect(data).unwrap();
+        assert_ne!(encrypted,data);assert_eq!(dpapi_unprotect(&encrypted).unwrap(),data);
+        assert!(dpapi_unprotect("无效的密文".as_bytes()).is_err());
     }
 }

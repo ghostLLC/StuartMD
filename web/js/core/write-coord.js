@@ -15,7 +15,7 @@
   const seqs = new Map();
 
   function normKey(path) {
-    return String(path == null ? "" : path).replace(/\\/g, "/");
+    return String(path == null ? "" : path).replace(/\\/g, "/").toLowerCase();
   }
 
   /**
@@ -43,17 +43,14 @@
 
   /**
    * Run fn after every previously enqueued fn for the same absolute path.
-   * fn may be sync or return a promise. Failures resolve to { error } so the
-   * chain never jams. Returns a promise of fn's result.
+   * 调用者获得原始成功结果或错误，下一次写入继续按顺序执行。
    */
   function enqueue(path, fn) {
     const key = normKey(path);
     const prev = queues.get(key) || Promise.resolve();
-    const next = prev
-      .then(() => (typeof fn === "function" ? fn() : undefined))
-      .catch((e) => {
-        return { error: String(e && e.message ? e.message : e) };
-      });
+    if (typeof fn !== "function") throw new TypeError("写入操作必须提供函数");
+    // 前一次失败已交给对应调用者，本次操作仍按文件顺序执行。
+    const next = prev.then(fn, fn);
     queues.set(key, next);
     next.then(
       () => {
@@ -72,6 +69,10 @@
     seqs.clear();
   }
 
+  async function flush() {
+    while (queues.size) await Promise.all([...queues.values()]);
+  }
+
   global.StuartCore = global.StuartCore || {};
   global.StuartCore.writeCoord = {
     enqueue,
@@ -79,5 +80,6 @@
     isStale,
     currentSeq,
     reset,
+    flush,
   };
 })(typeof window !== "undefined" ? window : globalThis);

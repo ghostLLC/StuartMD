@@ -1,388 +1,97 @@
-/**
- * StuartMD AI client — config, explain streaming, memory assist.
- * Host: window.StuartAI
- */
 (function (global) {
   "use strict";
-
-  const Ctx = () => global.StuartAIContext || null;
-  const api = () => (global.pywebview && global.pywebview.api) || null;
-
-  function rid() {
-    return "ai-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+  const state = { ai: null };
+  function api() {
+    const bridge = global.pywebview?.api;
+    if (!bridge) throw new Error("原生接口尚未加载");
+    return bridge;
   }
-
-  const state = {
-    ai: null,
-    requestId: null,
-    streaming: false,
-    answer: "",
-    listenersBound: false,
-    onDelta: null,
-    onDone: null,
-  };
-
-  function defaultAi() {
-    const core = global.StuartCore && global.StuartCore.settings;
-    return core && core.defaultAi ? core.defaultAi() : { providers: [] };
+  function checked(result) {
+    if (result?.error) throw new Error(result.error);
+    return result;
   }
-
-  async function ensureConfig(force) {
+  async function ensureConfig(force = false) {
     if (state.ai && !force) return state.ai;
-    const a = api();
-    if (a && a.ai_get_config) {
-      const res = await a.ai_get_config();
-      if (res && res.ai) {
-        state.ai = res.ai;
-        return state.ai;
-      }
-    }
-    // fallback: settings payload
-    if (a && a.get_settings) {
-      const s = await a.get_settings();
-      state.ai = (s && s.ai) || defaultAi();
-      return state.ai;
-    }
-    state.ai = defaultAi();
+    const result = checked(await api().ai_get_config());
+    if (!result.ai) throw new Error("AI设置响应缺少配置");
+    state.ai = result.ai;
     return state.ai;
   }
-
   async function saveAi(next) {
-    const a = api();
-    state.ai = next;
-    if (a && a.ai_save_config) {
-      const res = await a.ai_save_config(next);
-      if (res && res.ai) state.ai = res.ai;
-      return res;
+    let result = checked(await api().ai_save_config(next));
+    if (result.needs_confirm) {
+      const accepted = await global.StuartUIConfirm(`保存后会把已保存的 API Key 发送到 ${result.detail.key_sent_to}。确认使用这个服务地址吗？`);
+      if (!accepted) throw new Error("服务地址修改已经取消");
+      result = checked(await api().ai_save_config(next, true));
     }
-    if (a && a.save_settings) {
-      return a.save_settings({ ai: next });
-    }
-    return { error: "bridge missing" };
+    if (!result.ok || !result.ai) throw new Error("AI设置没有完成保存");
+    state.ai = result.ai;
+    if (!result.ai.enabled) await global.StuartAIService.cancel();
+    return result;
   }
-
-  async function setApiKey(providerId, key) {
-    const a = api();
-    if (!a || !a.ai_set_api_key) return { error: "bridge missing" };
-    return a.ai_set_api_key(providerId, key);
+  const setApiKey = async (providerId, key) => checked(await api().ai_set_api_key(providerId, key));
+  const clearApiKey = async providerId => checked(await api().ai_clear_api_key(providerId));
+  const testProvider = async providerId => checked(await api().ai_test_provider(providerId));
+  function getStyle(ai = state.ai || {}) {
+    const style = ai.style || {};
+    return { length: style.length || "normal", tone: style.tone || "neutral", custom: style.custom || "",
+      length_hint: style.length_hint || "", feedback: style.feedback || { short: 0, ok: 0, long: 0 } };
   }
-
-  async function clearApiKey(providerId) {
-    const a = api();
-    if (!a || !a.ai_clear_api_key) return { error: "bridge missing" };
-    return a.ai_clear_api_key(providerId);
-  }
-
-  async function testProvider(providerId) {
-    const a = api();
-    if (!a || !a.ai_test_provider) return { error: "bridge missing" };
-    return a.ai_test_provider(providerId);
-  }
-
-  async function bindEvents() {
-    if (state.listenersBound) return;
-    const tauri = global.__TAURI__ || global.__TAURI_INTERNALS__;
-    let listen = null;
-    if (global.__TAURI__ && global.__TAURI__.event && global.__TAURI__.event.listen) {
-      listen = global.__TAURI__.event.listen;
-    } else if (
-      global.__TAURI_INTERNALS__ &&
-      typeof global.__TAURI_INTERNALS__.listen === "function"
-    ) {
-      listen = global.__TAURI_INTERNALS__.listen.bind(global.__TAURI_INTERNALS__);
-    }
-    if (!listen) {
-      // polling fallback via custom window events emitted by bridge
-      global.addEventListener("ai-chat-delta", (e) => onDelta(e.detail));
-      global.addEventListener("ai-chat-done", (e) => onDone(e.detail));
-      state.listenersBound = true;
-      return;
-    }
-    await Promise.all([
-      listen("ai-chat-delta", (e) => onDelta(e.payload || e)),
-      listen("ai-chat-done", (e) => onDone(e.payload || e)),
-    ]);
-    state.listenersBound = true;
-    void tauri;
-  }
-
-  function onDelta(payload) {
-    if (!payload || (payload.requestId && state.requestId && payload.requestId !== state.requestId)) {
-      return;
-    }
-    const piece = payload.text || "";
-    state.answer += piece;
-    if (typeof state.onDelta === "function") state.onDelta(state.answer, piece);
-  }
-
-  function onDone(payload) {
-    if (!payload || (payload.requestId && state.requestId && payload.requestId !== state.requestId)) {
-      return;
-    }
-    state.streaming = false;
-    const text = payload.text || state.answer || "";
-    state.answer = text;
-    if (typeof state.onDone === "function") state.onDone(payload);
-    state.requestId = null;
-  }
-
-  async function cancel(reqId) {
-    const a = api();
-    const id = reqId || state.requestId;
-    state.streaming = false;
-    state.requestId = null;
-    if (a && a.ai_chat_cancel && id) {
-      try {
-        await a.ai_chat_cancel(id);
-      } catch (_) {}
-    }
-    return { ok: true, request_id: id };
-  }
-
-  async function memoryGet(key) {
-    const a = api();
-    if (!a || !a.memory_get) return { error: "bridge missing" };
-    return a.memory_get(key);
-  }
-
-  async function memorySet(key, content) {
-    const a = api();
-    if (!a || !a.memory_set) return { error: "bridge missing" };
-    return a.memory_set(key, content);
-  }
-
-  function getStyle(ai) {
-    const cfg = ai || state.ai || {};
-    const s = cfg.style || {};
-    return {
-      length: s.length || "normal",
-      tone: s.tone || "neutral",
-      custom: s.custom || "",
-      length_hint: s.length_hint || "",
-      feedback: s.feedback || { short: 0, ok: 0, long: 0 },
-    };
-  }
-
   async function saveStyle(patch) {
     const cfg = await ensureConfig(true);
-    const next = Object.assign({}, cfg);
-    const cur = getStyle(cfg);
-    next.style = Object.assign({}, cur, patch || {});
-    if (patch && patch.feedback) {
-      next.style.feedback = Object.assign({}, cur.feedback || {}, patch.feedback);
-    }
-    const res = await saveAi(next);
-    return res && res.error ? res : { ok: true, style: getStyle(state.ai) };
+    const previous = getStyle(cfg);
+    const result = await saveAi({ ...cfg, style: { ...previous, ...patch, feedback: { ...previous.feedback, ...patch.feedback } } });
+    return { ...result, style: getStyle(state.ai) };
   }
-
-  /** Record first-answer length feedback → mild style constraint + memory note. */
+  function activeProvider(ai) { return ai?.providers?.find(provider => provider.id === ai.active_provider_id) || null; }
+  async function rememberSnippet(content, metadata = {}) {
+    const text = String(content ?? "");
+    if (!text.trim()) throw new Error("记忆正文为空");
+    const current = global.StuartMD.getDocument();
+    const now = Date.now(), memoryId = crypto.randomUUID();
+    const workspace = Object.hasOwn(metadata, "workspaceRoot") ? metadata.workspaceRoot : global.StuartMD.state.workspaceRoot || null;
+    const documentId = metadata.documentId || current.documentId;
+    const item = {
+      memoryId, tier: metadata.category === "preference" ? 3 : 2, category: metadata.category || "note", content: text,
+      confidence: 1, createdAt: now, lastAccessedAt: now, accessCount: 0, pinned: false,
+      scope: metadata.category === "preference" ? "global" : "document", workspaceId: metadata.category === "preference" ? null : workspace,
+      documentId: metadata.category === "preference" ? null : documentId, preferenceKey: metadata.preferenceKey || null,
+      version: metadata.version || 1, sourceMessageId: metadata.sourceMessageId || null,
+      sourceAnchor: metadata.sourceAnchor || { documentId, path: current.path, revision: current.revision, createdBy: "manual-confirmation" },
+      confirmed: true, supersededBy: null, requestId: metadata.requestId || null,
+    };
+    await api().organic_memory_upsert(item);
+    return { ok: true, memoryId };
+  }
   async function recordStyleFeedback(kind) {
-    if (!["short", "ok", "long"].includes(kind)) return { error: "invalid feedback" };
+    if (!["short", "ok", "long"].includes(kind)) throw new Error("回答长度反馈类型无效");
+    const cfg = await ensureConfig(true), style = getStyle(cfg);
+    const feedback = { ...style.feedback, [kind]: (style.feedback[kind] || 0) + 1 };
+    const hint = global.StuartAIContext.lengthHintFromFeedback(feedback, style.length);
+    const result = await saveStyle({ feedback, length_hint: hint });
+    if (cfg.memory_mode !== "off") {
+      const effective = await api().organic_memory_effective(null, null);
+      const previous = effective.find(item => item.preferenceKey === "answer-length");
+      await rememberSnippet(hint || "保持当前回答长度。", { category: "preference", preferenceKey: "answer-length", version: (previous?.version || 0) + 1 });
+    }
+    return result;
+  }
+  async function handleMemoryAfterExplain(metadata, quote, answer) {
     const cfg = await ensureConfig(true);
-    const style = getStyle(cfg);
-    const fb = Object.assign({ short: 0, ok: 0, long: 0 }, style.feedback || {});
-    fb[kind] = (fb[kind] || 0) + 1;
-    const C = global.StuartAIContext;
-    const hint =
-      C && C.lengthHintFromFeedback
-        ? C.lengthHintFromFeedback(fb, style.length)
-        : style.length_hint;
-    const res = await saveStyle({ feedback: fb, length_hint: hint });
-    try {
-      const label =
-        kind === "short" ? "首答偏短" : kind === "long" ? "首答偏长" : "首答长度满意";
-      await rememberSnippet(`回答长度反馈：${label}`);
-    } catch (_) {}
-    return res;
+    if (cfg.memory_mode === "off") return { skipped: true };
+    if (cfg.memory_mode === "ask") return { ok: true, mode: "ask", ask: true };
+    if (!metadata.sessionId || !metadata.requestId) throw new Error("学习记录缺少会话或请求编号");
+    const messages = await api().session_get_messages(metadata.sessionId);
+    const source = messages.find(message => message.requestId === metadata.requestId && message.role === "assistant" && message.completionStatus === "Completed");
+    if (!source || source.content !== answer) throw new Error("学习正文与已经保存的完整回答不一致");
+    await rememberSnippet(`问题及引用：\n${quote}\n\n完整回答：\n${answer}`, {
+      ...metadata, category: "concept", preferenceKey: "learning:" + metadata.requestId, sourceMessageId: source.messageId,
+      sourceAnchor: { ...metadata.sourceAnchor, sessionId: metadata.sessionId, requestId: metadata.requestId, sourceHash: source.sourceHash },
+    });
+    return { ok: true, mode: "always" };
   }
-
-  async function loadMemoryProfile() {
-    const cfg = await ensureConfig();
-    const mode = (cfg && cfg.memory_mode) || "always";
-    if (mode === "off") return "";
-    try {
-      const res = await memoryGet("user_profile");
-      if (res && res.content) return String(res.content).slice(0, 2000);
-    } catch (_) {}
-    return "";
-  }
-
-  async function rememberSnippet(snippet) {
-    const text = String(snippet || "").trim().slice(0, 400);
-    if (!text) return { error: "内容为空" };
-    const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
-    let prev = "";
-    try {
-      const res = await memoryGet("user_profile");
-      prev = (res && res.content) || "";
-    } catch (_) {}
-    const lines = prev ? prev.split("\n") : [];
-    if (lines.some((l) => l.includes(text))) {
-      return { ok: true, deduped: true };
-    }
-    lines.push(`- [${stamp}] ${text}`);
-    // keep profile compact
-    const next = lines.slice(-80).join("\n");
-    return memorySet("user_profile", next);
-  }
-
-  async function rememberActivity(meta, quote) {
-    const stamp = new Date().toISOString();
-    const line = `- ${stamp} | ${(meta && meta.name) || ""} | ${String(quote || "").slice(0, 80).replace(/\n/g, " ")}`;
-    let prev = "";
-    try {
-      const res = await memoryGet("activity_explains");
-      prev = (res && res.content) || "";
-    } catch (_) {}
-    const body = prev ? prev + "\n" + line : `# StuartMD 讲解活动\n${line}`;
-    return memorySet("activity_explains", body.split("\n").slice(-200).join("\n"));
-  }
-
-  function activeProvider(ai) {
-    const list = (ai && ai.providers) || [];
-    const id = (ai && ai.active_provider_id) || "deepseek";
-    return list.find((p) => p.id === id) || list[0] || null;
-  }
-
-  function hasKey(provider) {
-    return !!(provider && (provider.key_set || provider.has_key));
-  }
-
-  /**
-   * Start explain. Returns {ok, requestId} or {error}.
-   */
-  async function explain(input, handlers) {
-    const C = Ctx();
-    if (!C) return { error: "AI context module missing" };
-    await bindEvents();
-    const cfg = await ensureConfig();
-    if (!cfg || cfg.enabled === false) {
-      return { error: "AI 功能已关闭，请在「模型」中启用" };
-    }
-    const provider = activeProvider(cfg);
-    if (!provider) return { error: "请先配置 AI 服务商" };
-    if (!hasKey(provider) && provider.id !== "custom") {
-      // key_set may be backend-enforced; still try and surface error
-    }
-    if (state.streaming) {
-      await cancel();
-    }
-
-    let built;
-    const memoryProfile = await loadMemoryProfile();
-    if (input && input.kind === "pdf") {
-      built = C.buildPdfExplain(input, {
-        maxChars: cfg.context_max_chars || C.DEFAULT_MAX,
-        scope: cfg.context_scope,
-        memoryProfile,
-      });
-    } else {
-      const host = global.StuartMD;
-      const quoteIn = (input && input.quote) || "";
-      built = C.buildMarkdownExplain(host, {
-        maxChars: cfg.context_max_chars || C.DEFAULT_MAX,
-        scope: cfg.context_scope,
-        quote: quoteIn,
-        memoryProfile,
-      });
-      if (!built.quote && host && host.getSelectionCache) {
-        const cache = host.getSelectionCache();
-        if (cache && cache.text) {
-          built = C.buildMarkdownExplain(host, {
-            maxChars: cfg.context_max_chars || C.DEFAULT_MAX,
-            scope: cfg.context_scope,
-            quote: cache.text,
-            memoryProfile,
-          });
-        }
-      }
-    }
-
-    if (!built.quote || !String(built.quote).trim()) {
-      return { error: "请先选中要问答的内容" };
-    }
-
-    const style = getStyle(cfg);
-    const messages = [
-      { role: "system", content: C.systemPrompt(style) },
-      { role: "user", content: built.promptUser },
-    ];
-
-    const requestId = rid();
-    state.requestId = requestId;
-    state.answer = "";
-    state.streaming = true;
-    state.onDelta = handlers && handlers.onDelta;
-    state.onDone = handlers && handlers.onDone;
-
-    const a = api();
-    if (!a || !a.ai_chat_start) {
-      state.streaming = false;
-      state.requestId = null;
-      return { error: "bridge missing ai_chat_start" };
-    }
-
-    const res = await a.ai_chat_start(
-      requestId,
-      provider.id,
-      provider.model,
-      messages,
-      cfg.thinking || "balanced",
-      cfg.max_output_tokens || 2048
-    );
-    if (res && res.error) {
-      state.streaming = false;
-      state.requestId = null;
-      return res;
-    }
-    return { ok: true, requestId, meta: built.meta, quote: built.quote };
-  }
-
-  async function handleMemoryAfterExplain(meta, quote, answer) {
-    const cfg = await ensureConfig();
-    const mode = (cfg && cfg.memory_mode) || "always";
-    if (mode === "off") return { skipped: true };
-    try {
-      await rememberActivity(meta, quote);
-      if (mode === "always") {
-        const tip = `讲解偏好：关注 ${(meta && meta.heading) || (meta && meta.name) || "文档"} 相关内容`;
-        await rememberSnippet(tip);
-        if (answer && answer.length > 0) {
-          // light topic line
-          const topic = String(quote || "").slice(0, 40);
-          if (topic) await rememberSnippet(`常用主题片段：${topic}`);
-        }
-        return { ok: true, mode };
-      }
-      return { ok: true, mode, ask: true };
-    } catch (e) {
-      return { error: e && e.message ? e.message : String(e) };
-    }
-  }
-
-  global.StuartAI = {
-    state,
-    get config() {
-      return state.ai;
-    },
-    ensureConfig,
-    saveAi,
-    getStyle,
-    saveStyle,
-    recordStyleFeedback,
-    setApiKey,
-    clearApiKey,
-    testProvider,
-    explain,
-    cancel,
-    memoryGet,
-    memorySet,
-    loadMemoryProfile,
-    rememberSnippet,
-    handleMemoryAfterExplain,
-    activeProvider,
-    get streaming() {
-      return state.streaming;
-    },
-  };
+  global.StuartAI = { state, get config() { return state.ai; }, ensureConfig, saveAi, getStyle, saveStyle,
+    recordStyleFeedback, setApiKey, clearApiKey, testProvider, activeProvider, rememberSnippet, handleMemoryAfterExplain,
+    explain: (options, handlers) => global.StuartAIService.explainSelection(options, handlers),
+    cancel: () => global.StuartAIService.cancel(), get streaming() { return global.StuartAIService.streaming; } };
 })(typeof window !== "undefined" ? window : globalThis);

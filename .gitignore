@@ -1,4 +1,6 @@
 # Build / OS
+node_modules/
+.superpowers/
 target/
 dist/
 dist-installer/
@@ -32,3 +34,7 @@ tests/edge_profile_canvas/
 tests/edge_profile_canvas_comp/
 tests/scratch_p0_2_atomic/
 tests/scratch_p1_3_settings/
+tests/native-artifacts/
+resources/native/
+resources/tokenizers/
+.resource-cache/

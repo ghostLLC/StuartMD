@@ -1,5 +1,4 @@
-// StuartMD — runtime bridge: prefer Tauri invoke; else leave pywebview as-is.
-// Loaded before app.js. Does not change pywebview behavior when Tauri is absent.
+// StuartMD 原生命令接口，在 app.js 加载前注册。
 (function () {
   "use strict";
   if (!window.__TAURI__ && !window.__TAURI_INTERNALS__) return;
@@ -14,20 +13,37 @@
     return Promise.reject(new Error("tauri invoke missing"));
   }
 
-  function dialogApi() {
-    return window.__TAURI__?.dialog || null;
-  }
-
   const api = {
     get_app_info: () => invoke("stuart_get_app_info"),
     get_settings: () => invoke("stuart_get_settings"),
     save_settings: (data) => invoke("stuart_save_settings", { data }),
-    read_file: (path) => invoke("stuart_read_file", { path }),
+    read_file: (path) => invoke("document_read", { path }),
+    document_read: (path) => invoke("document_read", { path }),
+    document_new: () => invoke("document_new"),
+    document_release: (documentId) => invoke("document_release", { documentId }),
+    document_confirm_encoding: (documentId, encoding) => invoke("document_confirm_encoding", { documentId, encoding }),
+    document_encoding_preview: (documentId, encoding) => invoke("document_encoding_preview", { documentId, encoding }),
+    document_target_revision: (path, documentId = null) => invoke("document_target_revision", { path, documentId }),
+    save_document: (request) => invoke("save_document", { request }),
+    journal_write: (snapshot) => invoke("journal_write", { snapshot }),
+    journal_list: () => invoke("journal_list"),
+    journal_read: (documentId) => invoke("journal_read", { documentId }),
+    journal_restore: (documentId) => invoke("journal_restore", { documentId }),
+    journal_discard: (documentId) => invoke("journal_discard", { documentId }),
+    journal_flush: () => invoke("journal_flush"),
+    save_operations_list: () => invoke("save_operations_list"),
+    save_operation_read: (operationId, version, encoding = null) => invoke("save_operation_read", { operationId, version, encoding }),
+    save_operation_copy: (operationId, version, targetPath) => invoke("save_operation_copy", { operationId, version, targetPath }),
     write_file: (path, content) => invoke("stuart_write_file", { path, content }),
     read_pdf: (path) => invoke("stuart_read_pdf", { path }),
+    pdf_document_snapshot: (documentId) => invoke("pdf_document_snapshot", { documentId }),
     read_dir_tree: (path) => invoke("stuart_read_dir_tree", { path }),
     get_recents: () => invoke("stuart_get_recents"),
-    open_path: (path) => invoke("stuart_open_path", { path }),
+    open_path: async (path) => {
+      const result = await invoke("stuart_open_path", { path });
+      if (result.error || result.kind === "folder") return result;
+      return invoke("document_read", { path: result.path || path });
+    },
     open_in_new_window: (path) => invoke("stuart_open_in_new_window", { path }),
     open_new_window: () => invoke("stuart_open_new_window"),
     open_url: (url) => invoke("stuart_open_url", { url }),
@@ -39,8 +55,16 @@
     import_wallpaper: (b64, name) => invoke("stuart_import_wallpaper_ex", { b64, name }),
     get_wallpaper: () => invoke("stuart_get_wallpaper"),
     clear_wallpaper: () => invoke("stuart_clear_wallpaper"),
-    open_welcome: () => invoke("stuart_open_welcome"),
-    open_sample: () => invoke("stuart_open_sample"),
+    open_welcome: async () => {
+      const result = await invoke("stuart_open_welcome");
+      if (result.error) throw new Error(result.error);
+      return { ...await invoke("document_read", { path: result.path }), welcome: true };
+    },
+    open_sample: async () => {
+      const result = await invoke("stuart_open_sample");
+      if (result.error) throw new Error(result.error);
+      return invoke("document_read", { path: result.path });
+    },
     file_exists: (path) => invoke("stuart_file_exists", { path }),
     resolve_asset: (base, rel) => invoke("stuart_resolve_asset", { baseFile: base, rel }),
     open_data_dir: () => invoke("stuart_open_data_dir"),
@@ -50,13 +74,13 @@
     get_file_association_status: () => invoke("stuart_get_file_association_status"),
     register_file_association: () => invoke("stuart_register_file_association"),
     load_annotations: (path) => invoke("stuart_load_annotations", { pdfPath: path }),
-    save_annotations: (path, items) => invoke("stuart_save_annotations", { pdfPath: path, items }),
-    add_annotation: (path, ann) => invoke("stuart_add_annotation", { pdfPath: path, ann }),
-    delete_annotation: (path, id) =>
-      invoke("stuart_delete_annotation", { pdfPath: path, annId: id }),
-    clear_annotations: (path) => invoke("stuart_clear_annotations", { pdfPath: path }),
-    export_pdf_annotations: (path, items) =>
-      invoke("stuart_export_pdf_annotations", { pdfPath: path, items }),
+    save_annotations: (path, items, documentId) => invoke("stuart_save_annotations", { pdfPath: path, items, documentId }),
+    add_annotation: (path, ann, documentId) => invoke("stuart_add_annotation", { pdfPath: path, ann, documentId }),
+    delete_annotation: (path, id, documentId) => invoke("stuart_delete_annotation", { pdfPath: path, annId: id, documentId }),
+    clear_annotations: (path, documentId) => invoke("stuart_clear_annotations", { pdfPath: path, documentId }),
+    export_pdf_annotations: (path, items, documentId) => invoke("stuart_export_pdf_annotations", { pdfPath: path, items, documentId }),
+    edit_pdf_annotations: (path, edits, documentId) => invoke("stuart_edit_pdf_annotations", { pdfPath: path, edits, documentId }),
+    restore_pdf_annotations: (documentId, operationId, version) => invoke("stuart_restore_pdf_annotations", { documentId, operationId, version }),
     capture_window: () => invoke("stuart_capture_window"),
     apply_window_state: () => invoke("stuart_apply_window_state"),
     // AI / memory / tool surface (medium-term)
@@ -74,32 +98,38 @@
     clear_draft: (path) => invoke("stuart_clear_draft", { path }),
     // AI 3.0.0
     ai_get_config: () => invoke("stuart_ai_get_config"),
-    ai_save_config: (ai) => invoke("stuart_ai_save_config", { ai }),
+    ai_save_config: (ai, confirm) => invoke("stuart_ai_save_config", { ai, confirm: confirm ?? null }),
     ai_set_api_key: (providerId, apiKey) =>
       invoke("stuart_ai_set_api_key", { providerId, apiKey }),
     ai_clear_api_key: (providerId) => invoke("stuart_ai_clear_api_key", { providerId }),
     ai_test_provider: (providerId) => invoke("stuart_ai_test_provider", { providerId }),
-    ai_chat_start: (requestId, providerId, model, messages, thinking, maxOutputTokens) =>
-      invoke("stuart_ai_chat_start", {
+    ai_chat_start: (requestId, providerId, model, messages, thinking, maxOutputTokens, documentId, sessionId, contextInput) =>
+      invoke("stuart_ai_request_start", {
         requestId,
         providerId: providerId || null,
         model: model || null,
         messages,
         thinking: thinking || null,
         maxOutputTokens: maxOutputTokens == null ? null : maxOutputTokens,
+        documentId,
+        sessionId,
+        contextInput,
       }),
-    ai_chat_cancel: (requestId) => invoke("stuart_ai_chat_cancel", { requestId }),
+    ai_chat_cancel: (requestId) => invoke("stuart_ai_request_cancel", { requestId }),
+    ai_chat_status: (requestId) => invoke("stuart_ai_request_status", { requestId }),
     // StuartMD RAG Knowledge Engine (M1 + M2)
     rag_set_workspace: (workspaceRoot) => invoke("stuart_rag_set_workspace", { workspaceRoot }),
-    rag_query: (query, topK) => invoke("stuart_rag_query", { query, topK }),
-    rag_get_status: () => invoke("stuart_rag_get_status"),
-    rag_sync_workspace: () => invoke("stuart_rag_sync_workspace"),
-    rag_cancel_sync: () => invoke("stuart_rag_cancel_sync"),
+    rag_query: (query, topK, workspaceRoot, acceptPartial = false) => invoke("stuart_rag_query", { request: { query, topK, vaultRoot: workspaceRoot || null, acceptPartial } }),
+    rag_get_status: (workspaceRoot) => invoke("stuart_rag_get_status", { workspaceRoot: workspaceRoot || null }),
+    rag_sync_workspace: (workspaceRoot) => invoke("stuart_rag_sync_workspace", { workspaceRoot: workspaceRoot || null }),
+    rag_cancel_sync: (workspaceRoot, jobId) => invoke("stuart_rag_cancel_sync", { workspaceRoot: workspaceRoot || null, jobId: jobId || null }),
+    rag_set_model: (modelId, workspaceRoot) => invoke("stuart_rag_set_model", { modelId, workspaceRoot: workspaceRoot || null }),
+    pdf_context: (path, pageNumber) => invoke("stuart_pdf_context", { path, pageNumber }),
     // StuartMD Diff Gatekeeper (M4)
-    companion_preview_diff: (originalPath, proposedContent, currentRev) =>
-      invoke("stuart_companion_preview_diff", { originalPath, proposedContent, currentRev }),
-    companion_apply_diff: (originalPath, finalContent, expectedRev, expectedHash) =>
-      invoke("stuart_companion_apply_diff", { originalPath, finalContent, expectedRev, expectedHash }),
+    companion_preview_diff: (originalPath, proposedContent, currentRev, documentId) =>
+      invoke("stuart_companion_preview_diff", { originalPath, proposedContent, currentRev, documentId }),
+    companion_apply_diff: (originalPath, finalContent, expectedRev, expectedHash, documentId, approvalId) =>
+      invoke("stuart_companion_apply_diff", { originalPath, finalContent, expectedRev, expectedHash, documentId, approvalId }),
     companion_save_note: (originalPath, noteContent, customSuffix) =>
       invoke("stuart_companion_save_note", { originalPath, noteContent, customSuffix: customSuffix || null }),
     // StuartMD Context Pyramid & Budgeting Engine (M3)
@@ -110,112 +140,54 @@
         reserveOutput: reserveOutput == null ? null : reserveOutput,
       }),
     // StuartMD Organic Memory & Chat Archive (M5)
-    session_create: (title, workspaceRoot) =>
-      invoke("stuart_session_create", { title, workspaceRoot: workspaceRoot || null }),
+    session_create: (title, workspaceRoot, documentId, documentPath) =>
+      invoke("stuart_session_create_document", { title, workspaceRoot: workspaceRoot || null, documentId: documentId || null, documentPath: documentPath || null }),
     session_list: () => invoke("stuart_session_list"),
     session_get_messages: (sessionId) => invoke("stuart_session_get_messages", { sessionId }),
+    session_rebind: (sessionId, documentId) => invoke("stuart_session_rebind", { sessionId, documentId }),
+    session_open_document: sessionId => invoke("stuart_session_open_document", { sessionId }),
     session_add_message: (msg) => invoke("stuart_session_add_message", { msg }),
     session_delete: (sessionId) => invoke("stuart_session_delete", { sessionId }),
     session_search: (query, limit) => invoke("stuart_session_search", { query, limit: limit || 20 }),
     organic_memory_upsert: (item) => invoke("stuart_organic_memory_upsert", { item }),
     organic_memory_list: (tier) => invoke("stuart_organic_memory_list", { tier: tier == null ? null : tier }),
     organic_memory_evolve: () => invoke("stuart_organic_memory_evolve"),
+    organic_memory_search: (query, limit) => invoke("stuart_organic_memory_search", { query, limit: limit ?? 20 }),
+    organic_memory_delete: (memoryId) => invoke("stuart_organic_memory_delete", { memoryId }),
+    organic_memory_effective: (workspaceId, documentId) => invoke("stuart_organic_memory_effective", { workspaceId: workspaceId || null, documentId: documentId || null }),
+    context_model_spec: (providerId, model) => invoke("stuart_context_model_spec", { providerId, model }),
+    context_validate_model_spec: (provider) => invoke("stuart_context_validate_model_spec", { provider }),
     // Event listener helper
     listen_event: (event, handler) => {
       if (window.__TAURI__?.event?.listen) {
         return window.__TAURI__.event.listen(event, handler);
       }
-      return Promise.resolve(() => {});
+      throw new Error("Tauri事件接口不可用");
     },
 
     open_file_dialog: async () => {
-      // Prefer backend dialog (auto-grants path capability)
-      try {
-        const backend = await invoke("stuart_dialog_open_file");
-        if (backend && backend.cancelled) return null;
-        if (backend && backend.path) {
-          return await api.read_file(backend.path);
-        }
-      } catch (_) {}
-      const dlg = dialogApi();
-      if (dlg?.open) {
-        const path = await dlg.open({
-          multiple: false,
-          filters: [
-            { name: "文档", extensions: ["md", "markdown", "mdown", "mkd", "pdf", "txt"] },
-            { name: "Markdown", extensions: ["md", "markdown"] },
-            { name: "PDF", extensions: ["pdf"] },
-            { name: "全部", extensions: ["*"] },
-          ],
-        });
-        if (!path) return null;
-        try {
-          await api.register_allowed_path(path);
-        } catch (_) {}
-        return api.read_file(path);
-      }
-      return { error: "系统文件对话框不可用" };
-    },
-
-    save_file_dialog: async (content, suggested) => {
-      try {
-        const backend = await invoke("stuart_dialog_save_file", {
-          defaultName: suggested || "untitled.md",
-        });
-        if (backend && backend.cancelled) return null;
-        if (backend && backend.path) {
-          const wr = await api.write_file(backend.path, content || "");
-          if (wr && wr.error) return wr;
-          return { ok: true, path: backend.path };
-        }
-      } catch (_) {}
-      const dlg = dialogApi();
-      if (dlg?.save) {
-        const path = await dlg.save({
-          defaultPath: suggested || "untitled.md",
-          filters: [
-            { name: "Markdown", extensions: ["md", "markdown"] },
-            { name: "文本", extensions: ["txt"] },
-          ],
-        });
-        if (!path) return null;
-        let finalPath = path;
-        if (!/\.(md|markdown|txt)$/i.test(finalPath)) finalPath += ".md";
-        try {
-          await api.register_allowed_path(finalPath);
-        } catch (_) {}
-        return api.write_file(finalPath, content || "");
-      }
-      return { error: "另存为需要系统对话框" };
+      const result = await invoke("stuart_dialog_open_file");
+      if (result.error) throw new Error(result.error);
+      if (result.cancelled) return null;
+      if (!result.path) throw new Error("系统文件对话框没有返回文件路径");
+      return api.read_file(result.path);
     },
 
     open_folder_dialog: async () => {
-      try {
-        const backend = await invoke("stuart_dialog_open_folder");
-        if (backend && backend.path) return backend.path;
-      } catch (_) {}
-      const dlg = dialogApi();
-      if (dlg?.open) {
-        const path = await dlg.open({ directory: true, multiple: false });
-        return path || null;
-      }
-      return null;
+      const result = await invoke("stuart_dialog_open_folder");
+      if (result.error) throw new Error(result.error);
+      if (result.cancelled) return null;
+      if (!result.path) throw new Error("系统目录对话框没有返回目录路径");
+      return result.path;
     },
 
-    export_html: async (html, suggested) => {
-      const dlg = dialogApi();
-      if (dlg?.save) {
-        const path = await dlg.save({
-          defaultPath: suggested || "export.html",
-          filters: [{ name: "HTML", extensions: ["html", "htm"] }],
-        });
-        if (!path) return null;
-        let finalPath = path;
-        if (!/\.html?$/i.test(finalPath)) finalPath += ".html";
-        return api.write_file(finalPath, html || "");
-      }
-      return invoke("stuart_export_html", { html: html || "", suggestedName: suggested || null });
-    },
+    export_html: (request) => invoke("stuart_export_html", { request }),
+  };
+
+  api.choose_save_path = async suggested => {
+    const result = await invoke("stuart_dialog_save_file", { defaultName: suggested || "未命名.md" });
+    if (result.error) throw new Error(result.error);
+    return result.cancelled ? null : result.path;
   };
 
   window.pywebview = window.pywebview || {};

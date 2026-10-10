@@ -1,6 +1,6 @@
 [package]
 name = "stuartmd"
-version = "3.5.10"
+version = "3.5.11"
 description = "StuartMD desktop shell (Tauri)"
 authors = ["StuartMD"]
 edition = "2021"
@@ -12,6 +12,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
@@ -21,22 +22,40 @@ lopdf = { version = "0.34", features = ["chrono"] }
 ureq = { version = "2.12", features = ["json"] }
 url = "2"
 zeroize = { version = "1", features = ["derive"] }
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.32", features = ["bundled", "backup"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.25"
 sqlite-vec = "0.1"
-fastembed = "4"
+fastembed = { version = "=4.9.1", default-features = false, features = ["ort-load-dynamic"] }
 tokio = { version = "1", features = ["sync", "rt", "macros", "time"] }
 thiserror = "1"
 log = "0.4"
 urlencoding = "2.1"
 similar = { version = "2.6", features = ["inline"] }
 regex = "1.10"
+encoding = "=0.2.33"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4", "serde"] }
+pulldown-cmark = "0.13"
+tokenizers = { version = "=0.21.4", default-features = false, features = ["onig", "progressbar"] }
+ort = { version = "=2.0.0-rc.9", default-features = false, features = ["ndarray", "load-dynamic"] }
+pdfium-render = { version = "=0.9.4", default-features = false, features = ["pdfium_7881", "image_025", "thread_safe"] }
+csv = "1.4"
+image = { version = "0.25", default-features = false, features = ["png"] }
+fs2 = "0.4"
+notify = "8"
+reqwest = { version = "0.12", features = ["blocking", "json", "stream"] }
+eventsource-stream = "=0.2.3"
+futures-util = "0.3"
+tokio-util = { version = "0.7", features = ["rt"] }
+minijinja = { version = "2", features = ["builtins", "json"] }
+minijinja-contrib = { version = "2", features = ["pycompat"] }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"
 windows-sys = { version = "0.59", features = [
   "Win32_Foundation",
+  "Win32_Security",
   "Win32_Security_Cryptography",
   "Win32_System_Memory",
   "Win32_System_LibraryLoader",

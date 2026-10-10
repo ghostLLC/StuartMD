@@ -9,7 +9,6 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use log::{error, info, warn};
 use r2d2::Pool;
 use rusqlite::{params, Connection, Result as SqlResult, Error as SqlError};
 
@@ -23,6 +22,41 @@ use super::config::{
 pub struct VectorHit {
     pub chunk_id: String,
     pub distance: f32, // Cosine distance [0.0, 2.0], 0.0 is identical
+}
+
+#[cfg(test)]
+mod repair_tests {
+    use super::*;
+
+    #[test]
+    fn existing_index_rejects_a_different_model_dimension() {
+        let directory = std::env::temp_dir().join(format!("stuart-rag-dimension-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let database = directory.join("index.db");
+        let mut config = StorageConfig::default();
+        config.db_path = database.clone();
+        let storage = RagStorage::open(config.clone()).unwrap();
+        drop(storage);
+        config.embedding_dim = 384;
+        config.model_id = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2".into();
+        assert!(RagStorage::open(config).is_err(), "不同模型不得继续打开已有索引");
+        assert!(database.exists());
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn corrupt_database_is_preserved_and_reported() {
+        let directory = std::env::temp_dir().join(format!("stuart-rag-corrupt-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let database = directory.join("index.db");
+        let original = b"This file has no SQLite header.";
+        std::fs::write(&database, original).unwrap();
+        let mut config = StorageConfig::default();
+        config.db_path = database.clone();
+        assert!(RagStorage::open(config).is_err(), "损坏数据库必须返回错误");
+        assert_eq!(std::fs::read(database).unwrap(), original);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 }
 
 /// FTS5 BM25 search hit
@@ -107,14 +141,7 @@ impl RagStorage {
                 .map_err(|e| format!("Failed to create storage dir: {}", e))?;
         }
 
-        // Perform health check and attempt open
-        match Self::try_open(&config) {
-            Ok(storage) => Ok(storage),
-            Err(e) => {
-                warn!("[RagStorage] Database open failed or corrupt: {}. Initiating auto-heal...", e);
-                Self::heal_and_reopen(&config)
-            }
-        }
+        Self::try_open(&config)
     }
 
     /// Internal attempt to open writer connection, check schema integrity, and initialize pool
@@ -125,7 +152,7 @@ impl RagStorage {
         // Execute mandatory WAL and timeout PRAGMAs (DEF-CONC-02)
         let pragma_sql = format!(
             "PRAGMA journal_mode = WAL;
-             PRAGMA synchronous = NORMAL;
+             PRAGMA synchronous = FULL;
              PRAGMA busy_timeout = {};
              PRAGMA foreign_keys = ON;
              PRAGMA temp_store = MEMORY;
@@ -187,17 +214,16 @@ impl RagStorage {
             let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
             if let Some(row) = rows.next().map_err(|e| e.to_string())? {
                 let val_str: String = row.get(0).map_err(|e| e.to_string())?;
-                meta_dim = val_str.parse().ok();
+                meta_dim = Some(val_str.parse().map_err(|error| format!("无效的索引维度：{error}"))?);
             }
         }
 
         if let Some(existing_dim) = meta_dim {
             if existing_dim != config.embedding_dim {
-                warn!(
-                    "[RagStorage] Vault dimension mismatch: existing={}, requested={}",
-                    existing_dim, config.embedding_dim
-                );
+                return Err(format!("索引维度不匹配：existing={existing_dim}, requested={}", config.embedding_dim));
             }
+            let existing_model: String = tx.query_row("SELECT value FROM rag_vault_meta WHERE key='model_id'", [], |row| row.get(0)).map_err(|error| error.to_string())?;
+            if existing_model != config.model_id { return Err("索引模型身份不匹配，需要建立新的索引代际".into()); }
         } else {
             tx.execute(
                 "INSERT OR REPLACE INTO rag_vault_meta VALUES ('model_id', ?1)",
@@ -259,6 +285,12 @@ impl RagStorage {
 
             CREATE TRIGGER IF NOT EXISTS trg_rag_chunks_ad AFTER DELETE ON rag_chunks BEGIN
                 DELETE FROM rag_chunks_fts WHERE chunk_id = old.chunk_id;
+                DELETE FROM vec_chunks WHERE chunk_id = old.chunk_id;
+            END;
+            CREATE TRIGGER IF NOT EXISTS trg_rag_chunks_au AFTER UPDATE ON rag_chunks BEGIN
+                DELETE FROM rag_chunks_fts WHERE chunk_id = old.chunk_id;
+                INSERT INTO rag_chunks_fts(chunk_id, heading_path, content)
+                VALUES (new.chunk_id, new.heading_path, new.content);
             END;"
         ).map_err(|e| format!("Create relational and FTS tables error: {}", e))?;
 
@@ -277,43 +309,6 @@ impl RagStorage {
         Ok(())
     }
 
-    /// Windows-safe crash auto-heal: drop handles, isolate files, recreate fresh DB (DEF-CONC-07)
-    fn heal_and_reopen(config: &StorageConfig) -> Result<Self, String> {
-        let db_path = &config.db_path;
-
-        // Ensure handles are completely dropped in current process
-        std::thread::sleep(Duration::from_millis(30));
-
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-
-        // 1. Rename corrupted database
-        if db_path.exists() {
-            let corrupt_db = db_path.with_extension(format!("db.corrupt.{}", timestamp));
-            if let Err(e) = std::fs::rename(db_path, &corrupt_db) {
-                error!("[RagStorage] Failed to rename corrupt database: {}", e);
-                return Err(format!("Auto-heal failed to isolate database file: {}", e));
-            }
-            info!("[RagStorage] Moved corrupt database to {:?}", corrupt_db);
-        }
-
-        // 2. Rename or purge WAL / SHM
-        let wal_path = db_path.with_extension("db-wal");
-        if wal_path.exists() {
-            let corrupt_wal = db_path.with_extension(format!("db-wal.corrupt.{}", timestamp));
-            let _ = std::fs::rename(&wal_path, &corrupt_wal);
-        }
-        let shm_path = db_path.with_extension("db-shm");
-        if shm_path.exists() {
-            let _ = std::fs::remove_file(&shm_path);
-        }
-
-        // 3. Retry opening clean database
-        Self::try_open(config)
-    }
-
     /// Check out an independent read connection from the pool (P95 < 15ms SLA, DEF-CONC-01)
     pub fn get_reader(&self) -> Result<r2d2::PooledConnection<SqliteConnectionManager>, String> {
         self.reader_pool.get().map_err(|e| format!("Reader pool error: {}", e))
@@ -330,9 +325,12 @@ impl RagStorage {
 
         // 1. Insert or replace document record
         tx.execute(
-            "INSERT OR REPLACE INTO rag_documents 
+            "INSERT INTO rag_documents
              (doc_id, rel_path, file_format, content_hash, file_size, file_mtime, indexed_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(doc_id) DO UPDATE SET rel_path=excluded.rel_path,
+             file_format=excluded.file_format,content_hash=excluded.content_hash,
+             file_size=excluded.file_size,file_mtime=excluded.file_mtime,indexed_at=excluded.indexed_at",
             params![
                 doc.doc_id,
                 doc.rel_path,
@@ -357,6 +355,8 @@ impl RagStorage {
 
         // 3. Insert chunks and vectors
         for chunk in chunks {
+            let embedding = chunk.embedding.as_ref().ok_or_else(|| format!("片段缺少真实向量：{}", chunk.chunk_id))?;
+            super::embedding::validate_vector(embedding, self.config.embedding_dim)?;
             tx.execute(
                 "INSERT INTO rag_chunks 
                  (chunk_id, doc_id, chunk_index, heading_path, start_line, end_line,
@@ -445,8 +445,7 @@ impl RagStorage {
                 distance: row.get(1)?,
             })
         }).map_err(|e| format!("Query KNN error: {}", e))?
-        .filter_map(SqlResult::ok)
-        .collect();
+        .collect::<SqlResult<Vec<_>>>().map_err(|error| error.to_string())?;
 
         Ok(hits)
     }
@@ -506,8 +505,7 @@ impl RagStorage {
                 embedding: None,
             })
         }).map_err(|e| format!("Fetch chunks error: {}", e))?
-        .filter_map(SqlResult::ok)
-        .collect();
+        .collect::<SqlResult<Vec<_>>>().map_err(|error| error.to_string())?;
 
         Ok(results)
     }
@@ -518,16 +516,13 @@ impl RagStorage {
         let doc_count: usize = conn
             .query_row("SELECT count(*) FROM rag_documents", [], |r| r.get::<_, i64>(0))
             .map(|v| v as usize)
-            .unwrap_or(0);
+            .map_err(|error| error.to_string())?;
         let chunk_count: usize = conn
             .query_row("SELECT count(*) FROM rag_chunks", [], |r| r.get::<_, i64>(0))
             .map(|v| v as usize)
-            .unwrap_or(0);
+            .map_err(|error| error.to_string())?;
 
-        let now_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
+        let last_indexed: u64 = conn.query_row("SELECT COALESCE(MAX(indexed_at),0) FROM rag_documents", [], |row| row.get(0)).map_err(|error| error.to_string())?;
 
         Ok(VaultMeta {
             model_id: self.config.model_id.clone(),
@@ -535,7 +530,7 @@ impl RagStorage {
             schema_version: "1".to_string(),
             document_count: doc_count,
             chunk_count,
-            last_indexed: now_ms,
+            last_indexed,
         })
     }
 
@@ -550,8 +545,32 @@ impl RagStorage {
                 Ok((row.get(0)?, row.get(1)?, row.get(2)?))
             })
             .map_err(|e| e.to_string())?
-            .filter_map(SqlResult::ok)
-            .collect();
+            .collect::<SqlResult<Vec<_>>>().map_err(|error| error.to_string())?;
         Ok(rows)
+    }
+
+    pub fn set_metadata(&self, key: &str, value: &str) -> Result<(), String> {
+        let connection = self.writer.lock().map_err(|error| error.to_string())?;
+        connection.execute("INSERT INTO rag_vault_meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![key,value]).map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    pub fn metadata(&self, key: &str) -> Result<String, String> {
+        self.get_reader()?.query_row("SELECT value FROM rag_vault_meta WHERE key=?1", params![key], |row| row.get(0)).map_err(|error| error.to_string())
+    }
+
+    pub fn validate_and_flush(&self) -> Result<(), String> {
+        let connection = self.writer.lock().map_err(|error| error.to_string())?;
+        let integrity: String = connection.query_row("PRAGMA integrity_check", [], |row| row.get(0)).map_err(|error| error.to_string())?;
+        if integrity != "ok" { return Err(format!("索引完整性检查失败：{integrity}")); }
+        let foreign_keys: usize = connection.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |row| row.get(0)).map_err(|error| error.to_string())?;
+        let chunks: usize = connection.query_row("SELECT count(*) FROM rag_chunks", [], |row| row.get(0)).map_err(|error| error.to_string())?;
+        let vectors: usize = connection.query_row("SELECT count(*) FROM vec_chunks", [], |row| row.get(0)).map_err(|error| error.to_string())?;
+        let fts: usize = connection.query_row("SELECT count(*) FROM rag_chunks_fts", [], |row| row.get(0)).map_err(|error| error.to_string())?;
+        let orphans: usize = connection.query_row("SELECT count(*) FROM vec_chunks v LEFT JOIN rag_chunks c USING(chunk_id) WHERE c.chunk_id IS NULL", [], |row| row.get(0)).map_err(|error| error.to_string())?;
+        if foreign_keys != 0 || orphans != 0 || chunks != vectors || chunks != fts { return Err(format!("索引记录不一致：chunks={chunks},vectors={vectors},fts={fts},orphans={orphans},foreignKeys={foreign_keys}")); }
+        connection.execute_batch("PRAGMA wal_checkpoint(FULL)").map_err(|error| error.to_string())?;
+        std::fs::OpenOptions::new().read(true).write(true).open(&self.config.db_path).map_err(|error|format!("打开索引以完成持久化：{error}"))?.sync_all().map_err(|error|format!("持久化索引文件：{error}"))?;
+        Ok(())
     }
 }

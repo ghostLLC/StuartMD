@@ -191,7 +191,12 @@
   border-color: #d4b84a;
 }
 
-/* Mermaid — document figure, not poster (S2.3 compact, tighter) */
+/* Mermaid 的文字尺寸由渲染器统一设置，外层仅控制图表大小。 */
+.mermaid-measure,
+.mermaid-diagram {
+  line-height: normal;
+}
+
 .mermaid-diagram {
   margin: 0.75em auto;
   text-align: center;
@@ -200,114 +205,16 @@
   background: var(--bg-soft);
   border: 1px solid var(--border);
   border-radius: 6px;
-  width: fit-content !important;
-  max-width: min(100%, 700px) !important;
-  max-height: 430px !important;
+  width: fit-content;
+  max-width: 100%;
   box-sizing: border-box;
 }
 
 .mermaid-diagram svg {
-  /* JS picks scale from content size; clamp as a document figure. */
-  max-width: 100% !important;
-  max-height: 410px !important;
+  max-width: 100%;
+  height: auto;
   display: block;
   margin: 0 auto;
-  font-size: 11px;
-}
-
-/* Hide mermaid's offscreen measure node if it leaks into the preview. */
-.mermaid-diagram + .mermaid,
-.preview .mermaid:not(.mermaid-diagram) {
-  display: none !important;
-}
-
-/* htmlLabels: mermaid v10+ puts node/edge text in foreignObject. Keep it
-   visible (incl. CJK) on every theme. :where() => specificity 0, so
-   mermaid's own theme CSS still wins when present; these are fallbacks. */
-.mermaid-diagram svg foreignObject {
-  overflow: visible;
-}
-
-.mermaid-diagram :where(.nodeLabel, .edgeLabel) {
-  color: var(--text);
-  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-}
-
-.mermaid-diagram :where(text, tspan) {
-  fill: var(--text);
-}
-
-/* Compact label type (~11px, CJK still legible). Non-:where so we beat
-   mermaid's theme CSS; !important only for font-size against inline styles. */
-.mermaid-diagram :is(.nodeLabel, .edgeLabel),
-.mermaid-diagram svg foreignObject > div,
-.mermaid-diagram svg foreignObject > div > span,
-.mermaid-diagram svg :is(text, tspan) {
-  font-size: 11px !important;
-  line-height: 1.2;
-}
-
-/* Unscoped on purpose: mermaid's layout pass measures .nodeLabel/.edgeLabel
-   BEFORE the .mermaid-diagram wrapper exists. Same metrics at measure and
-   paint → node rects hug text instead of poster-sized boxes. */
-.nodeLabel,
-.edgeLabel {
-  font-size: 11px !important;
-  line-height: 1.2 !important;
-  padding: 1px 4px !important;
-  margin: 0 !important;
-  min-height: 0 !important;
-  text-align: center !important;
-  display: block !important;
-}
-
-foreignObject > div {
-  text-align: center !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-}
-
-.mermaid-diagram :is(.nodeLabel, .edgeLabel),
-.mermaid-diagram svg foreignObject > div,
-.mermaid-diagram svg foreignObject > div > span {
-  padding: 1px 4px !important;
-  margin: 0 !important;
-  min-height: 0 !important;
-}
-
-/* Labels sit in a foreignObject that is often wider than the text — force
-   horizontal/vertical center so CJK does not drift to the right of the node. */
-.mermaid-diagram svg foreignObject {
-  text-align: center !important;
-}
-.mermaid-diagram svg foreignObject > div {
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  text-align: center !important;
-  width: 100% !important;
-  height: 100% !important;
-  box-sizing: border-box !important;
-}
-.mermaid-diagram :is(.nodeLabel, .edgeLabel),
-.mermaid-diagram svg foreignObject > div > span {
-  text-align: center !important;
-  display: block !important;
-  width: 100% !important;
-}
-
-/* Thinner edges + node outlines (arrowheads stay readable) */
-.mermaid-diagram :is(.edgePath path, .flowchart-link, path.path, .edgePath .path) {
-  stroke-width: 1px !important;
-}
-
-.mermaid-diagram :is(g.node rect, g.node polygon, g.node circle, g.node ellipse, g.node path) {
-  stroke-width: 1px;
-}
-
-.mermaid-diagram marker :is(path, polygon) {
-  stroke-width: 1px;
 }
 
 pre.mermaid-fallback,
@@ -3060,7 +2967,14 @@ body[data-theme="wallpaper"] #preview *::selection {
   line-height: 1;
   user-select: text;
   z-index: 2;
+  transform-origin: 0 0;
+  text-size-adjust: none;
 }
+
+.pdf-text-layer[data-main-rotation="90"] { transform: rotate(90deg) translateY(-100%); }
+.pdf-text-layer[data-main-rotation="180"] { transform: rotate(180deg) translate(-100%, -100%); }
+.pdf-text-layer[data-main-rotation="270"] { transform: rotate(270deg) translateX(-100%); }
+.pdf-text-layer span.markedContent { top: 0; height: 0; }
 
 .pdf-text-layer span {
   position: absolute;
@@ -4250,6 +4164,7 @@ body.ai-shortcut-recording #ai-shortcut-input {
 }
 .sc-card-title { font-size: 12px; font-weight: 600; }
 .sc-card-meta { font-size: 11px; color: var(--text-2); margin: 2px 0; }
+#sc-vault-status { white-space: pre-wrap; }
 .sc-card-snippet { font-size: 12px; color: var(--text-2); line-height: 1.5; }
 .sc-filters { display: flex; gap: 6px; padding: 8px 12px 0; flex: none; }
 .sc-chip {

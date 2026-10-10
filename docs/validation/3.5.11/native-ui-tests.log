@@ -1,0 +1,617 @@
+
+> stuartmd-validation@3.5.11 test
+> node --test tests/project-audit-core.cjs tests/repair-document-state.cjs tests/repair-text-buffer.cjs tests/repair-write-coordinator.cjs
+
+✔ LF 换行 (1.4911ms)
+✔ CRLF 换行 (0.269ms)
+✔ 混合 LF 和 CRLF 换行 (0.1636ms)
+✔ 同一个文件的窗口分别拥有文档身份和编辑版本 (9.7376ms)
+✔ 旧保存完成不能清除新编辑 (0.9122ms)
+✔ 渲染确认只接受对应文档版本和epoch (0.4494ms)
+✔ 保存快照冻结磁盘版本和编辑操作 (0.3889ms)
+✔ 恢复正文保留草稿版本和原文件保存版本 (0.2214ms)
+✔ 源码编辑保留未编辑的混合换行和尾部空行 (4.9943ms)
+✔ UTF-16编辑不能拆开emoji (0.5972ms)
+✔ 新增换行使用记录的默认分隔符并保留其他换行 (0.2513ms)
+✔ 段落源码编辑只改变编辑文字并保留该段落的混合换行 (0.1799ms)
+✔ 成熟Markdown解析保留段落外的全部字符 (16.5247ms)
+✔ 实际文件写入失败后，同一路径的后续写入可以完成 (14.7744ms)
+✔ Windows大小写路径别名依次执行实际文件写入 (9.8958ms)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 421.2728
+warning: unused import: `PathBuf`
+ --> src\document\journal.rs:5:23
+  |
+5 | use std::path::{Path, PathBuf};
+  |                       ^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `ConflictDetails`
+ --> src\document\mod.rs:9:16
+  |
+9 | pub use save::{ConflictDetails, SaveOperation, SavePayload, SaveRequest, SaveResult, SaveStatus, SourceEdit};
+  |                ^^^^^^^^^^^^^^^
+
+warning: unused import: `Manager`
+  --> src\win_api.rs:12:13
+   |
+12 | use tauri::{Manager, PhysicalPosition, PhysicalSize};
+   |             ^^^^^^^
+
+warning: unused variable: `app`
+   --> src\rag_ipc.rs:244:61
+    |
+244 | ...(window:tauri::WebviewWindow,app:tauri::AppHandle,path:String,page_number:usize)->Result<crate::rag::pdf_extract::PdfContent,Str...
+    |                                 ^^^ help: if this is intentional, prefix it with an underscore: `_app`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `document_for_path` is never used
+   --> src\document\mod.rs:167:12
+    |
+ 74 | impl DocumentService {
+    | -------------------- method in this implementation
+...
+167 |     pub fn document_for_path(&self, owner: &str, path: &Path) -> Result<String, String> {
+    |            ^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `rects` is never read
+  --> src\document\pdf_annotations.rs:19:9
+   |
+ 8 | pub struct Annotation {
+   |            ---------- field in this struct
+...
+19 |     pub rects: Vec<Value>,
+   |         ^^^^^
+   |
+   = note: `Annotation` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: function `export_safe_name` is never used
+   --> src\fs_api.rs:283:8
+    |
+283 | pub fn export_safe_name(name: &str) -> String {
+    |        ^^^^^^^^^^^^^^^^
+
+warning: type alias `RrfRankedChunk` is never used
+  --> src\rag_ipc.rs:27:10
+   |
+27 | pub type RrfRankedChunk=RagHitPayload;
+   |          ^^^^^^^^^^^^^^
+
+warning: linker stdout: 正在创建库 C:\Users\Administrator\Desktop\Stuart\tauri\src-tauri\target\debug\deps\stuartmd-b736c5b0f8880e8d.lib 和对象 C:\Users\Administrator\Desktop\Stuart\tauri\src-tauri\target\debug\deps\stuartmd-b736c5b0f8880e8d.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `stuartmd` (bin "stuartmd" test) generated 9 warnings (run `cargo fix --bin "stuartmd" -p stuartmd --tests` to apply 3 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.90s
+     Running unittests src\main.rs (tauri\src-tauri\target\debug\deps\stuartmd-b736c5b0f8880e8d.exe)
+
+running 68 tests
+test ai::real_tests::actual_deepseek_stream_budget_summary_cancel_and_disabled ... ignored, 需要当前用户的真实DeepSeek密钥和独立测试数据目录
+test ai_chat::tests::builtin_credentials_use_the_official_host ... ok
+test ai_chat::tests::provider_id_cannot_escape_the_keys_directory ... ok
+test ai_chat::tests::windows_dpapi_protects_and_reads_the_same_user_key ... ok
+test context::budget::tests::full_focus_is_preserved_or_reports_context_too_large ... ok
+test context::budget::tests::invalid_budget_stops_before_assembly ... ok
+test context::budget::tests::project_audit_context_budget_is_enforced_for_profile ... ok
+test context::compressor::tests::history_helpers_preserve_complete_original_messages ... ok
+test context::compressor::tests::structured_summary_requires_actual_source_quote ... ok
+test context::real_tests::counting_configuration_rejects_nonfinite_reserve_and_output_above_window ... ok
+test context::real_tests::final_message_budget_includes_requested_output_and_protocol_reserve ... ok
+test context::real_tests::official_tokenizer_templates_count_chinese_emoji_and_completed_reasoning ... ok
+test context::tests::test_escape_xml_attr ... ok
+test context::tests::test_format_knowledge_xml_attribute_injection ... ok
+test context::tests::test_format_knowledge_xml_injection_sanitization ... ok
+test context::tokenizer::tests::test_multilingual_token_estimation ... ok
+test context::tokenizer::tests::test_safe_unicode_take_boundary ... ok
+test document::pdf_annotations::tests::actual_pdf_annotations_render_edit_and_preserve_rotation_cropbox ... ok
+test document::pdf_annotations::tests::invalid_annotation_coordinates_and_missing_sources_stop_before_saving ... ok
+test document::tests::actual_encodings_preserve_original_bytes_and_reject_unrepresentable_characters ... ok
+test document::tests::annotation_json_export_preserves_source_document_identity_and_unsaved_draft ... ok
+test document::tests::legacy_drafts_import_is_idempotent_and_preserves_orphan_source ... ok
+test document::tests::older_save_preserves_newer_draft_and_save_as_identity ... ok
+test document::tests::real_sqlite_journal_restores_empty_untitled_and_newer_edits_after_save ... ok
+test document::tests::restarted_save_recovery_reads_verified_versions_and_copies_exact_bytes ... ok
+test document::tests::save_as_retains_journal_captured_before_target_change ... ok
+test document::tests::stale_disk_revision_retains_base_local_and_external_content ... ok
+test document::tests::utf16_edits_preserve_mixed_newlines_and_validate_surrogate_boundaries ... ok
+test fs_api::tests::test_atomic_write_file_basic_and_overwrite ... ok
+test fs_api::tests::test_atomic_write_file_relative_path ... ok
+test fs_api::tests::test_draft_roundtrip ... ok
+test fs_api::tests::test_reject_unsafe_path_str ... ok
+test fs_api::tests::test_url_safety_rules ... ok
+test fs_api::tests::test_write_grant_covers_special_dirs ... ok
+test memory::evolution::tests::test_aged_neglected_memory_eviction ... ok
+test memory::evolution::tests::test_day_zero_eviction_immunity ... ok
+test memory::evolution::tests::test_pinned_memory_immortality ... ok
+test memory::tests::archive_subprocess_creates_real_sessions ... ignored
+test memory::tests::confirmed_preference_has_one_deterministic_latest_version ... ok
+test memory::tests::corrupt_database_returns_error_and_preserves_bytes ... ok
+test memory::tests::independent_processes_create_one_hundred_unique_sessions ... ok
+test memory::tests::legacy_database_migration_keeps_keys_creates_verified_backup_and_is_idempotent ... ok
+test memory::tests::legacy_markdown_import_preserves_each_list_item_and_original_source ... ok
+test memory::tests::preferences_follow_scope_confirmation_and_latest_version ... ok
+test memory::tests::project_audit_memory_search_index_tracks_content_updates ... ok
+test memory::tests::project_audit_two_sessions_can_be_created_in_one_second ... ok
+test memory::tests::repeated_learning_request_rejects_changed_scope_and_source ... ok
+test memory::tests::request_message_is_idempotent_and_partial_answers_are_excluded ... ok
+test rag::fts::tests::test_escape_fts5_query_edge_cases ... ok
+test rag::fts::tests::test_in_memory_fts5_trigram_execution ... ok
+test rag::hybrid_search::tests::test_def_06_zero_score_filtering_and_secondary_tie_breaking ... ok
+test rag::hybrid_search::tests::test_resolve_query_weights_rules ... ok
+test rag::hybrid_search::tests::test_rrf_asymmetric_channels ... ok
+test rag::indexer::tests::content_fingerprint_is_sha256 ... ok
+test rag::indexer::tests::markdown_parser_preserves_fences_and_heading_sources ... ok
+test rag::real_tests::actual_generation_retains_valid_index_on_cancel_and_file_changes ... ignored, 使用真实模型、SQLite、201 个 Markdown 和实际 PDF，由 Models 验收命令执行
+test rag::real_tests::actual_models_produce_normalized_multilingual_semantic_vectors ... ignored, 使用真实 ONNX 模型，由 Models 验收命令执行
+test rag::real_tests::actual_pdf_native_ocr_rotation_cropbox_and_sources ... ignored, 使用真实 PDFium、Tesseract 和实际 PDF 文件，由 Models 验收命令执行
+test rag::storage::repair_tests::corrupt_database_is_preserved_and_reported ... ok
+test rag::storage::repair_tests::existing_index_rejects_a_different_model_dimension ... ok
+test rag::watcher::tests::actual_workspace_changes_report_create_write_rename_delete ... ok
+test rag::watcher::tests::scanner_includes_more_than_two_hundred_real_documents ... ok
+test rag::watcher::tests::temporary_files_and_ignored_directories_have_explicit_rules ... ok
+test security::diff_guard::tests::test_apply_diff_hash_conflict_detection ... ok
+test security::diff_guard::tests::test_diff_preview_and_line_numbering ... ok
+test security::diff_guard::tests::test_save_companion_note ... ok
+test win_api::tests::test_reveal_local_path_accepts_existing_local ... ok
+test win_api::tests::test_reveal_local_path_rejects_unc_urls_ads ... ok
+
+test result: ok. 63 passed; 0 failed; 5 ignored; 0 measured; 0 filtered out; finished in 4.51s
+
+warning: unused import: `PathBuf`
+ --> src\..\..\..\tauri\src-tauri\src\document\journal.rs:5:23
+  |
+5 | use std::path::{Path, PathBuf};
+  |                       ^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `JournalAck`, `JournalEntry`, `JournalRecord`, and `JournalSnapshot`
+ --> src\..\..\..\tauri\src-tauri\src\document\mod.rs:8:19
+  |
+8 | pub use journal::{JournalAck, JournalEntry, JournalRecord, JournalSnapshot};
+  |                   ^^^^^^^^^^  ^^^^^^^^^^^^  ^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^
+
+warning: unused imports: `ConflictDetails` and `SaveOperation`
+ --> src\..\..\..\tauri\src-tauri\src\document\mod.rs:9:16
+  |
+9 | pub use save::{ConflictDetails, SaveOperation, SavePayload, SaveRequest, SaveResult, SaveStatus, SourceEdit};
+  |                ^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^
+
+warning: struct `DocumentReadResult` is never constructed
+  --> src\..\..\..\tauri\src-tauri\src\document\mod.rs:17:12
+   |
+17 | pub struct DocumentReadResult {
+   |            ^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: struct `DocumentContextSnapshot` is never constructed
+  --> src\..\..\..\tauri\src-tauri\src\document\mod.rs:34:12
+   |
+34 | pub struct DocumentContextSnapshot {
+   |            ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: field `disk_revision` is never read
+  --> src\..\..\..\tauri\src-tauri\src\document\mod.rs:63:9
+   |
+61 | pub(crate) struct ResourceState {
+   |                   ------------- field in this struct
+62 |     pub bytes: Vec<u8>,
+63 |     pub disk_revision: DiskRevision,
+   |         ^^^^^^^^^^^^^
+   |
+   = note: `ResourceState` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+
+warning: field `data_dir` is never read
+  --> src\..\..\..\tauri\src-tauri\src\document\mod.rs:70:16
+   |
+66 | pub struct DocumentService {
+   |            --------------- field in this struct
+...
+70 |     pub(crate) data_dir: PathBuf,
+   |                ^^^^^^^^
+
+warning: multiple associated items are never used
+   --> src\..\..\..\tauri\src-tauri\src\document\mod.rs:80:12
+    |
+ 74 | impl DocumentService {
+    | -------------------- associated items in this implementation
+...
+ 80 |     pub fn new_document(&self, owner: &str) -> Result<DocumentReadResult, String> {
+    |            ^^^^^^^^^^^^
+...
+ 88 |     pub fn read(&self, owner: &str, path: &Path) -> Result<DocumentReadResult, String> {
+    |            ^^^^
+...
+103 |     pub fn read_binary(&self, owner: &str, path: &Path) -> Result<DocumentReadResult, String> {
+    |            ^^^^^^^^^^^
+...
+117 |     pub fn confirm_encoding(&self, owner: &str, document_id: &str, name: &str) -> Result<DocumentReadResult, String> {
+    |            ^^^^^^^^^^^^^^^^
+...
+129 |     pub fn encoding_preview(&self, owner: &str, document_id: &str, name: &str) -> Result<DocumentReadResult, String> {
+    |            ^^^^^^^^^^^^^^^^
+...
+137 |     fn read_result(document_id: &str, state: &DocumentState) -> DocumentReadResult {
+    |        ^^^^^^^^^^^
+...
+148 |     pub fn release_window(&self, owner: &str) -> Result<(), String> {
+    |            ^^^^^^^^^^^^^^
+...
+158 |     pub fn release_document(&self, owner:&str, document_id:&str)->Result<(),String> {
+    |            ^^^^^^^^^^^^^^^^
+...
+167 |     pub fn document_for_path(&self, owner: &str, path: &Path) -> Result<String, String> {
+    |            ^^^^^^^^^^^^^^^^^
+...
+187 |     pub fn capture_export_target(&self, owner: &str, document_id: &str, target: &Path) -> Result<DiskRevision, String> {
+    |            ^^^^^^^^^^^^^^^^^^^^^
+...
+195 |     pub fn validate_context_snapshot(&self, owner: &str, document_id: &str, editor_revision: u64, source_hash: &str) -> Result<Stri...
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+203 |     pub fn snapshot_for_window(&self, owner: &str, document_id: &str) -> Result<DocumentContextSnapshot, String> {
+    |            ^^^^^^^^^^^^^^^^^^^
+
+warning: struct `JournalSnapshot` is never constructed
+  --> src\..\..\..\tauri\src-tauri\src\document\journal.rs:10:12
+   |
+10 | pub struct JournalSnapshot {
+   |            ^^^^^^^^^^^^^^^
+
+warning: struct `JournalAck` is never constructed
+  --> src\..\..\..\tauri\src-tauri\src\document\journal.rs:22:12
+   |
+22 | pub struct JournalAck { pub document_id: String, pub journal_revision: u64, pub persisted_revision: u64 }
+   |            ^^^^^^^^^^
+
+warning: methods `write`, `list`, `discard`, and `flush` are never used
+   --> src\..\..\..\tauri\src-tauri\src\document\journal.rs:80:12
+    |
+ 57 | impl JournalStore {
+    | ----------------- methods in this implementation
+...
+ 80 |     pub fn write(&self, owner: &str, snapshot: &JournalSnapshot, state: &DocumentState, legacy: Option<&str>, import_key: Option<&s...
+    |            ^^^^^
+...
+126 |     fn list(&self) -> Result<Vec<JournalEntry>, String> {
+    |        ^^^^
+...
+136 |     fn discard(&self, id: &str) -> Result<(), String> {
+    |        ^^^^^^^
+...
+146 |     fn flush(&self) -> Result<(), String> {
+    |        ^^^^^
+
+warning: methods `write_journal`, `journal_read`, `journal_list`, `discard`, `flush`, and `import_legacy` are never used
+   --> src\..\..\..\tauri\src-tauri\src\document\journal.rs:152:12
+    |
+151 | impl DocumentService {
+    | -------------------- methods in this implementation
+152 |     pub fn write_journal(&self, owner: &str, mut snapshot: JournalSnapshot) -> Result<JournalAck, String> {
+    |            ^^^^^^^^^^^^^
+...
+170 |     pub fn journal_read(&self, id: &str) -> Result<JournalRecord, String> { self.journal.read(id) }
+    |            ^^^^^^^^^^^^
+171 |     pub fn journal_list(&self) -> Result<Vec<JournalEntry>, String> { self.journal.list() }
+    |            ^^^^^^^^^^^^
+172 |     pub fn discard(&self, id: &str) -> Result<(), String> { self.journal.discard(id) }
+    |            ^^^^^^^
+173 |     pub fn flush(&self) -> Result<(), String> { self.journal.flush()?; self.save_store.flush() }
+    |            ^^^^^
+...
+186 |     pub fn import_legacy(&self, known_paths: &[String]) -> Result<usize, String> {
+    |            ^^^^^^^^^^^^^
+
+warning: struct `Annotation` is never constructed
+ --> src\..\..\..\tauri\src-tauri\src\document\pdf_annotations.rs:8:12
+  |
+8 | pub struct Annotation {
+  |            ^^^^^^^^^^
+
+warning: enum `NativeEdit` is never used
+  --> src\..\..\..\tauri\src-tauri\src\document\pdf_annotations.rs:26:10
+   |
+26 | pub enum NativeEdit {
+   |          ^^^^^^^^^^
+
+warning: function `error` is never used
+  --> src\..\..\..\tauri\src-tauri\src\document\pdf_annotations.rs:32:4
+   |
+32 | fn error(error: impl std::fmt::Display) -> String { format!("PDF批注处理失败：{error}") }
+   |    ^^^^^
+
+warning: function `color` is never used
+  --> src\..\..\..\tauri\src-tauri\src\document\pdf_annotations.rs:34:8
+   |
+34 | pub fn color(id: &str) -> Result<[f32; 3], String> {
+   |        ^^^^^
+
+warning: function `numbers` is never used
+  --> src\..\..\..\tauri\src-tauri\src\document\pdf_annotations.rs:43:4
+   |
+43 | fn numbers(values: &[f32]) -> Object { Object::Array(values.iter().copied().map(Object::Real).collect()) }
+   |    ^^^^^^^
+
+warning: function `pdf_text` is never used
+  --> src\..\..\..\tauri\src-tauri\src\document\pdf_annotations.rs:44:4
+   |
+44 | fn pdf_text(text: &str) -> Object {
+   |    ^^^^^^^^
+
+warning: function `quad_bounds` is never used
+  --> src\..\..\..\tauri\src-tauri\src\document\pdf_annotations.rs:50:4
+   |
+50 | fn quad_bounds(quads: &[[f32; 8]]) -> Result<[f32; 4], String> {
+   |    ^^^^^^^^^^^
+
+warning: function `appearance` is never used
+  --> src\..\..\..\tauri\src-tauri\src\document\pdf_annotations.rs:65:4
+   |
+65 | fn appearance(document: &mut Document, subtype: &str, quads: &[[f32; 8]], rgb: [f32; 3], bounds: [f32; 4]) -> Result<ObjectId, Strin...
+   |    ^^^^^^^^^^
+
+warning: function `page_annotations` is never used
+   --> src\..\..\..\tauri\src-tauri\src\document\pdf_annotations.rs:110:4
+    |
+110 | fn page_annotations(document: &Document, page: ObjectId) -> Result<Vec<Object>, String> {
+    |    ^^^^^^^^^^^^^^^^
+
+warning: function `load` is never used
+   --> src\..\..\..\tauri\src-tauri\src\document\pdf_annotations.rs:116:4
+    |
+116 | fn load(bytes: &[u8]) -> Result<Document, String> {
+    |    ^^^^
+
+warning: function `serialize` is never used
+   --> src\..\..\..\tauri\src-tauri\src\document\pdf_annotations.rs:123:4
+    |
+123 | fn serialize(mut document: Document, page_count: usize) -> Result<Vec<u8>, String> {
+    |    ^^^^^^^^^
+
+warning: function `export` is never used
+   --> src\..\..\..\tauri\src-tauri\src\document\pdf_annotations.rs:129:8
+    |
+129 | pub fn export(bytes: &[u8], annotations: &[Annotation]) -> Result<Vec<u8>, String> {
+    |        ^^^^^^
+
+warning: function `pdfjs_id` is never used
+   --> src\..\..\..\tauri\src-tauri\src\document\pdf_annotations.rs:167:4
+    |
+167 | fn pdfjs_id(id: ObjectId) -> String {if id.1==0 {format!("{}R",id.0)} else {format!("{}R{}",id.0,id.1)}}
+    |    ^^^^^^^^
+
+warning: function `edit` is never used
+   --> src\..\..\..\tauri\src-tauri\src\document\pdf_annotations.rs:169:8
+    |
+169 | pub fn edit(bytes: &[u8], edits: &[NativeEdit]) -> Result<Vec<u8>, String> {
+    |        ^^^^
+
+warning: methods `save_pdf_annotations`, `edit_pdf_annotations`, `restore_pdf_history`, and `save_pdf_bytes` are never used
+   --> src\..\..\..\tauri\src-tauri\src\document\pdf_annotations.rs:201:12
+    |
+200 | impl DocumentService {
+    | -------------------- methods in this implementation
+201 |     pub fn save_pdf_annotations(&self, owner: &str, document_id: &str, annotations: &[Annotation]) -> Result<SaveResult,String> {
+    |            ^^^^^^^^^^^^^^^^^^^^
+...
+209 |     pub fn edit_pdf_annotations(&self, owner: &str, document_id: &str, edits: &[NativeEdit]) -> Result<SaveResult,String> {
+    |            ^^^^^^^^^^^^^^^^^^^^
+...
+217 |     pub fn restore_pdf_history(&self, owner: &str, document_id: &str, operation_id: &str, version: &str) -> Result<SaveResult,Strin...
+    |            ^^^^^^^^^^^^^^^^^^^
+...
+227 |     fn save_pdf_bytes(&self, owner: &str, document_id: &str, state: super::DocumentState, bytes: Vec<u8>) -> Result<SaveResult,Stri...
+    |        ^^^^^^^^^^^^^^
+
+warning: methods `pin_pdf_history`, `release_pdf_history`, and `flush` are never used
+   --> src\..\..\..\tauri\src-tauri\src\document\save.rs:189:12
+    |
+ 99 | impl SaveStore {
+    | -------------- methods in this implementation
+...
+189 |     pub fn pin_pdf_history(&self, document_id:&str, operation_id:&str) -> Result<(),String> {
+    |            ^^^^^^^^^^^^^^^
+...
+196 |     pub fn release_pdf_history(&self, document_id:&str) -> Result<(),String> {
+    |            ^^^^^^^^^^^^^^^^^^^
+...
+211 |     pub fn flush(&self) -> Result<(), String> {
+    |            ^^^^^
+
+warning: methods `save_operations` and `save_operation_copy` are never used
+   --> src\..\..\..\tauri\src-tauri\src\document\save.rs:236:12
+    |
+235 | impl DocumentService {
+    | -------------------- methods in this implementation
+236 |     pub fn save_operations(&self) -> Result<Vec<SaveOperation>, String> { self.save_store.operations() }
+    |            ^^^^^^^^^^^^^^^
+...
+240 |     pub fn save_operation_copy(&self,owner:&str,operation_id:&str,version:&str,target:&Path)->Result<SaveResult,String> {
+    |            ^^^^^^^^^^^^^^^^^^^
+
+warning: `stuart-document-verification` (bin "stuart-document-verification") generated 29 warnings (run `cargo fix --bin "stuart-document-verification" -p stuart-document-verification` to apply 3 suggestions)
+warning: unused imports: `JournalAck`, `JournalEntry`, and `JournalRecord`
+ --> src\..\..\..\tauri\src-tauri\src\document\mod.rs:8:19
+  |
+8 | pub use journal::{JournalAck, JournalEntry, JournalRecord, JournalSnapshot};
+  |                   ^^^^^^^^^^  ^^^^^^^^^^^^  ^^^^^^^^^^^^^
+
+warning: field `disk_revision` is never read
+  --> src\..\..\..\tauri\src-tauri\src\document\mod.rs:63:9
+   |
+61 | pub(crate) struct ResourceState {
+   |                   ------------- field in this struct
+62 |     pub bytes: Vec<u8>,
+63 |     pub disk_revision: DiskRevision,
+   |         ^^^^^^^^^^^^^
+   |
+   = note: `ResourceState` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: methods `encoding_preview`, `release_window`, `document_for_path`, `capture_export_target`, and `validate_context_snapshot` are never used
+   --> src\..\..\..\tauri\src-tauri\src\document\mod.rs:129:12
+    |
+ 74 | impl DocumentService {
+    | -------------------- methods in this implementation
+...
+129 |     pub fn encoding_preview(&self, owner: &str, document_id: &str, name: &str) -> Result<DocumentReadResult, String> {
+    |            ^^^^^^^^^^^^^^^^
+...
+148 |     pub fn release_window(&self, owner: &str) -> Result<(), String> {
+    |            ^^^^^^^^^^^^^^
+...
+167 |     pub fn document_for_path(&self, owner: &str, path: &Path) -> Result<String, String> {
+    |            ^^^^^^^^^^^^^^^^^
+...
+187 |     pub fn capture_export_target(&self, owner: &str, document_id: &str, target: &Path) -> Result<DiskRevision, String> {
+    |            ^^^^^^^^^^^^^^^^^^^^^
+...
+195 |     pub fn validate_context_snapshot(&self, owner: &str, document_id: &str, editor_revision: u64, source_hash: &str) -> Result<Stri...
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: field `rects` is never read
+  --> src\..\..\..\tauri\src-tauri\src\document\pdf_annotations.rs:19:9
+   |
+ 8 | pub struct Annotation {
+   |            ---------- field in this struct
+...
+19 |     pub rects: Vec<Value>,
+   |         ^^^^^
+   |
+   = note: `Annotation` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: unused import: `PathBuf`
+ --> tests\..\..\..\tauri\src-tauri\src\document\journal.rs:5:23
+  |
+5 | use std::path::{Path, PathBuf};
+  |                       ^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `JournalAck`, `JournalEntry`, and `JournalRecord`
+ --> tests\..\..\..\tauri\src-tauri\src\document\mod.rs:8:19
+  |
+8 | pub use journal::{JournalAck, JournalEntry, JournalRecord, JournalSnapshot};
+  |                   ^^^^^^^^^^  ^^^^^^^^^^^^  ^^^^^^^^^^^^^
+
+warning: unused imports: `ConflictDetails` and `SaveOperation`
+ --> tests\..\..\..\tauri\src-tauri\src\document\mod.rs:9:16
+  |
+9 | pub use save::{ConflictDetails, SaveOperation, SavePayload, SaveRequest, SaveResult, SaveStatus, SourceEdit};
+  |                ^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^
+
+warning: field `disk_revision` is never read
+  --> tests\..\..\..\tauri\src-tauri\src\document\mod.rs:63:9
+   |
+61 | pub(crate) struct ResourceState {
+   |                   ------------- field in this struct
+62 |     pub bytes: Vec<u8>,
+63 |     pub disk_revision: DiskRevision,
+   |         ^^^^^^^^^^^^^
+   |
+   = note: `ResourceState` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: methods `encoding_preview`, `release_window`, `document_for_path`, `capture_export_target`, and `validate_context_snapshot` are never used
+   --> tests\..\..\..\tauri\src-tauri\src\document\mod.rs:129:12
+    |
+ 74 | impl DocumentService {
+    | -------------------- methods in this implementation
+...
+129 |     pub fn encoding_preview(&self, owner: &str, document_id: &str, name: &str) -> Result<DocumentReadResult, String> {
+    |            ^^^^^^^^^^^^^^^^
+...
+148 |     pub fn release_window(&self, owner: &str) -> Result<(), String> {
+    |            ^^^^^^^^^^^^^^
+...
+167 |     pub fn document_for_path(&self, owner: &str, path: &Path) -> Result<String, String> {
+    |            ^^^^^^^^^^^^^^^^^
+...
+187 |     pub fn capture_export_target(&self, owner: &str, document_id: &str, target: &Path) -> Result<DiskRevision, String> {
+    |            ^^^^^^^^^^^^^^^^^^^^^
+...
+195 |     pub fn validate_context_snapshot(&self, owner: &str, document_id: &str, editor_revision: u64, source_hash: &str) -> Result<Stri...
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: field `rects` is never read
+  --> tests\..\..\..\tauri\src-tauri\src\document\pdf_annotations.rs:19:9
+   |
+ 8 | pub struct Annotation {
+   |            ---------- field in this struct
+...
+19 |     pub rects: Vec<Value>,
+   |         ^^^^^
+   |
+   = note: `Annotation` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: `stuart-document-verification` (bin "stuart-document-verification" test) generated 6 warnings (2 duplicates) (run `cargo fix --bin "stuart-document-verification" -p stuart-document-verification --tests` to apply 1 suggestion)
+warning: `stuart-document-verification` (test "processes") generated 6 warnings (run `cargo fix --test "processes" -p stuart-document-verification` to apply 3 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.20s
+     Running unittests src\main.rs (tests\native-documents\target\debug\deps\stuart_document_verification-02479a542672489e.exe)
+
+running 11 tests
+test document::pdf_annotations::tests::actual_pdf_annotations_render_edit_and_preserve_rotation_cropbox ... ok
+test document::pdf_annotations::tests::invalid_annotation_coordinates_and_missing_sources_stop_before_saving ... ok
+test document::tests::actual_encodings_preserve_original_bytes_and_reject_unrepresentable_characters ... ok
+test document::tests::annotation_json_export_preserves_source_document_identity_and_unsaved_draft ... ok
+test document::tests::legacy_drafts_import_is_idempotent_and_preserves_orphan_source ... ok
+test document::tests::older_save_preserves_newer_draft_and_save_as_identity ... ok
+test document::tests::real_sqlite_journal_restores_empty_untitled_and_newer_edits_after_save ... ok
+test document::tests::restarted_save_recovery_reads_verified_versions_and_copies_exact_bytes ... ok
+test document::tests::save_as_retains_journal_captured_before_target_change ... ok
+test document::tests::stale_disk_revision_retains_base_local_and_external_content ... ok
+test document::tests::utf16_edits_preserve_mixed_newlines_and_validate_surrogate_boundaries ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.82s
+
+     Running tests\processes.rs (tests\native-documents\target\debug\deps\processes-869d2b186218e998.exe)
+
+running 14 tests
+test actual_denied_directory_write_preserves_document_and_recovery_content ... ok
+test document::pdf_annotations::tests::actual_pdf_annotations_render_edit_and_preserve_rotation_cropbox ... ok
+test document::pdf_annotations::tests::invalid_annotation_coordinates_and_missing_sources_stop_before_saving ... ok
+test document::tests::actual_encodings_preserve_original_bytes_and_reject_unrepresentable_characters ... ok
+test document::tests::annotation_json_export_preserves_source_document_identity_and_unsaved_draft ... ok
+test document::tests::legacy_drafts_import_is_idempotent_and_preserves_orphan_source ... ok
+test document::tests::older_save_preserves_newer_draft_and_save_as_identity ... ok
+test document::tests::real_sqlite_journal_restores_empty_untitled_and_newer_edits_after_save ... ok
+test document::tests::restarted_save_recovery_reads_verified_versions_and_copies_exact_bytes ... ok
+test document::tests::save_as_retains_journal_captured_before_target_change ... ok
+test document::tests::stale_disk_revision_retains_base_local_and_external_content ... ok
+test document::tests::utf16_edits_preserve_mixed_newlines_and_validate_surrogate_boundaries ... ok
+test independent_real_processes_detect_stale_save_and_preserve_all_versions ... ok
+test terminating_real_save_process_retains_durable_draft_and_rejects_incomplete_versions ... 实际终止阶段：Preparing，重启恢复版本：Preparing
+ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.54s
+
+2026-10-10T09:18:54.634Z ERROR webdriver: Error: WebDriverError: The operation was aborted due to timeout when running "http://127.0.0.1:4444/session" with method "POST" and args "{"capabilities":{"alwaysMatch":{"browserName":"webview2","ms:edgeChromium":true,"ms:edgeOptions":{"binary":"C:\\Users\\Administrator\\AppData\\Local\\StuartMD\\stuartmd.exe","webviewOptions":{"userDataFolder":"C:\\Users\\Administrator\\Desktop\\Stuart\\tests\\native-artifacts\\ui\\webview-profile"}},"wdio:enforceWebDriverClassic":true},"firstMatch":[{}]}}"
+    at FetchRequest._libRequest (file:///C:/Users/Administrator/Desktop/Stuart/node_modules/webdriver/build/node.js:1907:13)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async FetchRequest._request (file:///C:/Users/Administrator/Desktop/Stuart/node_modules/webdriver/build/node.js:1933:20)
+    at async startWebDriverSession (file:///C:/Users/Administrator/Desktop/Stuart/node_modules/webdriver/build/node.js:1062:16)
+    at async _WebDriver.newSession (file:///C:/Users/Administrator/Desktop/Stuart/node_modules/webdriver/build/node.js:1484:41)
+    at async remote (file:///C:/Users/Administrator/Desktop/Stuart/node_modules/webdriverio/build/node.js:8879:20)
+    at async main (C:\Users\Administrator\Desktop\Stuart\tests\native-ui\repair.cjs:49:15)
+Error: WebDriverError: The operation was aborted due to timeout when running "http://127.0.0.1:4444/session" with method "POST" and args "{"capabilities":{"alwaysMatch":{"browserName":"webview2","ms:edgeChromium":true,"ms:edgeOptions":{"binary":"C:\\Users\\Administrator\\AppData\\Local\\StuartMD\\stuartmd.exe","webviewOptions":{"userDataFolder":"C:\\Users\\Administrator\\Desktop\\Stuart\\tests\\native-artifacts\\ui\\webview-profile"}},"wdio:enforceWebDriverClassic":true},"firstMatch":[{}]}}"
+    at startWebDriverSession (file:///C:/Users/Administrator/Desktop/Stuart/node_modules/webdriver/build/node.js:1066:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async _WebDriver.newSession (file:///C:/Users/Administrator/Desktop/Stuart/node_modules/webdriver/build/node.js:1484:41)
+    at async remote (file:///C:/Users/Administrator/Desktop/Stuart/node_modules/webdriverio/build/node.js:8879:20)
+    at async main (C:\Users\Administrator\Desktop\Stuart\tests\native-ui\repair.cjs:49:15)
+Exception: C:\Users\Administrator\Desktop\Stuart\scripts\verify-repair.ps1:27
+Line |
+  27 |              if ($LASTEXITCODE -ne 0) { throw '原生界面测试失败' }
+     |                                         ~~~~~~~~~~~~~~~~
+     | 原生界面测试失败

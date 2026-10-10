@@ -36,6 +36,9 @@
 
   const state = {
     path: null,
+    documentId: null,
+    loadEpoch: 0,
+    loadingTask: null,
     name: "",
     doc: null,
     page: 1,
@@ -53,7 +56,24 @@
     _pageTextBusy: {},
   };
 
-  const annotHist = { stack: [], i: -1, max: 80 };
+  let annotHist = { stack: [], i: -1, max: 21 };
+  const annotationRecords = new Map();
+
+  function annotationSnapshot() {
+    return { items: cloneAnnots(state.annotations.filter(annotation => !annotation.native)), pdfVersion: state.annotationRecord.pdfVersion };
+  }
+
+  function recordPdfSave(record, result) {
+    if (!record.pdfVersion) {
+      const base = { operationId: result.operationId, version: "base" };
+      for (const snapshot of record.history.stack) if (!snapshot.pdfVersion) snapshot.pdfVersion = base;
+    }
+    record.pdfVersion = { operationId: result.operationId, version: "local" };
+  }
+
+  function ensureAnnotationIdle() {
+    if (state.annotationRecord?.restoring) throw new Error("PDF批注正在恢复保存版本");
+  }
 
   // === PHASE P1-2: PDF.js Virtualization & VRAM Eviction State ===
   const activeRenderTasks = new Map(); // pageNum (Number) -> RenderTask
@@ -99,40 +119,65 @@
   }
 
   function resetAnnotHistory() {
-    annotHist.stack = [cloneAnnots(state.annotations)];
+    annotHist.stack = [annotationSnapshot()];
     annotHist.i = 0;
   }
 
   function pushAnnotHistory() {
     annotHist.stack = annotHist.stack.slice(0, annotHist.i + 1);
-    annotHist.stack.push(cloneAnnots(state.annotations));
+    annotHist.stack.push(annotationSnapshot());
     if (annotHist.stack.length > annotHist.max) annotHist.stack.shift();
     annotHist.i = annotHist.stack.length - 1;
   }
 
-  async function applyAnnotSnapshot(list) {
-    state.annotations = cloneAnnots(list);
-    if (state.path) {
-      try {
-        const sidecar = state.annotations.filter((a) => !a.native);
-        await api("save_annotations", state.path, sidecar);
-      } catch (_) {}
-    }
-    await refreshAnnots();
+  function pushRecordHistory(record) {
+    record.history.stack = record.history.stack.slice(0, record.history.i + 1);
+    record.history.stack.push({ items: cloneAnnots(record.items), pdfVersion: record.pdfVersion });
+    if (record.history.stack.length > record.history.max) record.history.stack.shift();
+    record.history.i = record.history.stack.length - 1;
+  }
+
+  async function reloadSavedPdf(documentId, record) {
+    const view = state.documentId === documentId ? { page: state.page, scale: state.scale, rotation: state.rotation, scrollTop: el().scroll.scrollTop } : null;
+    const payload = await api("pdf_document_snapshot", documentId);
+    if (state.documentId !== documentId) return;
+    await openPdf({ ...payload, annotations: record.items, view });
+  }
+
+  async function applyAnnotSnapshot(snapshot) {
+    const documentId = state.documentId, path = state.path, record = state.annotationRecord;
+    record.restoring = true;
+    try {
+      await window.StuartCore.writeCoord.enqueue(`pdf-annotations:${documentId}`, async () => {
+        if (JSON.stringify(snapshot.pdfVersion) !== JSON.stringify(record.pdfVersion)) {
+          if (!snapshot.pdfVersion) throw new Error("PDF批注恢复版本缺失");
+          const saved = await confirmAnnotationSave(await api("restore_pdf_annotations", documentId, snapshot.pdfVersion.operationId, snapshot.pdfVersion.version));
+          window.StuartMD.confirmPdfSave(documentId, saved);
+          record.pdfVersion = snapshot.pdfVersion;
+        }
+        record.items = cloneAnnots(snapshot.items);
+        await confirmAnnotationSave(await api("save_annotations", path, record.items, documentId));
+        if (state.documentId === documentId) await reloadSavedPdf(documentId, record);
+      });
+    } finally { record.restoring = false; }
   }
 
   async function undoAnnot() {
     if (!pdfActive() || annotHist.i <= 0) return false;
-    annotHist.i--;
-    await applyAnnotSnapshot(annotHist.stack[annotHist.i]);
+    ensureAnnotationIdle();
+    const history = annotHist, index = history.i - 1;
+    await applyAnnotSnapshot(history.stack[index]);
+    history.i = index;
     toast("已撤销标注");
     return true;
   }
 
   async function redoAnnot() {
     if (!pdfActive() || annotHist.i >= annotHist.stack.length - 1) return false;
-    annotHist.i++;
-    await applyAnnotSnapshot(annotHist.stack[annotHist.i]);
+    ensureAnnotationIdle();
+    const history = annotHist, index = history.i + 1;
+    await applyAnnotSnapshot(history.stack[index]);
+    history.i = index;
     toast("已重做标注");
     return true;
   }
@@ -222,6 +267,8 @@
   }
 
   async function disposeDoc() {
+    const previous = state.doc, loading = state.loadingTask;
+    state.doc = null; state.loadingTask = null;
     try {
       if (state._virtualIo) {
         state._virtualIo.disconnect();
@@ -250,88 +297,37 @@
     }
 
     try {
-      if (state.doc && typeof state.doc.destroy === "function") {
-        await state.doc.destroy();
-      }
-    } catch (_) {}
-    state.doc = null;
+      if (previous) await previous.destroy();
+      else if (loading) await loading.destroy();
+    } catch (error) { toast("释放PDF文档失败：" + error.message); throw error; }
   }
 
-  async function loadNativePdfAnnotations() {
+  async function loadNativePdfAnnotations(pageNumber = state.page || 1) {
     if (!state.doc || !state.path) return;
-    try {
-      const merged = [];
-      const maxPages = Math.min(state.total, 80);
-      for (let n = 1; n <= maxPages; n++) {
-        const page = await state.doc.getPage(n);
-        const vp = page.getViewport({ scale: 1, rotation: (page.rotate || 0) + state.rotation });
-        const H = vp.height;
-        const W = vp.width;
-        let raw = [];
-        try {
-          raw = await page.getAnnotations({ intent: "display" });
-        } catch (_) {}
-        for (const a of raw || []) {
-          const sub = a.subtype || a.Subtype || "";
-          if (!["Highlight", "Text", "Underline", "StrikeOut", "Squiggly"].includes(sub)) continue;
-          const comment = a.contentsObj?.str || a.contents || "";
-          const col = pdfColorToId(a.color);
-          if (sub === "Text") {
-            const rect = a.rect || a.Rect;
-            let rects = [];
-            if (rect && rect.length >= 4) {
-              const x0 = Math.min(rect[0], rect[2]) / W;
-              const x1 = Math.max(rect[0], rect[2]) / W;
-              const yTop = 1 - Math.max(rect[1], rect[3]) / H;
-              const yBot = 1 - Math.min(rect[1], rect[3]) / H;
-              rects = [{ x: x0, y: yTop, w: Math.max(x1 - x0, 0.02), h: Math.max(yBot - yTop, 0.015) }];
-            }
-            merged.push({
-              id: "pdf-native-" + n + "-" + (a.id || merged.length),
-              type: "comment",
-              native: true,
-              page: n,
-              color: col,
-              text: String(comment || "").slice(0, 200),
-              comment: String(comment || ""),
-              rects,
-            });
-            continue;
-          }
-          const rects = quadToRects(a.quadPoints || a.quadpoints, W, H);
-          if (!rects.length) continue;
-          const type = sub === "Underline" ? "underline" : sub === "StrikeOut" ? "strike" : "highlight";
-          merged.push({
-            id: "pdf-native-" + n + "-" + (a.id || merged.length),
-            type,
-            native: true,
-            page: n,
-            color: col,
-            text: String(comment || "").slice(0, 200),
-            comment: comment ? String(comment) : "",
-            rects,
-          });
-        }
+    const captured = state.doc, epoch = state.loadEpoch, merged = [];
+    for (const number of [pageNumber]) {
+      const page = await captured.getPage(number), raw = await page.getAnnotations({ intent: "display" });
+      if (captured !== state.doc || epoch !== state.loadEpoch) return;
+      for (const annotation of raw) {
+        const subtype = annotation.subtype;
+        if (!["Highlight", "Text", "Underline", "StrikeOut", "Squiggly"].includes(subtype)) continue;
+        const rectangles = subtype === "Text" ? [annotation.rect] : (annotation.quadPoints || []).map(points => {
+          if (points.length !== 4 || points.some(point => !Number.isFinite(point.x) || !Number.isFinite(point.y))) throw new Error("PDF原生批注的页面坐标无效");
+          return [Math.min(...points.map(point => point.x)), Math.min(...points.map(point => point.y)), Math.max(...points.map(point => point.x)), Math.max(...points.map(point => point.y))];
+        });
+        if (!rectangles.length) continue;
+        if (rectangles.some(rectangle => !rectangle || rectangle.length !== 4 || rectangle.some(value => !Number.isFinite(value)))) throw new Error("PDF原生批注缺少实际矩形");
+        const comment = String(annotation.contentsObj?.str || annotation.contents || "");
+        merged.push({ id: `pdf-native-${number}-${annotation.id}`, nativeAnnotationId: annotation.id, type: subtype === "Text" ? "comment" : subtype === "Underline" ? "underline" : subtype === "StrikeOut" ? "strike" : "highlight", native: true, page: number, color: pdfColorToId(annotation.color), text: comment, comment, pdfRects: rectangles });
       }
-      const sidecar = state.annotations.filter((a) => !a.native);
-      const nativeOnly = merged.filter((m) => !sidecar.some((s) => s.id === m.id));
-      // Dedupe native ids (re-open / re-import can double-draw lines)
-      const seen = new Set();
-      const natives = [];
-      nativeOnly.forEach((m) => {
-        if (seen.has(m.id)) return;
-        seen.add(m.id);
-        natives.push(m);
-      });
-      state.annotations = [...natives, ...sidecar];
-    } catch (err) {
-      console.warn("native annot load", err);
     }
+    if (captured !== state.doc || epoch !== state.loadEpoch) return;
+    state.annotations = [...merged, ...state.annotations.filter(annotation => !annotation.native || annotation.page !== pageNumber)];
   }
 
   function pdfColorToId(color) {
     if (!color || !color.length) return "yellow";
-    const [r, g, b] = color;
+    const [r, g, b] = Array.from(color, value => value / 255);
     let best = PALETTE[0];
     let bestD = Infinity;
     PALETTE.forEach((c) => {
@@ -345,28 +341,13 @@
     return best.id;
   }
 
-  function quadToRects(quads, W, H) {
-    if (!quads || !quads.length) return [];
-    const rects = [];
-    for (let i = 0; i + 7 < quads.length; i += 8) {
-      const xs = [quads[i], quads[i + 2], quads[i + 4], quads[i + 6]];
-      const ys = [quads[i + 1], quads[i + 3], quads[i + 5], quads[i + 7]];
-      const minX = Math.min(...xs);
-      const maxX = Math.max(...xs);
-      const minY = Math.min(...ys);
-      const maxY = Math.max(...ys);
-      if (W <= 0 || H <= 0) continue;
-      rects.push({
-        x: minX / W,
-        y: 1 - maxY / H,
-        w: (maxX - minX) / W,
-        h: (maxY - minY) / H,
-      });
-    }
-    return rects;
+  function openPdf(payload) {
+    state.openPromise = openPdfDocument(payload);
+    return state.openPromise;
   }
 
-  async function openPdf(payload) {
+  async function openPdfDocument(payload) {
+    const epoch = ++state.loadEpoch;
     if (!window.pdfjsLib) {
       toast("PDF 引擎未加载");
       return;
@@ -376,26 +357,31 @@
     e.editor.hidden = true;
     e.area.hidden = false;
     await disposeDoc();
+    if (epoch !== state.loadEpoch) return;
     hideAnnotMenu();
     hideAnnotBar();
     hideHoverTip();
     state.path = payload.path;
+    state.documentId = payload.documentId;
+    state._pendingSel = null; state._pageText = {}; state._pageTextBusy = {};
     state.name = payload.name;
-    state.annotations = payload.annotations || [];
-    state.page = 1;
-    state.rotation = 0;
-    state.scale = 1.2;
+    const record = annotationRecords.get(payload.documentId) || { items: cloneAnnots(payload.annotations || []), pdfVersion: null, history: { stack: [], i: -1, max: 21 }, restoring: false };
+    annotationRecords.set(payload.documentId, record);
+    state.annotationRecord = record;
+    annotHist = record.history;
+    state.annotations = cloneAnnots(record.items);
+    state.page = payload.view?.page || 1;
+    state.rotation = payload.view?.rotation || 0;
+    state.scale = payload.view?.scale || 1.2;
     e.scroll.innerHTML = "";
 
     try {
       let docInit;
       if (payload.data) {
         docInit = { data: payload.data };
-      } else if (payload.path && window.__TAURI__?.core?.invoke) {
-        try {
-          const ab = await window.__TAURI__.core.invoke("stuart_read_pdf_binary", { path: payload.path });
-          docInit = { data: new Uint8Array(ab) };
-        } catch (_) {}
+      } else if (!payload.b64 && payload.path && window.__TAURI__?.core?.invoke) {
+        const ab = await window.__TAURI__.core.invoke("stuart_read_pdf_binary", { path: payload.path });
+        docInit = { data: new Uint8Array(ab) };
       }
       if (!docInit && payload.b64) {
         const bin = atob(payload.b64);
@@ -405,30 +391,42 @@
       }
       if (!docInit) throw new Error("缺少 PDF 数据源");
 
-      state.doc = await window.pdfjsLib.getDocument({
+      const loading = window.pdfjsLib.getDocument({
         ...docInit,
-        cMapUrl: "libs/pdfjs/cmaps/",
+        cMapUrl: new URL("libs/pdfjs/cmaps/", window.location.href).href,
         cMapPacked: true,
-      }).promise;
+        standardFontDataUrl: new URL("libs/pdfjs/standard_fonts/", window.location.href).href,
+      });
+      state.loadingTask = loading;
+      const pdf = await loading.promise;
+      if (epoch !== state.loadEpoch) { await pdf.destroy(); return; }
+      state.doc = pdf; state.loadingTask = null;
       state.total = state.doc.numPages;
-      e.pageInput.value = "1";
+      e.pageInput.value = String(state.page);
       e.pageInput.max = String(state.total);
       e.pageLabel.textContent = `/ ${state.total}`;
 
       const p1 = await state.doc.getPage(1);
       const vp1 = p1.getViewport({ scale: 1, rotation: p1.rotate + state.rotation });
       state.landscape = vp1.width >= vp1.height;
+      await normalizeAnnotationCoordinates(state.doc, record);
+      if (epoch !== state.loadEpoch) return;
       await loadNativePdfAnnotations();
-      resetAnnotHistory();
-      if (state.landscape) await fitToWidth(false);
-      else await fitScaleToHeight(false);
+      if (epoch !== state.loadEpoch) return;
+      if (!annotHist.stack.length) resetAnnotHistory();
+      if (!payload.view) {
+        if (state.landscape) await fitToWidth(false);
+        else await fitScaleToHeight(false);
+      }
       await renderAll();
+      if (payload.view && epoch === state.loadEpoch) el().scroll.scrollTop = payload.view.scrollTop;
       document.title = `${payload.name} — StuartMD`;
     } catch (err) {
       console.error("PDF open failed", err);
       toast("PDF 打开失败：" + (err && err.message ? err.message : err));
       e.area.hidden = true;
       e.welcome.hidden = false;
+      throw err;
     }
   }
 
@@ -560,11 +558,17 @@
     }
 
     wrap.dataset.rendering = "1";
+    const capturedDoc = state.doc, epoch = state.loadEpoch, renderIdentity = Symbol("pdf-page-render");
+    wrap._renderIdentity = renderIdentity;
+    let renderTask;
+    const isCurrent = () => capturedDoc === state.doc && epoch === state.loadEpoch && wrap.isConnected && wrap._renderIdentity === renderIdentity;
 
     try {
-      const page = await state.doc.getPage(num);
+      const page = await capturedDoc.getPage(num);
+      if (!isCurrent()) return;
       const rotation = ((page.rotate || 0) + state.rotation) % 360;
       const viewport = page.getViewport({ scale: state.scale, rotation });
+      wrap._pdfViewport = viewport;
 
       wrap.className = "pdf-page";
       wrap.dataset.page = String(num);
@@ -615,7 +619,7 @@
         wrap.appendChild(label);
       }
 
-      const renderTask = page.render({
+      renderTask = page.render({
         canvasContext: ctx,
         viewport,
         transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null,
@@ -623,6 +627,7 @@
       activeRenderTasks.set(num, renderTask);
 
       await renderTask.promise;
+      if (!isCurrent()) return;
 
       // Check if wrap was evicted while renderTask was in flight
       if (wrap.dataset.rendering !== "1") {
@@ -634,6 +639,7 @@
 
       // Extract and cache plain text
       const textContent = await page.getTextContent();
+      if (!isCurrent()) return;
       try {
         const plain = (textContent.items || [])
           .map((it) => (it && it.str) || "")
@@ -644,33 +650,21 @@
       } catch (_) {}
 
       layer.innerHTML = "";
-      const frag = document.createDocumentFragment();
-      const vscale = viewport.scale || 1;
-      textContent.items.forEach((item) => {
-        if (!item.str) return;
-        const tx = window.pdfjsLib.Util.transform(viewport.transform, item.transform);
-        const angle = Math.atan2(tx[1], tx[0]);
-        const fontHeight = Math.hypot(tx[2], tx[3]);
-        const fs =
-          typeof item.height === "number" && item.height > 0
-            ? item.height * vscale
-            : fontHeight * 0.82;
-        const top = tx[5] - fs * 0.95;
-        const span = document.createElement("span");
-        span.textContent = item.str;
-        span.setAttribute(
-          "style",
-          `left:${tx[4]}px;top:${top}px;font-size:${fs}px;transform:rotate(${angle}rad);transform-origin:0 0`
-        );
-        frag.appendChild(span);
-      });
-      layer.appendChild(frag);
+      layer.style.setProperty("--scale-factor", String(viewport.scale));
+      const textDivs = [], textDivProperties = new WeakMap();
+      await window.pdfjsLib.renderTextLayer({ textContentSource: textContent, container: layer, viewport, textDivs, textDivProperties }).promise;
+      layer._pdfTextDivs = textDivs;
+      layer._pdfTextDivProperties = textDivProperties;
+      if (!isCurrent()) return;
+      await loadNativePdfAnnotations(num);
+      if (!isCurrent()) return;
 
       drawAnnotationsForPage(annotLayer, num, viewport);
 
       // Enforce pool limit
       enforceMaxRenderedPool();
     } catch (err) {
+      if (!isCurrent()) return;
       if (err?.name === "RenderingCancelledException" || err?.message?.includes("cancelled")) {
         return; // Silent catch: fast scroll cancellation is expected behavior
       }
@@ -681,8 +675,8 @@
         wrap.innerHTML = `<div class="pdf-page-placeholder">第 ${num} 页渲染失败</div>`;
       }
     } finally {
-      delete wrap.dataset.rendering;
-      activeRenderTasks.delete(num);
+      if (wrap._renderIdentity === renderIdentity) delete wrap.dataset.rendering;
+      if (activeRenderTasks.get(num) === renderTask) activeRenderTasks.delete(num);
     }
   }
 
@@ -968,13 +962,17 @@
       const colorId = a.color || defCol;
       const cm = colorMeta(colorId);
 
-      (a.rects || []).forEach((r) => {
+      const rectangles = a.pdfRects ? a.pdfRects.map(rect => {
+        const bounds = viewport.convertToViewportRectangle(rect);
+        return { x: Math.min(bounds[0], bounds[2]) / W, y: Math.min(bounds[1], bounds[3]) / H, w: Math.abs(bounds[2] - bounds[0]) / W, h: Math.abs(bounds[3] - bounds[1]) / H };
+      }) : a.rects || [];
+      rectangles.forEach((r) => {
         const x = r.x * W;
         const y = r.y * H;
         const w = Math.max(r.w * W, 1);
         const h = Math.max(r.h * H, 2);
 
-        if (type === "highlight") {
+        if (type === "highlight" && !a.native) {
           fillRects.push({
             x,
             y,
@@ -982,7 +980,7 @@
             h: Math.round(h),
             color: rgbaFromHex(cm.hex, ANN.highlightAlpha),
           });
-        } else if (type === "strike") {
+        } else if (type === "strike" && !a.native) {
           const lineY = Math.round(y + h * ANN.strikeTopRatio);
           lineSegs.push({
             x,
@@ -990,7 +988,7 @@
             w,
             color: ANN.strikeLine,
           });
-        } else {
+        } else if (!a.native) {
           // underline === comment geometry (pixel-snapped, same linePx)
           const lineY = Math.round(y + h * ANN.underlineTopRatio + ANN.underlineBottomPad);
           const color = type === "comment" ? ANN.commentLine : ANN.underlineLine;
@@ -1068,16 +1066,66 @@
 
   async function persistAnnots() {
     if (!state.path) return;
-    try {
-      const sidecar = state.annotations.filter((a) => !a.native);
-      await api("save_annotations", state.path, sidecar);
-    } catch (_) {}
+    ensureAnnotationIdle();
+    const documentId = state.documentId, path = state.path, record = state.annotationRecord;
+    record.items = cloneAnnots(state.annotations.filter(a => !a.native));
     pushAnnotHistory();
+    await window.StuartCore.writeCoord.enqueue(`pdf-annotations:${documentId}`, async () => {
+      await confirmAnnotationSave(await api("save_annotations", path, record.items, documentId));
+    });
+  }
+
+  async function normalizeAnnotationCoordinates(document, record) {
+    for (const annotation of record.items) {
+      if (annotation.pdfQuads?.length) continue;
+      const page = await document.getPage(annotation.page);
+      const viewport = page.getViewport({ scale: 1, rotation: page.rotate });
+      let rectangles;
+      if (annotation.pdfRects?.length) rectangles = annotation.pdfRects.map(rectangle => {
+        const points = viewport.convertToViewportRectangle(rectangle);
+        return { x: Math.min(points[0], points[2]) / viewport.width, y: Math.min(points[1], points[3]) / viewport.height, w: Math.abs(points[2] - points[0]) / viewport.width, h: Math.abs(points[3] - points[1]) / viewport.height };
+      });
+      else rectangles = annotation.rects;
+      if (!Array.isArray(rectangles) || !rectangles.length) throw new Error("PDF批注缺少实际选区");
+      annotation.pdfQuads = rectangles.map(rectangle => {
+        const { x, y, w, h } = rectangle;
+        if (![x, y, w, h].every(Number.isFinite) || w <= 0 || h <= 0) throw new Error("PDF批注选区坐标无效");
+        return [viewport.convertToPdfPoint(x * viewport.width, y * viewport.height), viewport.convertToPdfPoint((x + w) * viewport.width, y * viewport.height), viewport.convertToPdfPoint(x * viewport.width, (y + h) * viewport.height), viewport.convertToPdfPoint((x + w) * viewport.width, (y + h) * viewport.height)].flat();
+      });
+      annotation.pdfRects = annotation.pdfQuads.map(points => [Math.min(points[0], points[2], points[4], points[6]), Math.min(points[1], points[3], points[5], points[7]), Math.max(points[0], points[2], points[4], points[6]), Math.max(points[1], points[3], points[5], points[7])]);
+    }
+    if (document === state.doc) state.annotations = [...state.annotations.filter(annotation => annotation.native), ...cloneAnnots(record.items)];
+  }
+
+  async function editNativeAnnotations(edits) {
+    ensureAnnotationIdle();
+    const documentId = state.documentId, path = state.path, record = state.annotationRecord;
+    return window.StuartCore.writeCoord.enqueue(`pdf-annotations:${documentId}`, async () => {
+      const saved = await confirmAnnotationSave(await api("edit_pdf_annotations", path, edits, documentId));
+      window.StuartMD.confirmPdfSave(documentId, saved);
+      recordPdfSave(record, saved);
+      pushRecordHistory(record);
+      if (state.documentId === documentId) await reloadSavedPdf(documentId, record);
+      return saved;
+    });
+  }
+
+  async function confirmAnnotationSave(result) {
+    if (result?.error) throw new Error(result.error);
+    if (result?.saveResult?.result === "Conflict") { await window.StuartRecovery.showExportConflict(result.saveResult); throw new Error("PDF批注保存存在冲突，本地内容已经保留"); }
+    if (result?.saveResult?.result !== "Saved") throw new Error("PDF批注保存没有完成");
+    return result.saveResult;
   }
 
   async function recolorAnnotation(id, colorId) {
     const a = findAnnot(id);
     if (!a) return;
+    ensureAnnotationIdle();
+    if (a.native) {
+      await editNativeAnnotations([{ action: "color", page: a.page, id: a.nativeAnnotationId, color: colorId }]);
+      toast("已修改批注颜色");
+      return;
+    }
     a.color = colorId;
     await persistAnnots();
     await refreshAnnots();
@@ -1094,12 +1142,35 @@
       (ev && ev.target && ev.target.closest && ev.target.closest(".pdf-page")) ||
       range.startContainer?.parentElement?.closest?.(".pdf-page");
     if (!wrap || !el().scroll?.contains(wrap)) return false;
+    const layer = wrap.querySelector(".pdf-text-layer");
+    if (!layer?.contains(range.startContainer) || !layer.contains(range.endContainer)) return false;
     const wrapBox = wrap.getBoundingClientRect();
-    const rects = hlRectsFromClientRects(range.getClientRects(), wrapBox);
+    const viewport = wrap._pdfViewport;
+    if (!viewport) throw new Error("PDF页面尚未完成坐标初始化");
+    const spans = (layer._pdfTextDivs || []).filter(span => range.intersectsNode(span) && span.textContent).map(span => ({ box: span.getBoundingClientRect(), angle: layer._pdfTextDivProperties.get(span).angle + viewport.rotation }));
+    const rects = [], quads = [];
+    for (const client of range.getClientRects()) {
+      if (client.width < 1 || client.height < 1) continue;
+      const overlaps = spans.map(span => ({ ...span, area: Math.max(0, Math.min(client.right, span.box.right) - Math.max(client.left, span.box.left)) * Math.max(0, Math.min(client.bottom, span.box.bottom) - Math.max(client.top, span.box.top)) })).sort((left, right) => right.area - left.area);
+      if (!overlaps[0]?.area) continue;
+      const angle = ((overlaps[0].angle % 360) + 360) % 360;
+      if (Math.abs(angle / 90 - Math.round(angle / 90)) > 0.001) throw new Error("PDF选区包含无法核验的倾斜文字角度");
+      const rect = { x: (client.left - wrapBox.left) / wrapBox.width, y: (client.top - wrapBox.top) / wrapBox.height, w: client.width / wrapBox.width, h: client.height / wrapBox.height };
+      if (rects.some(previous => ["x", "y", "w", "h"].every(key => Math.abs(previous[key] - rect[key]) < 0.0001))) continue;
+      const left = rect.x * viewport.width, right = (rect.x + rect.w) * viewport.width, top = rect.y * viewport.height, bottom = (rect.y + rect.h) * viewport.height;
+      const corners = [[left, top], [right, top], [left, bottom], [right, bottom]];
+      const order = [[0, 1, 2, 3], [1, 3, 0, 2], [3, 2, 1, 0], [2, 0, 3, 1]][Math.round(angle / 90) % 4];
+      quads.push(order.map(index => viewport.convertToPdfPoint(...corners[index])));
+      rects.push(rect);
+    }
     if (!rects.length) return false;
     state._pendingSel = {
+      documentId: state.documentId,
+      loadEpoch: state.loadEpoch,
       text,
       rects,
+      pdfRects: quads.map(points => [Math.min(...points.map(point => point[0])), Math.min(...points.map(point => point[1])), Math.max(...points.map(point => point[0])), Math.max(...points.map(point => point[1]))]),
+      pdfQuads: quads.map(points => points.flat()),
       page: Number(wrap.dataset.page || 1),
       clientX: ev ? ev.clientX : null,
       clientY: ev ? ev.clientY : null,
@@ -1113,28 +1184,20 @@
   }
 
   async function loadPageText(pageNum) {
-    const n = Number(pageNum) || 1;
-    if (state._pageText[n]) return state._pageText[n];
-    if (!state.doc || state._pageTextBusy[n]) return state._pageText[n] || "";
-    state._pageTextBusy[n] = true;
-    try {
-      const page = await state.doc.getPage(n);
-      const tc = await page.getTextContent();
-      const plain = (tc.items || [])
-        .map((it) => (it && it.str) || "")
-        .join(" ")
-        .replace(/\s+/g, " ")
-        .trim();
-      if (plain) state._pageText[n] = plain;
-    } catch (_) {}
-    state._pageTextBusy[n] = false;
-    return state._pageText[n] || "";
+    const document = state.doc, epoch = state.loadEpoch;
+    if (!document || !Number.isInteger(pageNum) || pageNum < 1 || pageNum > state.total) throw new Error("PDF文字来源页码无效");
+    const page = await document.getPage(pageNum);
+    const content = await page.getTextContent();
+    if (document !== state.doc || epoch !== state.loadEpoch) throw new Error("读取PDF文字期间已经切换文档");
+    const text = content.items.map(item => item.str || "").join(" ").replace(/\s+/g, " ").trim();
+    state._pageText[pageNum] = text;
+    return text;
   }
 
   function getSelection() {
     const ctx = state._pendingSel;
     // Expire stale pending selection so AI/annotate never quote a dead highlight.
-    if (ctx && ctx.at && Date.now() - ctx.at > 15000) {
+    if (ctx && (ctx.documentId !== state.documentId || ctx.loadEpoch !== state.loadEpoch || (ctx.at && Date.now() - ctx.at > 15000))) {
       state._pendingSel = null;
       return null;
     }
@@ -1143,11 +1206,14 @@
         text: ctx.text,
         page: ctx.page,
         rects: ctx.rects || [],
+        pdfRects: ctx.pdfRects || [],
+        pdfQuads: ctx.pdfQuads || [],
         fromPdf: true,
       };
     }
     const sel = window.getSelection();
     if (sel && !sel.isCollapsed && sel.toString().trim()) {
+      if (!captureSelectionCtx()) return null;
       const wrap =
         sel.anchorNode &&
         (sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement)?.closest?.(
@@ -1156,8 +1222,10 @@
       return {
         text: sel.toString().trim(),
         page: wrap ? Number(wrap.dataset.page || state.page) : state.page,
-        rects: [],
-        fromPdf: !!(el().scroll && sel.anchorNode && el().scroll.contains(sel.anchorNode)),
+        rects: state._pendingSel.rects,
+        pdfRects: state._pendingSel.pdfRects,
+        pdfQuads: state._pendingSel.pdfQuads,
+        fromPdf: true,
       };
     }
     return null;
@@ -1166,48 +1234,49 @@
   async function getAiContext() {
     const sel = getSelection();
     const page = (sel && sel.page) || state.page || 1;
-    const pageText = await loadPageText(page);
-    const prev = page > 1 ? await loadPageText(page - 1) : "";
-    const next = page < state.total ? await loadPageText(page + 1) : "";
-    const neighborText = [prev ? `【P${page - 1}】\n${prev}` : "", next ? `【P${page + 1}】\n${next}` : ""]
-      .filter(Boolean)
-      .join("\n\n");
+    const capturedId = state.documentId;
+    const source = await api("pdf_context", state.path, page);
+    if (capturedId !== state.documentId) throw new Error("读取PDF上下文期间已经切换文档");
+    const visible = source.pages.find(item => item.pageNumber === page);
+    if (!visible || visible.needsReview) throw new Error("PDF页面的文字识别结果需要复核");
     return {
       kind: "pdf",
       name: state.path ? String(state.path).split(/[\\/]/).pop() : "PDF",
       path: state.path || "",
       quote: sel ? sel.text : "",
       page,
-      pageText: pageText ? `【P${page}】\n${pageText}` : "",
-      neighborText,
+      pageText: visible.blocks.map(block => block.text).join("\n"),
+      neighborText: source.pages.filter(item => item.pageNumber !== page && !item.needsReview).map(item => `【P${item.pageNumber}】\n${item.blocks.map(block => block.text).join("\n")}`).join("\n\n"),
+      source,
       total: state.total,
     };
   }
 
   async function addAnnotFromSelection(type, colorId, commentText) {
+    ensureAnnotationIdle();
     const ctx = state._pendingSel;
     if (!ctx || !state.path) {
       toast("请先选中 PDF 文字");
       return;
     }
+    if (ctx.documentId !== state.documentId || ctx.loadEpoch !== state.loadEpoch || Date.now() - ctx.at > 15000) throw new Error("PDF选区已经失效，请重新选择文字");
     const defCol = TYPE_DEFAULT_COLOR[type] || state.hlColor || "yellow";
     const ann = {
+      id: crypto.randomUUID(),
       type,
       color: colorId || defCol,
       page: ctx.page,
       text: ctx.text,
       comment: commentText || "",
       rects: ctx.rects,
+      pdfRects: ctx.pdfRects,
+      pdfQuads: ctx.pdfQuads,
     };
     try {
-      const res = await api("add_annotation", state.path, ann);
-      if (res?.error) {
-        toast(res.error);
-        return;
-      }
-      state.annotations = await api("load_annotations", state.path);
-      await loadNativePdfAnnotations();
-      pushAnnotHistory();
+      const capturedId = state.documentId;
+      state.annotations.push(ann);
+      await persistAnnots();
+      if (capturedId !== state.documentId) return;
       await refreshAnnots();
       toast(
         type === "highlight"
@@ -1218,8 +1287,8 @@
               ? "已删除线"
               : "已添加"
       );
-    } catch (_) {
-      toast("标注失败");
+    } catch (error) {
+      toast("标注失败：" + error.message); throw error;
     }
   }
 
@@ -1301,38 +1370,33 @@
   async function eraseAnnotation(id) {
     try {
       const a = findAnnot(id);
-      if (a && a.native) {
-        state.annotations = state.annotations.filter((x) => x.id !== id);
-        pushAnnotHistory();
-        await refreshAnnots();
-        hideAnnotMenu();
-        toast("已隐藏原生标注");
-        return;
+      ensureAnnotationIdle();
+      if (a?.native) {
+        await editNativeAnnotations([{ action: "delete", page: a.page, id: a.nativeAnnotationId }]);
+        hideAnnotMenu(); toast("已删除批注"); return;
       }
-      const res = await api("delete_annotation", state.path, id);
-      if (res?.error) {
-        toast(res.error);
-        return;
-      }
-      state.annotations = await api("load_annotations", state.path);
-      await loadNativePdfAnnotations();
-      pushAnnotHistory();
+      const capturedId = state.documentId;
+      state.annotations = state.annotations.filter(annotation => annotation.id !== id);
+      await persistAnnots();
+      if (capturedId !== state.documentId) return;
       await refreshAnnots();
       hideAnnotMenu();
       toast("已擦除标注");
-    } catch (_) {
-      toast("擦除失败");
+    } catch (error) {
+      toast("擦除批注失败：" + error.message);
     }
   }
 
   async function refreshAnnots() {
     const e = el();
     if (!state.doc) return;
+    const capturedDoc = state.doc, epoch = state.loadEpoch;
     for (const wrap of e.scroll.querySelectorAll(".pdf-page")) {
       const pageNum = Number(wrap.dataset.page);
       const layer = wrap.querySelector(".pdf-annot-layer");
       if (!layer) continue;
-      const page = await state.doc.getPage(pageNum);
+      const page = await capturedDoc.getPage(pageNum);
+      if (capturedDoc !== state.doc || epoch !== state.loadEpoch || !wrap.isConnected) return;
       const rotation = ((page.rotate || 0) + state.rotation) % 360;
       const viewport = page.getViewport({ scale: state.scale, rotation });
       drawAnnotationsForPage(layer, pageNum, viewport);
@@ -1419,6 +1483,8 @@
 
   async function clearAll() {
     if (!state.path) return;
+    ensureAnnotationIdle();
+    const capturedId = state.documentId;
     const res = await uiConfirm(
       "确定清除标注？\n默认只清除高光 / 下划线 / 删除线，保留评论。\n清除后可用 Ctrl+Z 撤销。",
       { checkLabel: "同时清除评论", checkDefault: false }
@@ -1426,20 +1492,35 @@
     const ok = res && typeof res === "object" ? !!res.ok : !!res;
     const alsoComments = res && typeof res === "object" ? !!res.checked : false;
     if (!ok) return;
+    if (capturedId !== state.documentId) throw new Error("确认清除期间已经切换 PDF 文档");
+    const record = state.annotationRecord, path = state.path;
+    record.restoring = true;
     try {
-      await api("clear_annotations", state.path);
-      state.annotations = state.annotations.filter((a) => {
-        if (a.native) return true;
-        if (!alsoComments && a.type === "comment") return true;
-        return false;
+      for (let page = 1; page <= state.total; page++) {
+        await loadNativePdfAnnotations(page);
+        if (capturedId !== state.documentId) throw new Error("读取批注期间已经切换PDF文档");
+      }
+      const native = state.annotations.filter(annotation => annotation.native && (alsoComments || (!annotation.comment && annotation.type !== "comment")));
+      await window.StuartCore.writeCoord.enqueue(`pdf-annotations:${capturedId}`, async () => {
+        if (native.length) {
+          const edits = native.map(annotation => ({ action: "delete", page: annotation.page, id: annotation.nativeAnnotationId }));
+          const saved = await confirmAnnotationSave(await api("edit_pdf_annotations", path, edits, capturedId));
+          window.StuartMD.confirmPdfSave(capturedId, saved);
+          recordPdfSave(record, saved);
+        }
+        const retained = record.items.filter(annotation => !alsoComments && (annotation.type === "comment" || annotation.comment));
+        await confirmAnnotationSave(await api("save_annotations", path, retained, capturedId));
+        record.items = retained;
+        pushRecordHistory(record);
+        if (state.documentId === capturedId) await reloadSavedPdf(capturedId, record);
       });
-      pushAnnotHistory();
-      await refreshAnnots();
+      if (capturedId !== state.documentId) return;
       hideAnnotMenu();
       toast(alsoComments ? "已清除全部标注（含评论）" : "已清除标注（保留评论）");
-    } catch (_) {
-      toast("清除失败");
-    }
+    } catch (error) {
+      toast("清除批注失败：" + error.message);
+      throw error;
+    } finally { record.restoring = false; }
   }
 
   async function exportAnnotsToPdf() {
@@ -1447,18 +1528,25 @@
       toast("请先打开 PDF");
       return;
     }
-    const items = state.annotations.filter((a) => !a.native);
+    ensureAnnotationIdle();
+    const items = cloneAnnots(state.annotations.filter((a) => !a.native));
     if (!items.length) {
       toast("没有可写入的标注");
       return;
     }
     try {
-      const res = await api("export_pdf_annotations", state.path, items);
-      if (res?.error) {
-        toast(res.error);
-        return;
-      }
-      toast("已写入 PDF 原生批注（WPS / Edge 可打开）");
+      const capturedId = state.documentId, capturedPath = state.path;
+      const record = state.annotationRecord;
+      await window.StuartCore.writeCoord.enqueue(`pdf-annotations:${capturedId}`, async () => {
+        const saved = await confirmAnnotationSave(await api("export_pdf_annotations", capturedPath, items, capturedId));
+        window.StuartMD.confirmPdfSave(capturedId, saved);
+        recordPdfSave(record, saved);
+        record.items = record.items.filter(annotation => !items.some(exported => exported.id === annotation.id && JSON.stringify(exported) === JSON.stringify(annotation)));
+        await confirmAnnotationSave(await api("save_annotations", capturedPath, record.items, capturedId));
+        pushRecordHistory(record);
+        if (state.documentId === capturedId) await reloadSavedPdf(capturedId, record);
+      });
+      toast("已写入 PDF 原生批注");
     } catch (err) {
       toast("写入 PDF 失败：" + (err && err.message ? err.message : err));
     }
@@ -1466,6 +1554,7 @@
 
   // ---- Floating comment panel ----
   let _commentTargetId = null;
+  let _commentDocumentId = null;
   const _panelPos = { x: 0, y: 0, has: false };
 
   function placeCommentPanel(x, y) {
@@ -1493,6 +1582,7 @@
   function openCommentPanel(id, anchorX, anchorY) {
     const e = el();
     _commentTargetId = id;
+    _commentDocumentId = state.documentId;
     const a = id ? findAnnot(id) : null;
     if (e.commentTitle) {
       e.commentTitle.textContent = a ? "编辑评论" : "添加评论";
@@ -1510,7 +1600,7 @@
         e.commentQuote.textContent = "";
       }
     }
-    if (e.commentInput) e.commentInput.value = (a && (a.comment || a.text)) || "";
+    if (e.commentInput) { e.commentInput.value = a?.comment || ""; e.commentInput.readOnly = false; }
     if (e.commentPanel) e.commentPanel.hidden = false;
     placeCommentPanel(anchorX, anchorY);
     e.commentInput?.focus();
@@ -1520,9 +1610,12 @@
     const e = el();
     if (e.commentPanel) e.commentPanel.hidden = true;
     _commentTargetId = null;
+    _commentDocumentId = null;
   }
 
   async function saveComment() {
+    ensureAnnotationIdle();
+    if (_commentDocumentId !== state.documentId) throw new Error("评论所属PDF文档已经变化");
     const e = el();
     const id = _commentTargetId;
     const text = (e.commentInput && e.commentInput.value ? e.commentInput.value : "").trim();
@@ -1545,8 +1638,11 @@
       closeCommentPanel();
       return;
     }
+    if (a.native) {
+      await editNativeAnnotations([{ action: "comment", page: a.page, id: a.nativeAnnotationId, comment: text }]);
+      closeCommentPanel(); toast("评论已经保存"); return;
+    }
     a.comment = text;
-    a.text = text || a.text;
     await persistAnnots();
     await refreshAnnots();
     toast(text ? "评论已保存" : "评论已清空");
@@ -1782,15 +1878,49 @@
     if (e.btnColor) e.btnColor.title = "标注颜色";
   }
 
+  async function openAnchor(hit) {
+    await state.openPromise;
+    if (!state.doc || hit.sourceHash !== window.StuartMD.getDocument().diskRevision.rawByteSha256) throw new Error("PDF来源文件指纹与知识命中不同");
+    const pageNumber = Number(hit.pageNumber ?? hit.page);
+    if (!Number.isInteger(pageNumber) || pageNumber < 1 || pageNumber > state.total) throw new Error("PDF来源页码超出文档范围");
+    const source = typeof hit.boundingBox === "string" ? JSON.parse(hit.boundingBox) : hit.boundingBox || hit.bounds;
+    if (!source?.rects?.length || source.sourceHash !== hit.sourceHash) throw new Error("PDF来源缺少已经验证的坐标");
+    const capturedId = state.documentId;
+    const wrap = el().scroll.querySelector(`.pdf-page[data-page="${pageNumber}"]`);
+    if (!wrap) throw new Error("PDF来源页面尚未建立");
+    wrap.scrollIntoView({ block: "center" });
+    await renderPage(wrap);
+    if (wrap.dataset.rendering === "1") await new Promise((resolve, reject) => {
+      const observer = new MutationObserver(() => {
+        if (wrap.dataset.rendering !== "1") { clearTimeout(timer); observer.disconnect(); resolve(); }
+      });
+      const timer = setTimeout(() => { observer.disconnect(); reject(new Error("PDF来源页面渲染超时")); }, 15000);
+      observer.observe(wrap, { attributes: true, attributeFilter: ["data-rendering"] });
+    });
+    if (capturedId !== state.documentId || !wrap._pdfViewport || wrap.dataset.painted !== "1") throw new Error("PDF来源页面未完成当前文档的渲染");
+    document.querySelectorAll(".pdf-source-anchor").forEach(element => element.remove());
+    for (const rectangle of source.rects) {
+      if (rectangle.length !== 4 || rectangle.some(value => !Number.isFinite(value))) throw new Error("PDF来源坐标无效");
+      const points = wrap._pdfViewport.convertToViewportRectangle(rectangle);
+      const marker = document.createElement("div"); marker.className = "pdf-source-anchor";
+      Object.assign(marker.style, { position: "absolute", left: Math.min(points[0], points[2]) + "px", top: Math.min(points[1], points[3]) + "px", width: Math.abs(points[2] - points[0]) + "px", height: Math.abs(points[3] - points[1]) + "px", background: "rgba(255,210,45,.35)", outline: "2px solid #ca9e18", pointerEvents: "none", zIndex: "5" });
+      wrap.append(marker);
+    }
+    state.page = pageNumber; el().pageInput.value = String(pageNumber);
+  }
+
   function hidePdf() {
+    state.loadEpoch++;
     const e = el();
     e.area.hidden = true;
     hideAnnotMenu();
     hideAnnotBar();
     hideHoverTip();
     closeCommentPanel();
-    disposeDoc();
+    const disposing = disposeDoc();
     state.path = null;
+    state.documentId = null;
+    return disposing;
   }
 
   document.addEventListener("DOMContentLoaded", bindChrome);
@@ -1804,8 +1934,14 @@
     isActive: () => !el().area.hidden && !!state.doc,
     getSelection,
     getAiContext,
+    getCurrentPage: () => state.page,
+    openAnchor,
     loadPageText,
     uiConfirm,
+    async releaseDocument(documentId) {
+      if (state.documentId === documentId) await hidePdf();
+      annotationRecords.delete(documentId);
+    },
   };
   // Shared in-app confirm (Tauri native confirm() often no-ops)
   window.StuartUIConfirm = uiConfirm;

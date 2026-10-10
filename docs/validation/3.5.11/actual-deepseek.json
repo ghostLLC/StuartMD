@@ -1,0 +1,72 @@
+{
+  "answer": "根据文档 **StuartMD** 的验收要求：仅验收服务商 **DeepSeek**；禁止操作是 **删除用户文件**。😀",
+  "answerSha256": "fc3d9c29026fc5a3d29e11855dc8154d66e43283010c57041ad8d6a234cf3936",
+  "cancelChunks": 1,
+  "disabledChunks": 1,
+  "model": "deepseek-flash",
+  "models": [
+    "deepseek-flash",
+    "deepseek-v4-pro"
+  ],
+  "passed": true,
+  "plannedPromptTokens": 56,
+  "protocolReserve": 258,
+  "provider": "deepseek",
+  "streamChunks": 32,
+  "summary": {
+    "constraints": [
+      {
+        "sources": [
+          {
+            "messageId": "d1736b01-0952-4131-8537-20c5b7eaeb47",
+            "quote": "约束：禁止删除用户文件。"
+          }
+        ],
+        "text": "禁止删除用户文件"
+      }
+    ],
+    "corrections": [
+      {
+        "sources": [
+          {
+            "messageId": "d1736b01-0952-4131-8537-20c5b7eaeb47",
+            "quote": "最新更正：欢迎文档使用 StuartMD 名称。"
+          }
+        ],
+        "text": "欢迎文档使用 StuartMD 名称"
+      }
+    ],
+    "decisions": [
+      {
+        "sources": [
+          {
+            "messageId": "d1736b01-0952-4131-8537-20c5b7eaeb47",
+            "quote": "决定：本次仅验收 DeepSeek。"
+          }
+        ],
+        "text": "本次仅验收 DeepSeek"
+      }
+    ],
+    "openQuestions": [
+      {
+        "sources": [
+          {
+            "messageId": "d1736b01-0952-4131-8537-20c5b7eaeb47",
+            "quote": "待解决问题：确认 PDF 标注能够重新打开。"
+          }
+        ],
+        "text": "确认 PDF 标注能够重新打开"
+      }
+    ]
+  },
+  "usage": {
+    "completion_tokens": 33,
+    "prompt_cache_hit_tokens": 0,
+    "prompt_cache_miss_tokens": 58,
+    "prompt_tokens": 58,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 91
+  }
+}

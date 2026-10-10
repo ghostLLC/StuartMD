@@ -1,0 +1,281 @@
+{
+  "code": "flowchart LR\n  A[打开文档] --> B{文档类型}\n  B -->|Markdown| C[阅读与编辑]\n  B -->|PDF| D[阅读与批注]\n  C --> E[保存正文]\n  D --> F[保存批注]\n  E --> G[检查文件版本]\n  F --> G\n  G --> H[继续阅读]\n",
+  "errors": [],
+  "viewBox": "-8 -8 813.015625 128",
+  "svg": {
+    "x": 639,
+    "y": 135,
+    "width": 742,
+    "height": 116.8125,
+    "display": "block",
+    "fontSize": "14px",
+    "padding": "0px",
+    "cssWidth": "742px"
+  },
+  "nodes": [
+    {
+      "text": "打开文档",
+      "rect": {
+        "x": 646.3226928710938,
+        "y": 179.260986328125,
+        "width": 62.056640625,
+        "height": 28.29052734375,
+        "display": "inline",
+        "fontSize": "14px",
+        "padding": "0px",
+        "cssWidth": "68px"
+      },
+      "foreignObject": {
+        "x": 651.7982788085938,
+        "y": 184.736572265625,
+        "width": 51.10546875,
+        "height": 17.33935546875,
+        "display": "block",
+        "fontSize": "14px",
+        "padding": "0px",
+        "cssWidth": "56px"
+      },
+      "label": {
+        "x": 651.7982788085938,
+        "y": 184.736572265625,
+        "width": 51.10546875,
+        "height": 17.33935546875,
+        "display": "inline",
+        "fontSize": "14px",
+        "padding": "0px",
+        "cssWidth": "auto"
+      }
+    },
+    {
+      "text": "文档类型",
+      "rect": {
+        "x": 754.0092163085938,
+        "y": 148.232666015625,
+        "width": 90.34716796875,
+        "height": 90.34716796875,
+        "display": "inline",
+        "fontSize": "14px",
+        "padding": "0px",
+        "cssWidth": "auto"
+      },
+      "foreignObject": {
+        "x": 773.6300659179688,
+        "y": 184.736572265625,
+        "width": 51.10546875,
+        "height": 17.33935546875,
+        "display": "block",
+        "fontSize": "14px",
+        "padding": "0px",
+        "cssWidth": "56px"
+      },
+      "label": {
+        "x": 773.6300659179688,
+        "y": 184.736572265625,
+        "width": 51.10546875,
+        "height": 17.33935546875,
+        "display": "inline",
+        "fontSize": "14px",
+        "padding": "0px",
+        "cssWidth": "auto"
+      }
+    },
+    {
+      "text": "阅读与编辑",
+      "rect": {
+        "x": 950.2319946289062,
+        "y": 142.30078125,
+        "width": 74.83294677734375,
+        "height": 28.29052734375,
+        "display": "inline",
+        "fontSize": "14px",
+        "padding": "0px",
+        "cssWidth": "82px"
+      },
+      "foreignObject": {
+        "x": 955.7075805664062,
+        "y": 147.7763671875,
+        "width": 63.8818359375,
+        "height": 17.33935546875,
+        "display": "block",
+        "fontSize": "14px",
+        "padding": "0px",
+        "cssWidth": "70px"
+      },
+      "label": {
+        "x": 955.7075805664062,
+        "y": 147.7763671875,
+        "width": 63.8818359375,
+        "height": 17.33935546875,
+        "display": "inline",
+        "fontSize": "14px",
+        "padding": "0px",
+        "cssWidth": "auto"
+      }
+    },
+    {
+      "text": "阅读与批注",
+      "rect": {
+        "x": 950.2319946289062,
+        "y": 216.22119140625,
+        "width": 74.83294677734375,
+        "height": 28.29052734375,
+        "display": "inline",
+        "fontSize": "14px",
+        "padding": "0px",
+        "cssWidth": "82px"
+      },
+      "foreignObject": {
+        "x": 955.7075805664062,
+        "y": 221.69677734375,
+        "width": 63.8818359375,
+        "height": 17.33935546875,
+        "display": "block",
+        "fontSize": "14px",
+        "padding": "0px",
+        "cssWidth": "70px"
+      },
+      "label": {
+        "x": 955.7075805664062,
+        "y": 221.69677734375,
+        "width": 63.8818359375,
+        "height": 17.33935546875,
+        "display": "inline",
+        "fontSize": "14px",
+        "padding": "0px",
+        "cssWidth": "auto"
+      }
+    },
+    {
+      "text": "保存正文",
+      "rect": {
+        "x": 1070.69482421875,
+        "y": 142.30078125,
+        "width": 62.056640625,
+        "height": 28.29052734375,
+        "display": "inline",
+        "fontSize": "14px",
+        "padding": "0px",
+        "cssWidth": "68px"
+      },
+      "foreignObject": {
+        "x": 1076.17041015625,
+        "y": 147.7763671875,
+        "width": 51.10546875,
+        "height": 17.33935546875,
+        "display": "block",
+        "fontSize": "14px",
+        "padding": "0px",
+        "cssWidth": "56px"
+      },
+      "label": {
+        "x": 1076.17041015625,
+        "y": 147.7763671875,
+        "width": 51.10546875,
+        "height": 17.33935546875,
+        "display": "inline",
+        "fontSize": "14px",
+        "padding": "0px",
+        "cssWidth": "auto"
+      }
+    },
+    {
+      "text": "保存批注",
+      "rect": {
+        "x": 1070.69482421875,
+        "y": 216.22119140625,
+        "width": 62.056640625,
+        "height": 28.29052734375,
+        "display": "inline",
+        "fontSize": "14px",
+        "padding": "0px",
+        "cssWidth": "68px"
+      },
+      "foreignObject": {
+        "x": 1076.17041015625,
+        "y": 221.69677734375,
+        "width": 51.10546875,
+        "height": 17.33935546875,
+        "display": "block",
+        "fontSize": "14px",
+        "padding": "0px",
+        "cssWidth": "56px"
+      },
+      "label": {
+        "x": 1076.17041015625,
+        "y": 221.69677734375,
+        "width": 51.10546875,
+        "height": 17.33935546875,
+        "display": "inline",
+        "fontSize": "14px",
+        "padding": "0px",
+        "cssWidth": "auto"
+      }
+    },
+    {
+      "text": "检查文件版本",
+      "rect": {
+        "x": 1178.38134765625,
+        "y": 179.260986328125,
+        "width": 87.609375,
+        "height": 28.29052734375,
+        "display": "inline",
+        "fontSize": "14px",
+        "padding": "0px",
+        "cssWidth": "96px"
+      },
+      "foreignObject": {
+        "x": 1183.85693359375,
+        "y": 184.736572265625,
+        "width": 76.658203125,
+        "height": 17.33935546875,
+        "display": "block",
+        "fontSize": "14px",
+        "padding": "0px",
+        "cssWidth": "84px"
+      },
+      "label": {
+        "x": 1183.85693359375,
+        "y": 184.736572265625,
+        "width": 76.658203125,
+        "height": 17.33935546875,
+        "display": "inline",
+        "fontSize": "14px",
+        "padding": "0px",
+        "cssWidth": "auto"
+      }
+    },
+    {
+      "text": "继续阅读",
+      "rect": {
+        "x": 1311.62060546875,
+        "y": 179.260986328125,
+        "width": 62.056640625,
+        "height": 28.29052734375,
+        "display": "inline",
+        "fontSize": "14px",
+        "padding": "0px",
+        "cssWidth": "68px"
+      },
+      "foreignObject": {
+        "x": 1317.09619140625,
+        "y": 184.736572265625,
+        "width": 51.10546875,
+        "height": 17.33935546875,
+        "display": "block",
+        "fontSize": "14px",
+        "padding": "0px",
+        "cssWidth": "56px"
+      },
+      "label": {
+        "x": 1317.09619140625,
+        "y": 184.736572265625,
+        "width": 51.10546875,
+        "height": 17.33935546875,
+        "display": "inline",
+        "fontSize": "14px",
+        "padding": "0px",
+        "cssWidth": "auto"
+      }
+    }
+  ]
+}

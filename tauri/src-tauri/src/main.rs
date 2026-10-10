@@ -1,8 +1,11 @@
-// StuartMD Tauri shell
+// StuartMD 原生窗口与命令注册
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod ai_api;
 mod ai_chat;
+mod ai;
+mod app_runtime;
+mod document;
 mod fs_api;
 mod win_api;
 mod rag;
@@ -31,10 +34,36 @@ fn main() {
     fs_api::set_startup_file(startup);
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+            let path = args.into_iter().skip(1).find(|argument| !argument.starts_with('-')).map(|argument| {
+                let path = std::path::PathBuf::from(argument);
+                if path.is_absolute() { path } else { std::path::PathBuf::from(cwd).join(path) }
+            }).map(|path| path.to_string_lossy().into_owned());
+            app_runtime::create_document_window(app, path).expect("创建关联文档窗口失败");
+        }))
+        .manage(app_runtime::AppRuntime::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             fs_api::stuart_get_app_info,
+            fs_api::document_read,
+            fs_api::pdf_document_snapshot,
+            fs_api::document_new,
+            fs_api::document_release,
+            fs_api::document_confirm_encoding,
+            fs_api::document_encoding_preview,
+            fs_api::document_target_revision,
+            fs_api::save_document,
+            fs_api::journal_write,
+            fs_api::journal_list,
+            fs_api::journal_read,
+            fs_api::journal_restore,
+            fs_api::journal_discard,
+            fs_api::journal_flush,
+            fs_api::journal_import_legacy,
+            fs_api::save_operations_list,
+            fs_api::save_operation_read,
+            fs_api::save_operation_copy,
             fs_api::stuart_get_settings,
             fs_api::stuart_save_settings,
             fs_api::stuart_read_file,
@@ -56,7 +85,7 @@ fn main() {
             fs_api::stuart_export_html,
             fs_api::stuart_open_welcome,
             fs_api::stuart_file_exists,
-            // Path capability model (C2): dialog-backed grants + session allowlist
+            // 系统对话框选择路径后记录当前窗口的访问授权
             fs_api::stuart_register_allowed_path,
             fs_api::stuart_dialog_open_file,
             fs_api::stuart_dialog_save_file,
@@ -79,10 +108,12 @@ fn main() {
             win_api::stuart_delete_annotation,
             win_api::stuart_clear_annotations,
             win_api::stuart_export_pdf_annotations,
+            win_api::stuart_edit_pdf_annotations,
+            win_api::stuart_restore_pdf_annotations,
             win_api::stuart_capture_window,
             win_api::stuart_apply_window_state,
             win_api::stuart_exit_app,
-            // AI / memory / tool surface (medium-term)
+            // AI 配置与本地资料
             ai_api::stuart_get_capabilities,
             ai_api::stuart_ai_home,
             ai_api::stuart_memory_list,
@@ -91,27 +122,33 @@ fn main() {
             ai_api::stuart_memory_delete,
             ai_api::stuart_search_md,
             ai_api::stuart_workspace_files,
-            // AI chat / explain (3.0.0)
+            // AI 请求
             ai_chat::stuart_ai_get_config,
             ai_chat::stuart_ai_save_config,
             ai_chat::stuart_ai_set_api_key,
             ai_chat::stuart_ai_clear_api_key,
             ai_chat::stuart_ai_test_provider,
-            ai_chat::stuart_ai_chat_start,
-            ai_chat::stuart_ai_chat_cancel,
-            // StuartMD RAG Knowledge Engine (M1 + M2)
+            ai::stuart_ai_request_start,
+            ai::stuart_ai_request_cancel,
+            ai::stuart_ai_request_status,
+            app_runtime::stuart_close_window,
+            // 知识索引与查询
             rag_ipc::stuart_rag_set_workspace,
             rag_ipc::stuart_rag_query,
             rag_ipc::stuart_rag_get_status,
             rag_ipc::stuart_rag_sync_workspace,
             rag_ipc::stuart_rag_cancel_sync,
-            // StuartMD Diff Gatekeeper (M4)
+            rag_ipc::stuart_rag_set_model,
+            rag_ipc::stuart_pdf_context,
+            // 文档修改审核
             security::diff_guard::stuart_companion_preview_diff,
             security::diff_guard::stuart_companion_apply_diff,
             security::diff_guard::stuart_companion_save_note,
-            // StuartMD Context Pyramid & Budgeting Engine (M3)
+            // 上下文预算
             context::stuart_context_assemble,
-            // StuartMD Organic Memory & Chat Archive (M5)
+            context::stuart_context_model_spec,
+            context::stuart_context_validate_model_spec,
+            // 会话与记忆
             memory::stuart_session_create,
             memory::stuart_session_list,
             memory::stuart_session_get_messages,
@@ -121,17 +158,38 @@ fn main() {
             memory::stuart_organic_memory_upsert,
             memory::stuart_organic_memory_list,
             memory::stuart_organic_memory_evolve,
+            memory::stuart_session_create_document,
+            memory::stuart_session_rebind,
+            memory::stuart_session_open_document,
+            memory::stuart_organic_memory_search,
+            memory::stuart_organic_memory_delete,
+            memory::stuart_organic_memory_effective,
         ])
         .manage(rag::RagState::new())
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.emit("stuart-window-close-requested", ());
+            match event {
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    api.prevent_close();
+                    window.emit("stuart-window-close-requested", ()).expect("发送窗口关闭请求失败");
+                }
+                tauri::WindowEvent::Destroyed => {
+                    crate::ai::cancel_window(window.label());
+                    if let Some(service) = window.app_handle().try_state::<document::DocumentService>() {
+                        service.release_window(window.label()).expect("保存窗口文档草稿失败");
+                    }
+                    window.app_handle().state::<app_runtime::AppRuntime>().remove(window.label());
+                    window.app_handle().state::<rag::RagState>().window_workspaces.write().expect("窗口知识目录记录锁损坏").remove(window.label());
+                }
+                _ => {}
             }
         })
         .setup(|app| {
+            crate::context::model_spec::initialize_resource_directory(app.path().resource_dir()?.join("tokenizers"))?;
+            crate::rag::embedding::initialize_runtime(app.path().resource_dir()?.join("native"))?;
+            app.state::<app_runtime::AppRuntime>().register("main", fs_api::startup_file());
+            app.manage(document::DocumentService::new(fs_api::data_dir())?);
             if let Some(w) = app.get_webview_window("main") {
-                let _ = w.set_title("StuartMD");
+                w.set_title("StuartMD")?;
             }
             Ok(())
         })

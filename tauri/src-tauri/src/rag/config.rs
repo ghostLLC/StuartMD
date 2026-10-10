@@ -62,7 +62,7 @@ pub type ChunkInsertPayload = RagChunk;
 pub type ChunkQueryResult = RagChunk;
 
 /// RAG knowledge base operational status and summary statistics
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RagStatus {
     /// Operational status: "idle" | "indexing" | "ready" | "error"
@@ -73,7 +73,29 @@ pub struct RagStatus {
     pub chunk_count: usize,
     /// Last indexing timestamp in epoch milliseconds
     pub last_indexed: u64,
+    pub workspace_id: String,
+    pub index_generation: Option<String>,
+    pub model_id: String,
+    pub embedding_dim: usize,
+    pub job_id: Option<String>,
+    #[serde(default)]
+    pub selected_model_id: String,
+    pub total_files: usize,
+    pub processed_files: usize,
+    pub failed_files: Vec<IndexFileFailure>,
+    pub excluded_files: Vec<IndexExclusion>,
+    pub error_message: Option<String>,
+    #[serde(default)]
+    pub source_changed: bool,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexFileFailure { pub path: String, pub stage: String, pub message: String }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexExclusion { pub path: String, pub reason: String }
 
 pub type RagStatusResponse = RagStatus;
 
@@ -104,6 +126,7 @@ pub struct RagConfig {
     pub max_vault_depth: usize,
     /// Directory blacklist names to exclude from indexing
     pub blacklisted_dirs: Vec<String>,
+    pub native_resources: PathBuf,
 }
 
 pub type StorageConfig = RagConfig;
@@ -132,6 +155,7 @@ impl Default for RagConfig {
                 ".vscode".to_string(),
                 ".idea".to_string(),
             ],
+            native_resources: PathBuf::from("resources/native"),
         }
     }
 }

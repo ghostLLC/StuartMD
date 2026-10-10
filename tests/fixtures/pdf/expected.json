@@ -1,0 +1,180 @@
+{
+  "pageCount": 8,
+  "source": "Canvas中人工指定的语句、基线、字号及页面矩形",
+  "minimumNativeIoU": 0.8,
+  "anchors": [
+    {
+      "pageNumber": 1,
+      "text": "SINGLE COLUMN SOURCE ALPHA",
+      "method": "native",
+      "rect": [
+        72,
+        699.75,
+        301.488,
+        710.22
+      ]
+    },
+    {
+      "pageNumber": 1,
+      "text": "SECOND LINE SOURCE ALPHA",
+      "method": "native",
+      "rect": [
+        72,
+        674.75,
+        280.488,
+        685.22
+      ]
+    },
+    {
+      "pageNumber": 2,
+      "text": "LEFT COLUMN FIRST",
+      "method": "native",
+      "rect": [
+        54,
+        729.75,
+        176.67600000000002,
+        738.76
+      ]
+    },
+    {
+      "pageNumber": 2,
+      "text": "LEFT COLUMN SECOND",
+      "method": "native",
+      "rect": [
+        54,
+        707.75,
+        193.344,
+        716.76
+      ]
+    },
+    {
+      "pageNumber": 2,
+      "text": "LEFT COLUMN THIRD",
+      "method": "native",
+      "rect": [
+        54,
+        685.75,
+        178.668,
+        694.76
+      ]
+    },
+    {
+      "pageNumber": 2,
+      "text": "RIGHT COLUMN FIRST",
+      "method": "native",
+      "rect": [
+        330,
+        729.75,
+        460.668,
+        738.76
+      ]
+    },
+    {
+      "pageNumber": 2,
+      "text": "RIGHT COLUMN SECOND",
+      "method": "native",
+      "rect": [
+        330,
+        707.75,
+        477.336,
+        716.76
+      ]
+    },
+    {
+      "pageNumber": 2,
+      "text": "RIGHT COLUMN THIRD",
+      "method": "native",
+      "rect": [
+        330,
+        685.75,
+        462.65999999999997,
+        694.76
+      ]
+    },
+    {
+      "pageNumber": 3,
+      "text": "LANDSCAPE SOURCE BRAVO",
+      "method": "native",
+      "rect": [
+        95,
+        479.75,
+        296.488,
+        490.22
+      ]
+    },
+    {
+      "pageNumber": 4,
+      "text": "ROTATION SOURCE CHARLIE",
+      "method": "native",
+      "rect": [
+        95,
+        649.75,
+        295.69,
+        660.22
+      ]
+    },
+    {
+      "pageNumber": 5,
+      "text": "CROPBOX SOURCE DELTA",
+      "method": "native",
+      "rect": [
+        95,
+        649.75,
+        277.812,
+        660.22
+      ]
+    },
+    {
+      "pageNumber": 6,
+      "text": "简体中文 页面引用 来源坐标",
+      "method": "native"
+    },
+    {
+      "pageNumber": 6,
+      "text": "繁體中文 頁面引用 來源座標",
+      "method": "native"
+    },
+    {
+      "pageNumber": 7,
+      "text": "SCANNED PAGE SOURCE ECHO",
+      "method": "ocr"
+    },
+    {
+      "pageNumber": 7,
+      "text": "扫描页面包含真实文字",
+      "method": "ocr"
+    },
+    {
+      "pageNumber": 8,
+      "text": "MIXED NATIVE SOURCE FOXTROT",
+      "method": "native",
+      "rect": [
+        72,
+        709.75,
+        305.366,
+        720.22
+      ]
+    },
+    {
+      "pageNumber": 8,
+      "text": "IMAGE REGION SOURCE GOLF",
+      "method": "ocr"
+    }
+  ],
+  "columnOrder": [
+    "LEFT COLUMN FIRST",
+    "LEFT COLUMN SECOND",
+    "LEFT COLUMN THIRD",
+    "RIGHT COLUMN FIRST",
+    "RIGHT COLUMN SECOND",
+    "RIGHT COLUMN THIRD"
+  ],
+  "rotationPage": 4,
+  "cropBoxPage": 5,
+  "cropBox": [
+    40,
+    50,
+    550,
+    780
+  ]
+}

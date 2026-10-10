@@ -1,327 +1,249 @@
-// tauri/src-tauri/src/rag_ipc.rs
-//! StuartMD RAG Tauri IPC Gateway
-//! Bridges frontend requests to the local RAG subsystem.
-//! Implements:
-//! - stuart_rag_set_workspace
-//! - stuart_rag_query
-//! - stuart_rag_get_status
-
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use serde::{Deserialize, Serialize};
-use tauri::State;
+use std::sync::atomic::{AtomicBool,Ordering};
+use serde::{Deserialize,Serialize};
+use tauri::{Emitter,Manager,State};
+use crate::rag::{execute_rrf_fusion,resolve_query_weights,search_fts5_bm25,RagState,RagStatus,RagStorage,WorkspaceBinding};
+use crate::rag::generation::{workspace_id,GenerationCatalog,PARSER_VERSION,build_generation};
+use crate::rag::model_registry::{file_sha256,model_spec};
 
-use crate::rag::{
-    execute_rrf_fusion, resolve_query_weights, search_fts5_bm25,
-    RagState, RagStatus, RagStorage,
-};
-
-/// Workspace configuration response compatible with both VaultMeta and RagStatus contracts
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug,Clone,Serialize,Deserialize)]
+#[serde(rename_all="camelCase")]
 pub struct RagSetWorkspaceResponse {
-    pub status: String,
-    pub doc_count: usize,
-    pub document_count: usize,
-    pub chunk_count: usize,
-    pub last_indexed: u64,
-    pub model_id: String,
-    pub embedding_dim: usize,
-    pub schema_version: String,
+    pub status:String,pub doc_count:usize,pub document_count:usize,pub chunk_count:usize,pub last_indexed:u64,pub model_id:String,pub selected_model_id:String,pub embedding_dim:usize,pub schema_version:String,pub workspace_id:String,pub index_generation:Option<String>,
 }
 
-/// Optional structured search request argument
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RagSearchRequest {
-    pub vault_root: Option<String>,
-    pub query: String,
-    pub top_k: Option<usize>,
-}
+#[derive(Debug,Clone,Serialize,Deserialize)]
+#[serde(rename_all="camelCase")]
+pub struct RagSearchRequest {pub vault_root:Option<String>,pub query:String,pub top_k:Option<usize>,#[serde(default)] pub accept_partial:bool}
 
-/// Hit payload returned to frontend and L3 context pyramid
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug,Clone,Serialize,Deserialize)]
+#[serde(rename_all="camelCase")]
 pub struct RagHitPayload {
-    pub chunk_id: String,
-    pub rel_path: String,
-    pub heading_path: String,
-    pub start_line: Option<usize>,
-    pub end_line: Option<usize>,
-    pub page_number: Option<usize>,
-    pub bounding_box: Option<String>,
-    pub content: String,
-    pub rrf_score: f32,
-    pub deep_link: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub vector_rank: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub bm25_rank: Option<usize>,
+    pub chunk_id:String,pub rel_path:String,pub heading_path:String,pub start_line:Option<usize>,pub end_line:Option<usize>,pub page_number:Option<usize>,pub bounding_box:Option<String>,pub content:String,pub rrf_score:f32,pub deep_link:String,pub vector_rank:Option<usize>,pub bm25_rank:Option<usize>,
+    pub source_hash:String,pub index_generation:String,pub index_status:String,pub workspace_id:String,pub workspace_root:String,pub model_id:String,
+}
+pub type RrfRankedChunk=RagHitPayload;
+
+fn binding(state:&RagState,root:Option<&str>)->Result<WorkspaceBinding,String> {
+    let root=if let Some(path)=root {crate::fs_api::ensure_dir_allowed(path)?} else {state.workspace_root.read().map_err(|error|error.to_string())?.clone().ok_or("尚未选择知识目录")?};
+    state.workspaces.read().map_err(|error|error.to_string())?.get(&workspace_id(&root)).cloned().ok_or("知识目录尚未初始化".into())
 }
 
-#[allow(dead_code)]
-pub type RrfRankedChunk = RagHitPayload;
+fn window_binding(window:&tauri::WebviewWindow,state:&RagState,root:Option<&str>)->Result<WorkspaceBinding,String> {
+    let path=if let Some(root)=root {root.to_owned()}else {state.window_workspaces.read().map_err(|error|error.to_string())?.get(window.label()).ok_or("当前窗口尚未选择知识目录")?.to_string_lossy().into_owned()};
+    crate::fs_api::ensure_window_read_allowed(window,&path)?;
+    binding(state,Some(&path))
+}
 
-/// Configure or switch the active workspace/vault for local RAG retrieval
+fn record_binding(state:&RagState,mut workspace:WorkspaceBinding)->Result<(),String> {
+    workspace.status.source_changed |= workspace.source_revision.load(Ordering::Acquire)!=workspace.indexed_revision;
+    state.workspaces.write().map_err(|error|error.to_string())?.insert(workspace_id(&workspace.root),workspace.clone());
+    if state.workspace_root.read().map_err(|error|error.to_string())?.as_ref()==Some(&workspace.root) {
+        *state.status.write().map_err(|error|error.to_string())?=workspace.status;
+        *state.storage.write().map_err(|error|error.to_string())?=workspace.storage;
+    }
+    Ok(())
+}
+
+fn watch_workspace(app:&tauri::AppHandle,state:&RagState,workspace:&WorkspaceBinding)->Result<(),String> {
+    let id=workspace_id(&workspace.root);
+    let mut watchers=state.watchers.lock().map_err(|error|error.to_string())?;
+    if watchers.contains_key(&id) {return Ok(());}
+    let root=workspace.root.clone();
+    let watched_root=root.clone();
+    let callback_app=app.clone();
+    let pending=Arc::new(AtomicBool::new(false));
+    let watcher=crate::rag::watcher::WorkspaceWatcher::start(&watched_root,&workspace.config,move|event| {
+        let state=callback_app.state::<RagState>();
+        let mut workspaces=state.workspaces.write().expect("知识工作区锁不可用");
+        let workspace=workspaces.get_mut(&id).expect("监听知识目录记录缺失");
+        workspace.source_revision.fetch_add(1,Ordering::AcqRel);
+        workspace.status.source_changed=true;
+        match event {
+            Err(error)=> {workspace.status.status="Failed".into();workspace.status.error_message=Some(error);return;}
+            Ok(paths)=> {callback_app.emit("rag-source-changed",serde_json::json!({"workspaceId":id,"workspaceRoot":root,"paths":paths})).expect("发送资料变化事件失败");}
+        }
+        drop(workspaces);
+        if pending.swap(true,Ordering::AcqRel) {return;}
+        let pending=pending.clone();let app=callback_app.clone();let root=root.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+            let state=app.state::<RagState>();
+            loop {
+                let workspace=binding(&state,Some(&root.to_string_lossy())).expect("监听知识目录绑定缺失");
+                if !workspace.status.source_changed {
+                    let workspaces=state.workspaces.write().expect("知识工作区锁不可用");
+                    if workspaces.get(&workspace_id(&root)).expect("监听知识目录绑定缺失").status.source_changed {continue;}
+                    pending.store(false,Ordering::Release);break;
+                }
+                let active=state.jobs.lock().expect("知识任务锁不可用").get(&workspace_id(&root)).cloned();
+                if let Some(job)=active {
+                    let notified=job.finished.notified();tokio::pin!(notified);notified.as_mut().enable();
+                    if !job.ended.load(Ordering::Acquire) {notified.await;}
+                    if binding(&state,Some(&root.to_string_lossy())).expect("监听知识目录绑定缺失").status.status=="Cancelled" {pending.store(false,Ordering::Release);break;}
+                    continue;
+                }
+                if let Err(error)=synchronize(app.clone(),&state,workspace,true).await {
+                    app.emit("rag-sync-error",serde_json::json!({"workspaceId":workspace_id(&root),"message":error})).expect("发送知识任务错误失败");pending.store(false,Ordering::Release);break;
+                }
+            }
+        });
+    })?;
+    watchers.insert(workspace_id(&workspace.root),watcher);
+    Ok(())
+}
+
 #[tauri::command]
-pub async fn stuart_rag_set_workspace(
-    state: State<'_, RagState>,
-    workspace_root: Option<String>,
-    vault_path: Option<String>,
-) -> Result<RagSetWorkspaceResponse, String> {
-    let path_str = workspace_root
-        .or(vault_path)
-        .ok_or_else(|| "Workspace root path is required".to_string())?;
-
-    let root_path = PathBuf::from(&path_str);
-    if !root_path.exists() || !root_path.is_dir() {
-        return Err(format!("Workspace directory does not exist or is not a folder: {}", path_str));
+pub async fn stuart_rag_set_workspace(window:tauri::WebviewWindow,app:tauri::AppHandle,state:State<'_,RagState>,workspace_root:Option<String>,vault_path:Option<String>)->Result<RagSetWorkspaceResponse,String> {
+    let _operation=state.operation_lock.lock().await;
+    let path=workspace_root.or(vault_path);
+    if path.is_none() {
+        state.window_workspaces.write().map_err(|error|error.to_string())?.remove(window.label());
+        return Ok(RagSetWorkspaceResponse {status:"Uninitialized".into(),doc_count:0,document_count:0,chunk_count:0,last_indexed:0,model_id:String::new(),selected_model_id:String::new(),embedding_dim:0,schema_version:"2".into(),workspace_id:String::new(),index_generation:None});
     }
-
-    let canonical_root = root_path.canonicalize().map_err(|e| e.to_string())?;
-    let stuart_dir = canonical_root.join(".stuart");
-    if !stuart_dir.exists() {
-        std::fs::create_dir_all(&stuart_dir)
-            .map_err(|e| format!("Failed to create .stuart directory: {}", e))?;
-    }
-
-    let db_path = stuart_dir.join("rag.db");
-    let active_model_cfg = state.embedding_engine.get_active_config().await;
-
-    // Read configured parameters or use defaults
-    let mut storage_cfg = {
-        let guard = state.config.read().map_err(|e| e.to_string())?;
-        guard.clone()
+    let path=path.expect("知识目录路径已经检查");
+    crate::fs_api::ensure_window_read_allowed(&window,&path)?;
+    let root=crate::fs_api::ensure_dir_allowed(&path)?;
+    let id=workspace_id(&root);
+    let existing=state.workspaces.read().map_err(|error|error.to_string())?.get(&id).cloned();
+    let workspace=if let Some(workspace)=existing {workspace}else {
+        let catalog=GenerationCatalog::open(&root)?;
+        let generation=catalog.current()?;
+        let mut config=state.config.read().map_err(|error|error.to_string())?.clone();
+        #[cfg(debug_assertions)] {config.native_resources=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../resources/native");}
+        #[cfg(not(debug_assertions))] {config.native_resources=app.path().resource_dir().map_err(|error|error.to_string())?.join("native");}
+        let selected=catalog.selected_model()?.or_else(||generation.as_ref().map(|generation|generation.model.model_id.clone())).unwrap_or(config.model_id.clone());
+        config.model_id=selected.clone();config.embedding_dim=model_spec(&selected)?.dimension;
+        let storage=if let Some(generation)=&generation {
+            let mut active_config=config.clone();active_config.db_path=generation.database_path.clone();active_config.model_id=generation.model.model_id.clone();active_config.embedding_dim=generation.model.dimension;
+            let storage=Arc::new(RagStorage::open(active_config)?);
+            if storage.metadata("model_spec_hash")?!=generation.model.identity_hash()? {return Err("索引模型清单与数据库不一致".into());}
+            Some(storage)
+        } else {None};
+        let mut status=RagStatus {status:generation.as_ref().map(|generation|generation.status.clone()).unwrap_or("Uninitialized".into()),workspace_id:id.clone(),index_generation:generation.as_ref().map(|generation|generation.generation_id.clone()),model_id:generation.as_ref().map(|generation|generation.model.model_id.clone()).unwrap_or(selected.clone()),selected_model_id:selected,embedding_dim:generation.as_ref().map(|generation|generation.model.dimension).unwrap_or(config.embedding_dim),..Default::default()};
+        if let Some(storage)=&storage {let metadata=storage.get_vault_meta()?;status.doc_count=metadata.document_count;status.chunk_count=metadata.chunk_count;status.last_indexed=metadata.last_indexed;}
+        if let Some(generation)=&generation {status.failed_files=serde_json::from_str(&generation.failures_json).map_err(|error|error.to_string())?;status.source_changed=generation.parser_version!=PARSER_VERSION;}
+        WorkspaceBinding {root:root.clone(),storage,generation,status,config,operation:Arc::new(tokio::sync::Mutex::new(())),source_revision:Arc::new(std::sync::atomic::AtomicU64::new(0)),indexed_revision:0}
     };
-    storage_cfg.db_path = db_path;
-    storage_cfg.model_id = active_model_cfg.model_id.clone();
-    storage_cfg.embedding_dim = active_model_cfg.dimension;
-
-    // Open read/write separated storage (Dedicated Writer + r2d2 pool)
-    let storage = RagStorage::open(storage_cfg)
-        .map_err(|e| format!("Failed to open RAG storage: {}", e))?;
-    let storage_arc = Arc::new(storage);
-
-    // Read current vault stats
-    let meta = storage_arc.get_vault_meta()?;
-
-    let response = RagSetWorkspaceResponse {
-        status: if meta.chunk_count > 0 { "ready".to_string() } else { "idle".to_string() },
-        doc_count: meta.document_count,
-        document_count: meta.document_count,
-        chunk_count: meta.chunk_count,
-        last_indexed: meta.last_indexed,
-        model_id: meta.model_id,
-        embedding_dim: meta.embedding_dim,
-        schema_version: meta.schema_version,
-    };
-
-    // Update shared state
-    {
-        let mut ws_guard = state.workspace_root.write().map_err(|e| e.to_string())?;
-        *ws_guard = Some(canonical_root);
-    }
-    {
-        let mut st_guard = state.storage.write().map_err(|e| e.to_string())?;
-        *st_guard = Some(storage_arc);
-    }
-    state.update_status(|s| {
-        s.status = response.status.clone();
-        s.doc_count = response.doc_count;
-        s.chunk_count = response.chunk_count;
-        s.last_indexed = response.last_indexed;
-    });
-
-    log::info!(
-        "[RAG IPC] Workspace configured: '{}' (docs={}, chunks={})",
-        path_str,
-        response.doc_count,
-        response.chunk_count
-    );
-
+    let response=RagSetWorkspaceResponse {status:workspace.status.status.clone(),doc_count:workspace.status.doc_count,document_count:workspace.status.doc_count,chunk_count:workspace.status.chunk_count,last_indexed:workspace.status.last_indexed,model_id:workspace.status.model_id.clone(),selected_model_id:workspace.config.model_id.clone(),embedding_dim:workspace.status.embedding_dim,schema_version:"2".into(),workspace_id:id,index_generation:workspace.status.index_generation.clone()};
+    state.window_workspaces.write().map_err(|error|error.to_string())?.insert(window.label().into(),root.clone());
+    *state.workspace_root.write().map_err(|error|error.to_string())?=Some(root);
+    record_binding(&state,workspace.clone())?;
+    watch_workspace(&app,&state,&workspace)?;
     Ok(response)
 }
 
-/// Execute hybrid RRF retrieval (dense vector + trigram FTS5)
 #[tauri::command]
-pub async fn stuart_rag_query(
-    state: State<'_, RagState>,
-    query: Option<String>,
-    top_k: Option<usize>,
-    request: Option<RagSearchRequest>,
-) -> Result<Vec<RagHitPayload>, String> {
-    let query_raw = query
-        .or_else(|| request.as_ref().map(|r| r.query.clone()))
-        .unwrap_or_default();
-    let query_trimmed = query_raw.trim();
-    if query_trimmed.is_empty() {
-        return Ok(Vec::new());
+pub async fn stuart_rag_query(window:tauri::WebviewWindow,app:tauri::AppHandle,state:State<'_,RagState>,query:Option<String>,top_k:Option<usize>,request:Option<RagSearchRequest>)->Result<Vec<RagHitPayload>,String> {
+    let request_root=request.as_ref().and_then(|request|request.vault_root.as_deref());
+    let mut workspace=window_binding(&window,&state,request_root)?;
+    if workspace.status.source_changed {
+        synchronize(app,&state,workspace.clone(),true).await?;
+        workspace=binding(&state,Some(&workspace.root.to_string_lossy()))?;
     }
-
-    let top_k_val = top_k
-        .or_else(|| request.and_then(|r| r.top_k))
-        .unwrap_or(10)
-        .clamp(1, 50);
-
-    let storage = state.get_storage()?;
-    let reader = storage.get_reader()?;
-
-    // 1. Dynamic query classification
-    let (w_vec, w_bm25) = resolve_query_weights(query_trimmed);
-
-    // 2. Vector search channel
-    let mut vector_hits: Vec<(String, usize)> = Vec::new();
-    if w_vec > 0.0 {
-        if let Ok(query_vec) = state.embedding_engine.embed_query(query_trimmed).await {
-            if let Ok(raw_vec_results) = storage.search_vector_knn(&reader, &query_vec, 50) {
-                for (rank_0, hit) in raw_vec_results.into_iter().enumerate() {
-                    vector_hits.push((hit.chunk_id, rank_0 + 1));
-                }
-            }
-        }
+    if workspace.status.source_changed {return Err("工作区资料正在变化，请等待索引完成后重新查询".into());}
+    let generation=workspace.generation.as_ref().ok_or("知识目录尚未建立真实语义索引")?;
+    if generation.status=="Partial" && !request.as_ref().is_some_and(|request|request.accept_partial) {return Err("知识目录包含未完成资料，请先确认Partial范围".into());}
+    let storage=workspace.storage.as_ref().ok_or("知识目录数据库未加载")?;
+    let query=query.or_else(||request.as_ref().map(|request|request.query.clone())).ok_or("检索问题缺失")?;
+    if query.trim().is_empty() {return Ok(Vec::new());}
+    let top=top_k.or_else(||request.as_ref().and_then(|request|request.top_k)).unwrap_or(10).clamp(1,50);
+    let engine=state.engine_for(&generation.model.model_id)?;
+    let reader=storage.get_reader()?;
+    let (vector_weight,text_weight)=resolve_query_weights(&query);
+    let vector=engine.embed_query(&query).await.map_err(|error|error.to_string())?;
+    let vector_hits:Vec<_>=storage.search_vector_knn(&reader,&vector,50)?.into_iter().enumerate().map(|(index,hit)|(hit.chunk_id,index+1)).collect();
+    let text_hits:Vec<_>=search_fts5_bm25(&reader,&query,50).map_err(|error|error.to_string())?.into_iter().map(|(id,rank,_)|(id,rank)).collect();
+    let fused=execute_rrf_fusion(&vector_hits,&text_hits,vector_weight,text_weight,top);
+    let ids:Vec<_>=fused.iter().map(|hit|hit.chunk_id.clone()).collect();
+    let details:HashMap<_,_>=storage.get_chunks_by_ids(&ids)?.into_iter().map(|chunk|(chunk.chunk_id.clone(),chunk)).collect();
+    let source_hashes:HashMap<_,_>=storage.get_all_documents()?.into_iter().map(|(path,hash,_)|(path,hash)).collect();
+    let mut hits=Vec::new();
+    for hit in fused {
+        let chunk=details.get(&hit.chunk_id).ok_or("检索结果引用缺失片段")?;
+        let source_hash=source_hashes.get(&chunk.rel_path).ok_or("片段缺少资料来源指纹")?;
+        if file_sha256(&workspace.root.join(&chunk.rel_path))? != *source_hash {return Err(format!("资料发生变化，需要重新建立索引：{}",chunk.rel_path));}
+        let link=if let Some(page)=chunk.page_number {format!("stuart://anchor?file={}&page={page}",urlencoding::encode(&chunk.rel_path))}else{format!("stuart://anchor?file={}&line={}",urlencoding::encode(&chunk.rel_path),chunk.start_line.unwrap_or(1))};
+        hits.push(RagHitPayload {chunk_id:hit.chunk_id,rel_path:chunk.rel_path.clone(),heading_path:chunk.heading_path.clone(),start_line:chunk.start_line,end_line:chunk.end_line,page_number:chunk.page_number,bounding_box:chunk.bounding_box.clone(),content:chunk.content.clone(),rrf_score:hit.rrf_score,deep_link:link,vector_rank:hit.vector_rank,bm25_rank:hit.bm25_rank,source_hash:source_hash.clone(),index_generation:generation.generation_id.clone(),index_status:generation.status.clone(),workspace_id:generation.workspace_id.clone(),workspace_root:workspace.root.to_string_lossy().into_owned(),model_id:generation.model.model_id.clone()});
     }
-
-    // 3. Sparse trigram FTS5 channel
-    let mut bm25_hits: Vec<(String, usize)> = Vec::new();
-    if w_bm25 > 0.0 {
-        if let Ok(raw_fts_results) = search_fts5_bm25(&reader, query_trimmed, 50) {
-            for (chunk_id, rank_1, _score) in raw_fts_results {
-                bm25_hits.push((chunk_id, rank_1));
-            }
-        }
-    }
-
-    // 4. Reciprocal Rank Fusion (k=60, DEF-06 zero filtering and tie-breaking)
-    let fused = execute_rrf_fusion(&vector_hits, &bm25_hits, w_vec, w_bm25, top_k_val);
-    if fused.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    // 5. Hydrate chunks with outline metadata and deep links
-    let chunk_ids: Vec<String> = fused.iter().map(|f| f.chunk_id.clone()).collect();
-    let chunk_details = storage.get_chunks_by_ids(&chunk_ids)?;
-    let chunk_map: HashMap<String, _> = chunk_details
-        .into_iter()
-        .map(|c| (c.chunk_id.clone(), c))
-        .collect();
-
-    let mut hydrated_hits = Vec::with_capacity(fused.len());
-    for cand in fused {
-        if let Some(chunk) = chunk_map.get(&cand.chunk_id) {
-            let deep_link = if let Some(p) = chunk.page_number {
-                format!("stuart://anchor?file={}&page={}", urlencoding::encode(&chunk.rel_path), p)
-            } else if let (Some(s), Some(e)) = (chunk.start_line, chunk.end_line) {
-                format!("stuart://anchor?file={}&line={}&end={}", urlencoding::encode(&chunk.rel_path), s, e)
-            } else {
-                format!("stuart://anchor?file={}", urlencoding::encode(&chunk.rel_path))
-            };
-
-            hydrated_hits.push(RagHitPayload {
-                chunk_id: cand.chunk_id,
-                rel_path: chunk.rel_path.clone(),
-                heading_path: chunk.heading_path.clone(),
-                start_line: chunk.start_line,
-                end_line: chunk.end_line,
-                page_number: chunk.page_number,
-                bounding_box: chunk.bounding_box.clone(),
-                content: chunk.content.clone(),
-                rrf_score: cand.rrf_score,
-                deep_link,
-                vector_rank: cand.vector_rank,
-                bm25_rank: cand.bm25_rank,
-            });
-        }
-    }
-
-    Ok(hydrated_hits)
+    let latest=binding(&state,Some(&workspace.root.to_string_lossy()))?;
+    if latest.status.source_changed || latest.generation.as_ref().map(|generation|&generation.generation_id)!=Some(&generation.generation_id) {return Err("检索期间知识来源或索引代际已经变化，请重新查询".into());}
+    Ok(hits)
 }
 
-/// Retrieve current RAG subsystem status and stats
 #[tauri::command]
-pub async fn stuart_rag_get_status(
-    state: State<'_, RagState>,
-) -> Result<RagStatus, String> {
-    if let Ok(storage) = state.get_storage() {
-        if let Ok(meta) = storage.get_vault_meta() {
-            state.update_status(|s| {
-                s.doc_count = meta.document_count;
-                s.chunk_count = meta.chunk_count;
-                s.last_indexed = meta.last_indexed;
-                if s.status == "idle" && meta.chunk_count > 0 {
-                    s.status = "ready".to_string();
-                }
-            });
-        }
-    }
-    let status_guard = state.status.read().map_err(|e| e.to_string())?;
-    Ok(status_guard.clone())
+pub async fn stuart_rag_get_status(window:tauri::WebviewWindow,state:State<'_,RagState>,workspace_root:Option<String>)->Result<RagStatus,String> {Ok(window_binding(&window,&state,workspace_root.as_deref())?.status)}
+
+async fn synchronize(app:tauri::AppHandle,state:&RagState,workspace:WorkspaceBinding,wait:bool)->Result<crate::rag::IndexSummary,String> {
+    let operation=workspace.operation.clone();
+    let _operation=if wait {operation.lock().await}else {operation.try_lock().map_err(|_|"当前工作区知识任务正在执行")?};
+    let mut workspace=binding(state,Some(&workspace.root.to_string_lossy()))?;
+    let source_revision=workspace.source_revision.load(Ordering::Acquire);
+    let root=workspace.root.clone();let id=workspace_id(&root);
+    let job=state.begin_job(&id)?;
+    workspace.status.status="Loading".into();workspace.status.job_id=Some(job.job_id.clone());workspace.status.error_message=None;
+    record_binding(state,workspace.clone())?;
+    let result:Result<crate::rag::IndexSummary,String>=async {
+        let engine=state.engine_for(&workspace.config.model_id)?;
+        let built=build_generation(&root,&workspace.config,&engine,&job.cancel,&job.job_id,|progress| {
+            let mut workspaces=state.workspaces.write().expect("知识工作区锁不可用");
+            let active=workspaces.get_mut(&id).expect("知识工作区记录缺失");
+            if active.status.job_id.as_deref()==Some(&job.job_id) {active.status.total_files=progress.total_files;active.status.processed_files=progress.processed_files;active.status.status=progress.status.clone();}
+            app.emit("rag-sync-progress",&progress).expect("发送知识索引进度失败");
+        }).await?;
+        let metadata=built.storage.get_vault_meta()?;
+        workspace.status.status=built.summary.status.clone();workspace.status.index_generation=Some(built.generation.generation_id.clone());workspace.status.model_id=built.generation.model.model_id.clone();workspace.status.selected_model_id=workspace.config.model_id.clone();workspace.status.embedding_dim=built.generation.model.dimension;workspace.status.doc_count=metadata.document_count;workspace.status.chunk_count=metadata.chunk_count;workspace.status.last_indexed=metadata.last_indexed;workspace.status.failed_files=built.summary.failed_files.clone();workspace.status.excluded_files=built.summary.excluded_files.clone();workspace.status.source_changed=false;workspace.status.total_files=built.summary.total_files_scanned;workspace.status.processed_files=built.summary.total_files_scanned;
+        workspace.generation=Some(built.generation);workspace.storage=Some(built.storage);
+        workspace.indexed_revision=source_revision;
+        workspace.status.source_changed=workspace.source_revision.load(Ordering::Acquire)!=source_revision;
+        record_binding(state,workspace.clone())?;
+        app.emit("rag-status-changed",&workspace.status).map_err(|error|error.to_string())?;
+        Ok(built.summary)
+    }.await;
+    if let Err(error)=&result {workspace.status.status=if error=="Cancelled"{"Cancelled"}else{"Failed"}.into();workspace.status.error_message=Some(error.clone());record_binding(state,workspace)?;}
+    state.finish_job(&id,&job)?;
+    result
 }
 
-/// Trigger asynchronous incremental workspace synchronization
 #[tauri::command]
-pub async fn stuart_rag_sync_workspace(
-    app: tauri::AppHandle,
-    state: State<'_, RagState>,
-) -> Result<crate::rag::IndexSummary, String> {
-    use std::sync::atomic::Ordering;
-    use tauri::Emitter;
-
-    let root = {
-        let ws_guard = state.workspace_root.read().map_err(|e| e.to_string())?;
-        ws_guard
-            .as_ref()
-            .cloned()
-            .ok_or_else(|| "No workspace configured. Please select a workspace folder first.".to_string())?
-    };
-    let storage = state.get_storage()?;
-    let embedding_engine = state.embedding_engine.clone();
-    let config = {
-        let guard = state.config.read().map_err(|e| e.to_string())?;
-        guard.clone()
-    };
-    let cancel_flag = state.cancel_flag.clone();
-    cancel_flag.store(false, Ordering::Relaxed);
-
-    state.update_status(|s| {
-        s.status = "indexing".to_string();
-    });
-
-    let app_clone = app.clone();
-    let progress_callback = move |progress: crate::rag::IndexProgress| {
-        let _ = app_clone.emit("rag-sync-progress", &progress);
-    };
-
-    let summary = crate::rag::sync_vault_pipeline(
-        &root,
-        &storage,
-        &embedding_engine,
-        &config,
-        &cancel_flag,
-        progress_callback,
-    )
-    .await?;
-
-    if let Ok(meta) = storage.get_vault_meta() {
-        state.update_status(|s| {
-            s.status = "ready".to_string();
-            s.doc_count = meta.document_count;
-            s.chunk_count = meta.chunk_count;
-            s.last_indexed = meta.last_indexed;
-        });
-    }
-
-    Ok(summary)
+pub async fn stuart_rag_sync_workspace(window:tauri::WebviewWindow,app:tauri::AppHandle,state:State<'_,RagState>,workspace_root:Option<String>)->Result<crate::rag::IndexSummary,String> {
+    let workspace=window_binding(&window,&state,workspace_root.as_deref())?;
+    synchronize(app,&state,workspace,false).await
 }
 
-/// Cancel ongoing workspace indexing pipeline
 #[tauri::command]
-pub fn stuart_rag_cancel_sync(
-    state: State<'_, RagState>,
-) -> Result<bool, String> {
-    state.cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-    state.update_status(|s| {
-        s.status = "idle".to_string();
-    });
+pub async fn stuart_rag_cancel_sync(window:tauri::WebviewWindow,state:State<'_,RagState>,workspace_root:Option<String>,job_id:Option<String>)->Result<bool,String> {
+    let workspace=window_binding(&window,&state,workspace_root.as_deref())?;
+    let job=state.jobs.lock().map_err(|error|error.to_string())?.get(&workspace_id(&workspace.root)).cloned();
+    let Some(job)=job else {return Ok(false);};
+    if job_id.as_ref().is_some_and(|id|*id!=job.job_id) {return Err("取消凭据与当前知识任务不同".into());}
+    job.cancel.store(true,Ordering::Release);
+    loop {
+        let finished=job.finished.notified();tokio::pin!(finished);finished.as_mut().enable();
+        if job.ended.load(Ordering::Acquire) {break;}
+        finished.await;
+    }
     Ok(true)
+}
+
+#[tauri::command]
+pub async fn stuart_rag_set_model(window:tauri::WebviewWindow,state:State<'_,RagState>,model_id:String,workspace_root:Option<String>)->Result<RagStatus,String> {
+    let mut workspace=window_binding(&window,&state,workspace_root.as_deref())?;
+    let operation=workspace.operation.clone();let _operation=operation.try_lock().map_err(|_|"当前工作区知识任务尚未结束")?;
+    let engine=state.engine_for(&model_id)?;
+    let spec=engine.validated_spec().await.map_err(|error|error.to_string())?;
+    GenerationCatalog::open(&workspace.root)?.select_model(&model_id)?;
+    workspace.config.model_id=model_id.clone();workspace.config.embedding_dim=spec.dimension;workspace.status.selected_model_id=model_id;
+    let status=workspace.status.clone();record_binding(&state,workspace)?;
+    Ok(status)
+}
+
+#[tauri::command]
+pub async fn stuart_pdf_context(window:tauri::WebviewWindow,app:tauri::AppHandle,path:String,page_number:usize)->Result<crate::rag::pdf_extract::PdfContent,String> {
+    let path=crate::fs_api::ensure_window_read_allowed(&window,&path)?;
+    #[cfg(debug_assertions)] let native=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../resources/native");
+    #[cfg(not(debug_assertions))] let native=app.path().resource_dir().map_err(|error|error.to_string())?.join("native");
+    tokio::task::spawn_blocking(move||crate::rag::pdf_extract::extract_pdf_context(&path,&native,&AtomicBool::new(false),page_number)).await.map_err(|error|error.to_string())?
 }

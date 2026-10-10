@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "models": [
+    {
+      "key": "bge-m3",
+      "modelId": "BAAI/bge-m3",
+      "publisher": "Xenova/bge-m3",
+      "revision": "4de13258303883538bd53b696b452bf8099f0858",
+      "dimension": 1024,
+      "pooling": "cls",
+      "normalization": "l2",
+      "maxInputLength": 8192,
+      "quantization": "int8",
+      "artifacts": [
+        {"remotePath":"onnx/model_quantized.onnx","localPath":"model.onnx","sha256":"0826f8c1ab9edf1801db86c61919d4d108e8bfc0b809ec823ad366882ff0b77d"},
+        {"remotePath":"tokenizer.json","localPath":"tokenizer.json","sha256":"6710678b12670bc442b99edc952c4d996ae309a7020c1fa0096dd245c2faf790"},
+        {"remotePath":"config.json","localPath":"config.json","sha256":"734a79bf12d388c1467a4e3ab625f45de7f6906cffcfb93a1eca1787504bed95"},
+        {"remotePath":"tokenizer_config.json","localPath":"tokenizer_config.json","sha256":"7e4c1cc848840aeccdd763458c18dd525eb0f795c992e00ebe9c28554e7db2d4"},
+        {"remotePath":"special_tokens_map.json","localPath":"special_tokens_map.json","sha256":"8c785abebea9ae3257b61681b4e6fd8365ceafde980c21970d001e834cf10835"}
+      ]
+    },
+    {
+      "key": "minilm-multilingual",
+      "modelId": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+      "publisher": "Qdrant/paraphrase-multilingual-MiniLM-L12-v2-onnx-Q",
+      "revision": "faf4aa4225822f3bc6376869cb1164e8e3feedd0",
+      "dimension": 384,
+      "pooling": "mean",
+      "normalization": "l2",
+      "maxInputLength": 128,
+      "quantization": "int8",
+      "artifacts": [
+        {"remotePath":"model_optimized.onnx","localPath":"model.onnx","sha256":"634d0f66c29dc934c8fa72b8a4fe91dd4d420a22f1d82a241058d4316e659a99"},
+        {"remotePath":"tokenizer.json","localPath":"tokenizer.json","sha256":"fa685fc160bbdbab64058d4fc91b60e62d207e8dc60b9af5c002c5ab946ded00"},
+        {"remotePath":"config.json","localPath":"config.json","sha256":"c8ec081fdad2df991bf5abbf18418fec7a5cdaa421f60ffb060a30040b8c376f"},
+        {"remotePath":"tokenizer_config.json","localPath":"tokenizer_config.json","sha256":"0666eebf692422757e1dddf3c9fb1ded73ba3dc726c5828671fc89e45bf3609f"},
+        {"remotePath":"special_tokens_map.json","localPath":"special_tokens_map.json","sha256":"8c785abebea9ae3257b61681b4e6fd8365ceafde980c21970d001e834cf10835"}
+      ]
+    }
+  ]
+}

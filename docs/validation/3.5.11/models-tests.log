@@ -1,0 +1,79 @@
+{"modelId": "BAAI/bge-m3", "runtimeVersion": "1.20.1", "dimension": 1024}
+{"modelId": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2", "runtimeVersion": "1.20.1", "dimension": 384}
+warning: unused import: `PathBuf`
+ --> src\document\journal.rs:5:23
+  |
+5 | use std::path::{Path, PathBuf};
+  |                       ^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `ConflictDetails`
+ --> src\document\mod.rs:9:16
+  |
+9 | pub use save::{ConflictDetails, SaveOperation, SavePayload, SaveRequest, SaveResult, SaveStatus, SourceEdit};
+  |                ^^^^^^^^^^^^^^^
+
+warning: unused import: `Manager`
+  --> src\win_api.rs:12:13
+   |
+12 | use tauri::{Manager, PhysicalPosition, PhysicalSize};
+   |             ^^^^^^^
+
+warning: unused variable: `app`
+   --> src\rag_ipc.rs:244:61
+    |
+244 | ...(window:tauri::WebviewWindow,app:tauri::AppHandle,path:String,page_number:usize)->Result<crate::rag::pdf_extract::PdfContent,Str...
+    |                                 ^^^ help: if this is intentional, prefix it with an underscore: `_app`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `document_for_path` is never used
+   --> src\document\mod.rs:167:12
+    |
+ 74 | impl DocumentService {
+    | -------------------- method in this implementation
+...
+167 |     pub fn document_for_path(&self, owner: &str, path: &Path) -> Result<String, String> {
+    |            ^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `rects` is never read
+  --> src\document\pdf_annotations.rs:19:9
+   |
+ 8 | pub struct Annotation {
+   |            ---------- field in this struct
+...
+19 |     pub rects: Vec<Value>,
+   |         ^^^^^
+   |
+   = note: `Annotation` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: function `export_safe_name` is never used
+   --> src\fs_api.rs:283:8
+    |
+283 | pub fn export_safe_name(name: &str) -> String {
+    |        ^^^^^^^^^^^^^^^^
+
+warning: type alias `RrfRankedChunk` is never used
+  --> src\rag_ipc.rs:27:10
+   |
+27 | pub type RrfRankedChunk=RagHitPayload;
+   |          ^^^^^^^^^^^^^^
+
+warning: linker stdout: 正在创建库 C:\Users\Administrator\Desktop\Stuart\tauri\src-tauri\target\debug\deps\stuartmd-b736c5b0f8880e8d.lib 和对象 C:\Users\Administrator\Desktop\Stuart\tauri\src-tauri\target\debug\deps\stuartmd-b736c5b0f8880e8d.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `stuartmd` (bin "stuartmd" test) generated 9 warnings (run `cargo fix --bin "stuartmd" -p stuartmd --tests` to apply 3 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.06s
+     Running unittests src\main.rs (tauri\src-tauri\target\debug\deps\stuartmd-b736c5b0f8880e8d.exe)
+
+running 3 tests
+test rag::real_tests::actual_generation_retains_valid_index_on_cancel_and_file_changes ... ok
+test rag::real_tests::actual_models_produce_normalized_multilingual_semantic_vectors ... ok
+test rag::real_tests::actual_pdf_native_ocr_rotation_cropbox_and_sources ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 65 filtered out; finished in 208.45s
+

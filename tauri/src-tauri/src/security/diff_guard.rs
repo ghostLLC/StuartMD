@@ -9,6 +9,21 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use similar::{ChangeTag, TextDiff};
+use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
+use crate::document::{DocumentService, DiskRevision, SavePayload, SaveRequest, SaveResult, SaveStatus, SourceEdit};
+
+#[derive(Clone)]
+struct WriteApproval {
+    owner: String,
+    document_id: String,
+    path: String,
+    editor_revision: u64,
+    disk_revision: DiskRevision,
+    original_hash: String,
+    proposal_hash: String,
+}
+static APPROVALS: LazyLock<Mutex<HashMap<String, WriteApproval>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Single line change within a unified/split diff representation
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -35,6 +50,10 @@ pub struct DiffPayload {
     pub additions: usize,
     pub deletions: usize,
     pub lines: Vec<DiffHunkLine>,
+    pub document_id: String,
+    pub approval_id: String,
+    pub proposal_hash: String,
+    pub disk_revision: Option<DiskRevision>,
 }
 
 /// Result of creating an independent AI companion note
@@ -103,6 +122,10 @@ pub fn preview_diff_core(
         additions,
         deletions,
         lines,
+        document_id: String::new(),
+        approval_id: String::new(),
+        proposal_hash: crate::document::identity::sha256(proposed_content.as_bytes()),
+        disk_revision: Some(crate::document::identity::read_disk(p)?.0),
     })
 }
 
@@ -130,9 +153,15 @@ pub fn apply_diff_core(
         );
     }
 
-    // Call atomic physical write to disk with ReplaceFileW / rename and fsync
-    crate::fs_api::atomic_write_file(p, final_content.as_bytes())
-        .map_err(|e| format!("Atomic write failed: {}", e))?;
+    let service = DocumentService::new(crate::fs_api::data_dir())?;
+    let read = service.read("trusted-diff", p)?;
+    let result = service.save("trusted-diff", SaveRequest {
+        operation_id: uuid::Uuid::new_v4().to_string(), document_id: read.document_id,
+        editor_revision: expected_rev, target_path: original_path.into(), expected_disk_revision: read.disk_revision,
+        payload: SavePayload::TextEdits { encoding: read.encoding.ok_or("文档编码尚未确认")?, bom: read.bom,
+            source_edits: vec![SourceEdit { from: 0, to: current_disk_content.encode_utf16().count(), inserted_text: final_content.into() }] },
+    })?;
+    if result.result == SaveStatus::Conflict { return Err("Conflict detected: 保存过程中原文件发生变化，内容已经保留".into()); }
 
     log::info!(
         "[Diff Gatekeeper] Applied approved diff to '{}' (rev: {}, additions/updates saved)",
@@ -158,8 +187,12 @@ pub fn save_companion_note_core(
     let note_filename = format!("{}.{}", stem, suffix);
     let note_path = parent.join(&note_filename);
 
-    crate::fs_api::atomic_write_file(&note_path, note_content.as_bytes())
-        .map_err(|e| format!("Failed to write companion note: {}", e))?;
+    let service = DocumentService::new(crate::fs_api::data_dir())?;
+    let read = service.new_document("trusted-note")?;
+    let result = service.save("trusted-note", SaveRequest { operation_id: uuid::Uuid::new_v4().to_string(), document_id: read.document_id,
+        editor_revision: 1, target_path: note_path.to_string_lossy().into_owned(), expected_disk_revision: DiskRevision::absent(),
+        payload: SavePayload::TextEdits { encoding: "utf-8".into(), bom: false, source_edits: vec![SourceEdit { from: 0, to: 0, inserted_text: note_content.into() }] } })?;
+    if result.result == SaveStatus::Conflict { return Err("伴读笔记目标已经存在，请选择新的文件名".into()); }
 
     let note_path_str = note_path.to_string_lossy().replace('\\', "/");
     Ok(CompanionNoteResult {
@@ -176,30 +209,71 @@ pub fn save_companion_note_core(
 
 #[tauri::command]
 pub fn stuart_companion_preview_diff(
+    window: tauri::WebviewWindow,
+    service: tauri::State<'_, DocumentService>,
+    document_id: String,
     original_path: String,
     proposed_content: String,
     current_rev: u64,
 ) -> Result<DiffPayload, String> {
-    preview_diff_core(&original_path, &proposed_content, current_rev)
+    let canonical = crate::fs_api::ensure_window_read_allowed(&window, &original_path)?;
+    let snapshot = service.snapshot_for_window(window.label(), &document_id)?;
+    if snapshot.revision != current_rev { return Err("AI 修改预览的编辑版本已经变化".into()); }
+    if snapshot.kind != "markdown" || snapshot.path.as_deref().map(Path::new).map(crate::document::identity::canonical_target).transpose()?.as_ref() != Some(&canonical) { return Err("AI 修改目标与文档身份不一致".into()); }
+    let disk_revision = crate::document::identity::read_disk(&canonical)?.0;
+    if !disk_revision.same_content_and_identity(&snapshot.disk_revision) { return Err("AI 修改预览前磁盘内容已经变化，请检查保存冲突".into()); }
+    let mut payload = preview_diff_core(&original_path, &proposed_content, current_rev)?;
+    let approval_id = uuid::Uuid::new_v4().to_string();
+    let original_hash = compute_sha1_hash(&snapshot.source);
+    payload.document_id = document_id.clone();
+    payload.approval_id = approval_id.clone();
+    payload.original_hash = original_hash.clone();
+    payload.disk_revision = Some(disk_revision.clone());
+    APPROVALS.lock().map_err(|_| "AI 修改确认记录锁损坏")?.insert(approval_id, WriteApproval { owner: window.label().into(), document_id, path: original_path, editor_revision: current_rev, disk_revision, original_hash, proposal_hash: payload.proposal_hash.clone() });
+    Ok(payload)
 }
 
 #[tauri::command]
 pub fn stuart_companion_apply_diff(
+    window: tauri::WebviewWindow,
+    service: tauri::State<'_, DocumentService>,
+    document_id: String,
+    approval_id: String,
     original_path: String,
     final_content: String,
     expected_rev: u64,
     expected_hash: String,
-) -> Result<bool, String> {
-    apply_diff_core(&original_path, &final_content, expected_rev, &expected_hash)
+) -> Result<SaveResult, String> {
+    let approval = APPROVALS.lock().map_err(|_| "AI 修改确认记录锁损坏")?.get(&approval_id).cloned().ok_or("AI 修改缺少有效确认凭据")?;
+    if approval.owner != window.label() || approval.document_id != document_id || approval.path != original_path || approval.editor_revision != expected_rev || approval.original_hash != expected_hash || approval.proposal_hash != crate::document::identity::sha256(final_content.as_bytes()) { return Err("AI 修改确认凭据与目标、版本或正文不一致".into()); }
+    let current = service.snapshot_for_window(window.label(), &document_id)?;
+    if current.revision != expected_rev || compute_sha1_hash(&current.source) != expected_hash { return Err("AI 修改确认期间文档已经编辑，请重新检查差异".into()); }
+    crate::fs_api::ensure_window_write_allowed(&window, &original_path)?;
+    let state = service.state(window.label(), &document_id)?;
+    let result = service.save(window.label(), SaveRequest { operation_id: uuid::Uuid::new_v4().to_string(), document_id, editor_revision: expected_rev + 1, target_path: original_path, expected_disk_revision: approval.disk_revision,
+        payload: SavePayload::TextEdits { encoding: state.encoding.ok_or("文档编码尚未确认")?, bom: state.bom, source_edits: vec![SourceEdit { from: 0, to: state.source.ok_or("文档编码尚未确认")?.encode_utf16().count(), inserted_text: final_content }] } })?;
+    APPROVALS.lock().map_err(|_| "AI 修改确认记录锁损坏")?.remove(&approval_id);
+    Ok(result)
 }
 
 #[tauri::command]
 pub fn stuart_companion_save_note(
+    window: tauri::WebviewWindow,
+    service: tauri::State<'_, DocumentService>,
     original_path: String,
     note_content: String,
     custom_suffix: Option<String>,
 ) -> Result<CompanionNoteResult, String> {
-    save_companion_note_core(&original_path, &note_content, custom_suffix.as_deref())
+    let original = crate::fs_api::ensure_window_read_allowed(&window, &original_path)?;
+    let suffix = custom_suffix.as_deref().unwrap_or("ai-notes.md");
+    if suffix.contains(['/', '\\']) || !suffix.ends_with(".md") { return Err("伴读笔记后缀必须为当前目录中的 Markdown 文件名".into()); }
+    let stem = original.file_stem().and_then(|stem| stem.to_str()).ok_or("原文件名无效")?;
+    let target = original.with_file_name(format!("{stem}.{suffix}"));
+    crate::fs_api::register_window_path(&window, &crate::document::identity::display_path(&target))?;
+    let read = service.new_document(window.label())?;
+    let result = service.save(window.label(), SaveRequest { operation_id: uuid::Uuid::new_v4().to_string(), document_id: read.document_id, editor_revision: 1, target_path: crate::document::identity::display_path(&target), expected_disk_revision: DiskRevision::absent(), payload: SavePayload::TextEdits { encoding: "utf-8".into(), bom: false, source_edits: vec![SourceEdit { from: 0, to: 0, inserted_text: note_content }] } })?;
+    if result.result == SaveStatus::Conflict { return Err("伴读笔记目标已经存在，请选择新的文件名".into()); }
+    Ok(CompanionNoteResult { ok: true, note_path: crate::document::identity::display_path(&target), original_path, message: "伴读笔记已经保存".into() })
 }
 
 #[cfg(test)]

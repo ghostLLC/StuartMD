@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::fs_api::{
-    data_dir, exe_dir, load_json, load_settings_migrated, modify_settings,
-    path_to_file_uri, save_json, wallpapers_dir, PROG_ID, PROG_ID_PDF, VERSION,
+    data_dir, exe_dir, load_settings_migrated, modify_settings,
+    path_to_file_uri, wallpapers_dir, PROG_ID, PROG_ID_PDF, VERSION,
 };
 use tauri::{Manager, PhysicalPosition, PhysicalSize};
 
@@ -37,7 +37,7 @@ pub fn stuart_open_data_dir() -> bool {
 }
 
 #[tauri::command]
-pub fn stuart_open_sample() -> Value {
+pub fn stuart_open_sample(window: tauri::WebviewWindow) -> Value {
     let exe = exe_dir();
     let cwd = std::env::current_dir().unwrap_or_default();
     let candidates = [
@@ -52,7 +52,7 @@ pub fn stuart_open_sample() -> Value {
         if cand.is_file() {
             let disp = cand.to_string_lossy().to_string();
             // App-shipped samples are trusted content; grant then read.
-            let _ = crate::fs_api::register_allowed_path(&disp);
+            if let Err(error) = crate::fs_api::register_window_path(&window, &disp) { return json!({"error":error}); }
             return crate::fs_api::read_file_trusted(&disp);
         }
     }
@@ -546,56 +546,67 @@ pub fn stuart_import_wallpaper_ex(b64: String, name: Option<String>) -> Value {
 // PDF annotations
 fn annot_dir() -> PathBuf {
     let d = data_dir().join("pdf_annotations");
-    let _ = fs::create_dir_all(&d);
+    fs::create_dir_all(&d).expect("创建PDF批注目录失败");
     d
 }
 
 fn annot_key(path: &str) -> String {
     use sha1::{Digest, Sha1};
-    let p = std::fs::canonicalize(path).unwrap_or_else(|_| PathBuf::from(path));
+    let p = std::fs::canonicalize(path).expect("PDF批注来源文件无法规范化");
     let mut h = Sha1::new();
     h.update(p.to_string_lossy().as_bytes());
     format!("{:x}", h.finalize())
 }
 
-fn annot_file(path: &str) -> PathBuf {
+pub(crate) fn annot_file(path: &str) -> PathBuf {
     annot_dir().join(format!("{}.json", annot_key(path)))
 }
 
-pub fn load_annotations_for(p: &Path) -> Value {
+pub fn load_annotations_for(p: &Path) -> Result<Value,String> {
     let f = annot_file(&p.to_string_lossy());
-    let v = load_json(&f);
-    if let Some(items) = v.get("items").and_then(|i| i.as_array()) {
-        return json!(items);
-    }
-    json!([])
+    let bytes=match fs::read(&f) {Ok(bytes)=>bytes,Err(error) if error.kind()==std::io::ErrorKind::NotFound=>return Ok(json!([])),Err(error)=>return Err(format!("读取PDF批注失败：{error}"))};
+    decode_annotations(&bytes)
+}
+pub fn decode_annotations(bytes:&[u8])->Result<Value,String> {
+    let value:Value=serde_json::from_slice(bytes).map_err(|error|format!("PDF批注JSON无效：{error}"))?;
+    let items=value.get("items").and_then(Value::as_array).ok_or("PDF批注资料缺少完整数组")?;
+    if items.iter().any(|item|!item.is_object() || item["id"].as_str().is_none() || item["page"].as_u64().is_none_or(|page|page==0)) {return Err("PDF批注资料缺少实际编号或页码".into());}
+    Ok(json!(items))
 }
 
 #[tauri::command]
-pub fn stuart_load_annotations(pdf_path: String) -> Value {
+pub fn stuart_load_annotations(window:tauri::WebviewWindow,pdf_path:String) -> Result<Value,String> {
+    crate::fs_api::ensure_window_read_allowed(&window,&pdf_path)?;
     load_annotations_for(Path::new(&pdf_path))
 }
 
 #[tauri::command]
-pub fn stuart_save_annotations(pdf_path: String, items: Value) -> Value {
+pub fn stuart_save_annotations(window:tauri::WebviewWindow,service:tauri::State<'_,crate::document::DocumentService>,document_id:String,pdf_path:String,items:Value) -> Value {
+    let state=match service.state(window.label(),&document_id) {Ok(state)=>state,Err(error)=>return json!({"error":error})};
+    let source=match crate::fs_api::ensure_window_read_allowed(&window,&pdf_path) {Ok(path)=>path,Err(error)=>return json!({"error":error})};
+    if state.kind!="pdf" || state.path.as_ref()!=Some(&source) {return json!({"error":"PDF批注文档身份与来源路径不一致"});}
+    if !items.is_array() {return json!({"error":"PDF批注需要完整数组"});}
     let f = annot_file(&pdf_path);
     let payload = json!({
-        "pdf": std::fs::canonicalize(&pdf_path)
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or(pdf_path),
+        "pdf": crate::fs_api::display_path(&source),
         "items": items
     });
-    match save_json(&f, &payload) {
-        Ok(()) => json!({"ok": true}),
+    let bytes=match serde_json::to_vec_pretty(&payload) {Ok(bytes)=>bytes,Err(error)=>return json!({"error":error.to_string()})};
+    let expected=match service.resource_base(window.label(),&document_id,&f) {Ok(resource)=>resource.disk_revision,Err(error)=>return json!({"error":error})};
+    let request=crate::document::SaveRequest {operation_id:uuid::Uuid::new_v4().to_string(),document_id,editor_revision:state.current_editor_revision,target_path:f.to_string_lossy().into_owned(),expected_disk_revision:expected,payload:crate::document::SavePayload::ValidatedBytes {validation_hash:crate::document::identity::sha256(&bytes),bytes,producer:"json-annotations".into()}};
+    match service.save(window.label(),request) {
+        Ok(result) => json!({"ok":result.result==crate::document::SaveStatus::Saved,"saveResult":result}),
         Err(e) => json!({"error": e}),
     }
 }
 
 #[tauri::command]
-pub fn stuart_add_annotation(pdf_path: String, ann: Value) -> Value {
-    let mut items = match stuart_load_annotations(pdf_path.clone()) {
-        Value::Array(a) => a,
-        _ => vec![],
+pub fn stuart_add_annotation(window:tauri::WebviewWindow,service:tauri::State<'_,crate::document::DocumentService>,document_id:String,pdf_path:String,ann:Value) -> Value {
+    if let Err(error)=crate::fs_api::ensure_window_read_allowed(&window,&pdf_path) {return json!({"error":error});}
+    let mut items = match load_annotations_for(Path::new(&pdf_path)) {
+        Ok(Value::Array(a)) => a,
+        Ok(_) => return json!({"error":"PDF批注格式无效"}),
+        Err(error)=>return json!({"error":error}),
     };
     let mut a = ann.as_object().cloned().unwrap_or_default();
     if !a.contains_key("id") {
@@ -608,331 +619,61 @@ pub fn stuart_add_annotation(pdf_path: String, ann: Value) -> Value {
         a.insert("color".into(), json!("#fff59d"));
     }
     items.push(Value::Object(a));
-    stuart_save_annotations(pdf_path, Value::Array(items))
+    stuart_save_annotations(window,service,document_id,pdf_path,Value::Array(items))
 }
 
 #[tauri::command]
-pub fn stuart_delete_annotation(pdf_path: String, ann_id: String) -> Value {
-    let items = match stuart_load_annotations(pdf_path.clone()) {
-        Value::Array(a) => a,
-        _ => vec![],
+pub fn stuart_delete_annotation(window:tauri::WebviewWindow,service:tauri::State<'_,crate::document::DocumentService>,document_id:String,pdf_path:String,ann_id:String) -> Value {
+    if let Err(error)=crate::fs_api::ensure_window_read_allowed(&window,&pdf_path) {return json!({"error":error});}
+    let items = match load_annotations_for(Path::new(&pdf_path)) {
+        Ok(Value::Array(a)) => a,
+        Ok(_) => return json!({"error":"PDF批注格式无效"}),
+        Err(error)=>return json!({"error":error}),
     };
     let filtered: Vec<Value> = items
         .into_iter()
         .filter(|x| x.get("id").and_then(|i| i.as_str()) != Some(ann_id.as_str()))
         .collect();
-    stuart_save_annotations(pdf_path, Value::Array(filtered))
+    stuart_save_annotations(window,service,document_id,pdf_path,Value::Array(filtered))
 }
 
 #[tauri::command]
-pub fn stuart_clear_annotations(pdf_path: String) -> Value {
-    stuart_save_annotations(pdf_path, json!([]))
-}
-
-/// Write sidecar annotations into the PDF as native /Highlight + /Text.
-/// Edge/PDFium is strict: never decompress the whole file; encode non-ASCII
-/// Contents as UTF-16BE; validate the written file before replacing the original.
-#[tauri::command]
-pub fn stuart_export_pdf_annotations(pdf_path: String, items: Value) -> Value {
-    use lopdf::dictionary;
-    use lopdf::{Document, Object};
-
-    fn real(v: f64) -> Object {
-        let x = if !v.is_finite() { 0.0 } else { v };
-        Object::Real(x as f32)
-    }
-    fn obj_num(o: &Object) -> Option<f64> {
-        match o {
-            Object::Real(x) => Some(*x as f64),
-            Object::Integer(i) => Some(*i as f64),
-            _ => None,
-        }
-    }
-    fn rgb_for(id: &str) -> [f32; 3] {
-        match id {
-            "green" => [0.47, 0.78, 0.51],
-            "blue" => [0.39, 0.67, 0.90],
-            "pink" => [0.94, 0.59, 0.71],
-            "orange" => [0.98, 0.71, 0.35],
-            "purple" => [0.71, 0.59, 0.90],
-            "gray" => [0.63, 0.63, 0.63],
-            _ => [1.0, 0.91, 0.23],
-        }
-    }
-    /// PDF text string: ASCII → literal; otherwise UTF-16BE + BOM (Edge-safe).
-    fn pdf_text(s: &str) -> Object {
-        if s.is_ascii() {
-            Object::string_literal(s.as_bytes().to_vec())
-        } else {
-            let mut bytes = vec![0xFEu8, 0xFFu8];
-            for unit in s.encode_utf16() {
-                bytes.extend_from_slice(&unit.to_be_bytes());
-            }
-            Object::string_literal(bytes)
-        }
-    }
-    fn media_size(doc: &Document, page_id: (u32, u16)) -> (f64, f64) {
-        fn walk(doc: &Document, dict: &lopdf::Dictionary, depth: u8) -> Option<(f64, f64)> {
-            if depth > 8 {
-                return None;
-            }
-            if let Ok(Object::Array(mb)) = dict.get(b"MediaBox") {
-                let nums: Vec<f64> = mb.iter().filter_map(obj_num).collect();
-                if nums.len() >= 4 {
-                    let w = (nums[2] - nums[0]).abs();
-                    let h = (nums[3] - nums[1]).abs();
-                    if w > 1.0 && h > 1.0 && w.is_finite() && h.is_finite() {
-                        return Some((w, h));
-                    }
-                }
-            }
-            if let Ok(Object::Reference(pid)) = dict.get(b"Parent") {
-                if let Ok(Object::Dictionary(pd)) = doc.get_object(*pid) {
-                    return walk(doc, &pd, depth + 1);
-                }
-            }
-            None
-        }
-        if let Ok(Object::Dictionary(dict)) = doc.get_object(page_id) {
-            if let Some(sz) = walk(doc, &dict, 0) {
-                return sz;
-            }
-        }
-        (595.0, 842.0)
-    }
-
-    let src = Path::new(&pdf_path);
-    if !src.is_file() {
-        return json!({"error": "PDF 不存在"});
-    }
-    let arr = match items {
-        Value::Array(a) => a,
-        _ => vec![],
-    };
-    if arr.is_empty() {
-        return json!({"error": "没有标注可写入"});
-    }
-
-    let mut doc = match Document::load(src) {
-        Ok(d) => d,
-        Err(e) => return json!({"error": format!("打开 PDF 失败: {e}")}),
-    };
-    // Encrypted PDFs cannot be safely rewritten here
-    if doc.trailer.get(b"Encrypt").is_ok() {
-        return json!({"error": "暂不支持加密 PDF 写入标注，请先解密"});
-    }
-    // Intentionally leave streams compressed — full-document decompression
-    // rewrites object streams and is rejected by Edge/PDFium.
-
-    let pages = doc.get_pages();
-    if pages.is_empty() {
-        return json!({"error": "无法解析 PDF 页面"});
-    }
-
-    let mut created = 0usize;
-    for item in &arr {
-        let Some(obj) = item.as_object() else { continue };
-        let page_num = obj.get("page").and_then(|p| p.as_u64()).unwrap_or(1) as u32;
-        let Some(&page_id) = pages.get(&page_num) else { continue };
-        let (pw, ph) = media_size(&doc, page_id);
-        let comment = obj
-            .get("comment")
-            .and_then(|c| c.as_str())
-            .or_else(|| obj.get("text").and_then(|t| t.as_str()))
-            .unwrap_or("");
-        let color_id = obj.get("color").and_then(|c| c.as_str()).unwrap_or("yellow");
-        let rgb = rgb_for(color_id);
-        let color_arr = vec![
-            Object::Real(rgb[0]),
-            Object::Real(rgb[1]),
-            Object::Real(rgb[2]),
-        ];
-
-        let ann_type = obj
-            .get("type")
-            .and_then(|t| t.as_str())
-            .unwrap_or("highlight");
-        let subtype_str = match ann_type {
-            "underline" => "Underline",
-            "strike" => "StrikeOut",
-            "comment" => "Underline",
-            _ => "Highlight",
-        };
-        let ca = if ann_type == "highlight" { 0.4 } else { 1.0 };
-
-        let mut new_refs: Vec<Object> = Vec::new();
-
-        if let Some(rects) = obj.get("rects").and_then(|r| r.as_array()) {
-            for r in rects {
-                let Some(r) = r.as_object() else { continue };
-                let x = r.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let y = r.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let w = r.get("w").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let h = r.get("h").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                if !x.is_finite() || !y.is_finite() || !w.is_finite() || !h.is_finite() {
-                    continue;
-                }
-                if w.abs() < 1e-4 && h.abs() < 1e-4 {
-                    continue;
-                }
-                let x0 = x * pw;
-                let x1 = (x + w) * pw;
-                let y_top = ph - y * ph;
-                let y_bot = ph - (y + h) * ph;
-                let (rx0, rx1) = if x0 <= x1 { (x0, x1) } else { (x1, x0) };
-                let (ry0, ry1) = if y_bot <= y_top {
-                    (y_bot, y_top)
-                } else {
-                    (y_top, y_bot)
-                };
-                // QuadPoints: ul, ur, ll, lr (Adobe common order)
-                let mut dict = dictionary! {
-                    "Type" => "Annot",
-                    "Subtype" => subtype_str,
-                    "Rect" => Object::Array(vec![real(rx0), real(ry0), real(rx1), real(ry1)]),
-                    "QuadPoints" => Object::Array(vec![
-                        real(x0), real(y_top),
-                        real(x1), real(y_top),
-                        real(x0), real(y_bot),
-                        real(x1), real(y_bot),
-                    ]),
-                    "C" => Object::Array(color_arr.clone()),
-                    "CA" => Object::Real(ca),
-                    // Print flag; do not set Hidden/NoView
-                    "F" => Object::Integer(4),
-                };
-                // Page back-ref (PDFium/Edge prefer this)
-                dict.set("P", Object::Reference(page_id));
-                if !comment.is_empty() {
-                    dict.set("Contents", pdf_text(comment));
-                }
-                let id = doc.add_object(Object::Dictionary(dict));
-                new_refs.push(Object::Reference(id));
-                created += 1;
-            }
-        }
-
-        // Sticky-note comment (always attach when comment text exists)
-        if !comment.is_empty() {
-            let nx = obj
-                .get("rects")
-                .and_then(|r| r.as_array())
-                .and_then(|a| a.first())
-                .and_then(|r| r.as_object())
-                .and_then(|o| o.get("x").and_then(|v| v.as_f64()))
-                .unwrap_or(0.08);
-            let ny = obj
-                .get("rects")
-                .and_then(|r| r.as_array())
-                .and_then(|a| a.first())
-                .and_then(|r| r.as_object())
-                .and_then(|o| o.get("y").and_then(|v| v.as_f64()))
-                .unwrap_or(0.08);
-            let nx = if nx.is_finite() { nx } else { 0.08 };
-            let ny = if ny.is_finite() { ny } else { 0.08 };
-            let px = (nx * pw + 2.0).clamp(0.0, (pw - 18.0).max(0.0));
-            let py = (ph - ny * ph - 18.0).clamp(0.0, (ph - 18.0).max(0.0));
-            let dict = dictionary! {
-                "Type" => "Annot",
-                "Subtype" => "Text",
-                "Rect" => Object::Array(vec![
-                    real(px),
-                    real(py),
-                    real(px + 16.0),
-                    real(py + 16.0),
-                ]),
-                "Contents" => pdf_text(comment),
-                "Name" => "Comment",
-                "C" => Object::Array(color_arr.clone()),
-                "F" => Object::Integer(4),
-                "P" => Object::Reference(page_id),
-                "Open" => Object::Boolean(false),
-            };
-            let id = doc.add_object(Object::Dictionary(dict));
-            new_refs.push(Object::Reference(id));
-            created += 1;
-        }
-
-        if new_refs.is_empty() {
-            continue;
-        }
-
-        // Merge page /Annots (array or reference-to-array)
-        let mut existing: Vec<Object> = Vec::new();
-        if let Ok(Object::Dictionary(page_dict)) = doc.get_object(page_id) {
-            if let Ok(annots) = page_dict.get(b"Annots") {
-                match annots {
-                    Object::Array(a) => existing = a.clone(),
-                    Object::Reference(id) => {
-                        if let Ok(Object::Array(a)) = doc.get_object(*id) {
-                            existing = a.clone();
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-        existing.extend(new_refs);
-        if let Ok(Object::Dictionary(page_dict)) = doc.get_object_mut(page_id) {
-            page_dict.set("Annots", Object::Array(existing));
-        }
-    }
-
-    if created == 0 {
-        return json!({"error": "未能生成批注对象"});
-    }
-
-    let stem = src
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| "out".into());
-    // Always write beside the original first — never clobber until validated
-    let tmp = src.with_file_name(format!("{stem}.stuart-annot.tmp.pdf"));
-    if let Err(e) = doc.save(&tmp) {
-        return json!({"error": format!("保存失败: {e}")});
-    }
-    // Edge/PDFium-grade check: the written file must reload as a PDF
-    match Document::load(&tmp) {
-        Ok(check) => {
-            if check.get_pages().is_empty() {
-                let _ = fs::remove_file(&tmp);
-                return json!({"error": "写出的 PDF 无页面，已放弃覆盖原文件"});
-            }
-        }
-        Err(e) => {
-            let _ = fs::remove_file(&tmp);
-            return json!({"error": format!("写出的 PDF 校验失败（未覆盖原文件）: {e}")});
-        }
-    }
-
-    // Prefer overwrite original; fall back to sibling annotated file
-    let final_path = match fs::rename(&tmp, src) {
-        Ok(()) => src.to_path_buf(),
-        Err(_) => {
-            let alt = src.with_file_name(format!("{stem}.annotated.pdf"));
-            match fs::rename(&tmp, &alt) {
-                Ok(()) => alt,
-                Err(e) => return json!({"error": format!("写入文件失败: {e}")}),
-            }
-        }
-    };
-
-    json!({
-        "ok": true,
-        "created": created,
-        "path": final_path.to_string_lossy()
-    })
+pub fn stuart_clear_annotations(window:tauri::WebviewWindow,service:tauri::State<'_,crate::document::DocumentService>,document_id:String,pdf_path:String) -> Value {
+    stuart_save_annotations(window,service,document_id,pdf_path,json!([]))
 }
 
 #[tauri::command]
-pub fn stuart_capture_window(app: tauri::AppHandle) -> Value {
-    let Some(w) = app.get_webview_window("main") else {
-        return json!({"error": "no window"});
-    };
-    let pos = w.outer_position().unwrap_or(tauri::PhysicalPosition::new(0, 0));
-    let size = w.outer_size().unwrap_or(tauri::PhysicalSize::new(0, 0));
-    let maximized = w.is_maximized().unwrap_or(false);
-    let fullscreen = w.is_fullscreen().unwrap_or(false);
+pub fn stuart_export_pdf_annotations(window:tauri::WebviewWindow,service:tauri::State<'_,crate::document::DocumentService>,document_id:String,pdf_path:String,items:Value) -> Value {
+    let state=match service.state(window.label(),&document_id) {Ok(state)=>state,Err(error)=>return json!({"error":error})};
+    let src=match crate::fs_api::ensure_window_write_allowed(&window,&pdf_path) {Ok(path)=>path,Err(error)=>return json!({"error":error})};
+    if state.kind!="pdf" || state.path.as_ref()!=Some(&src) {return json!({"error":"PDF导出身份与来源路径不一致"});}
+    let annotations:Vec<crate::document::pdf_annotations::Annotation>=match serde_json::from_value(items) {Ok(items)=>items,Err(error)=>return json!({"error":format!("PDF批注格式无效：{error}")})};
+    match service.save_pdf_annotations(window.label(),&document_id,&annotations) {Ok(result)=>json!({"ok":result.result==crate::document::SaveStatus::Saved,"created":annotations.len(),"path":crate::fs_api::display_path(&src),"saveResult":result}),Err(error)=>json!({"error":error})}
+}
+
+#[tauri::command]
+pub fn stuart_edit_pdf_annotations(window:tauri::WebviewWindow,service:tauri::State<'_,crate::document::DocumentService>,document_id:String,pdf_path:String,edits:Vec<crate::document::pdf_annotations::NativeEdit>)->Result<Value,String> {
+    let state=service.state(window.label(),&document_id)?;
+    let source=crate::fs_api::ensure_window_write_allowed(&window,&pdf_path)?;
+    if state.kind!="pdf" || state.path.as_ref()!=Some(&source) {return Err("PDF批注身份与来源路径不一致".into());}
+    let result=service.edit_pdf_annotations(window.label(),&document_id,&edits)?;
+    Ok(json!({"ok":result.result==crate::document::SaveStatus::Saved,"saveResult":result}))
+}
+
+#[tauri::command]
+pub fn stuart_restore_pdf_annotations(window:tauri::WebviewWindow,service:tauri::State<'_,crate::document::DocumentService>,document_id:String,operation_id:String,version:String)->Result<Value,String> {
+    let state=service.state(window.label(),&document_id)?;
+    crate::fs_api::ensure_window_write_allowed(&window,&crate::document::identity::display_path(state.path.as_ref().ok_or("PDF来源路径缺失")?))?;
+    let result=service.restore_pdf_history(window.label(),&document_id,&operation_id,&version)?;
+    Ok(json!({"ok":result.result==crate::document::SaveStatus::Saved,"saveResult":result}))
+}
+
+#[tauri::command]
+pub fn stuart_capture_window(window: tauri::WebviewWindow) -> Result<Value,String> {
+    let pos = window.outer_position().map_err(|error|error.to_string())?;
+    let size = window.outer_size().map_err(|error|error.to_string())?;
+    let maximized = window.is_maximized().map_err(|error|error.to_string())?;
+    let fullscreen = window.is_fullscreen().map_err(|error|error.to_string())?;
     let res = modify_settings(|s| {
         if let Some(obj) = s.as_object_mut() {
             obj.insert(
@@ -949,58 +690,43 @@ pub fn stuart_capture_window(app: tauri::AppHandle) -> Value {
         }
         Ok(())
     });
-    match res {
-        Ok(_) => json!({"ok": true}),
-        Err(e) => json!({"error": e}),
-    }
+    res?;
+    Ok(json!({"ok": true}))
 }
 
 #[tauri::command]
-pub fn stuart_apply_window_state(app: tauri::AppHandle) -> Value {
+pub fn stuart_apply_window_state(window: tauri::WebviewWindow) -> Result<Value,String> {
     let s = load_settings_migrated();
     let Some(ws) = s.get("window_state") else {
-        return json!({"ok": false, "reason": "none"});
-    };
-    let Some(w) = app.get_webview_window("main") else {
-        return json!({"ok": false});
+        return Ok(json!({"ok": false, "reason": "none"}));
     };
     let fullscreen = ws.get("fullscreen").and_then(|v| v.as_bool()).unwrap_or(false);
     let maximized = ws.get("maximized").and_then(|v| v.as_bool()).unwrap_or(false);
     if fullscreen {
-        let _ = w.set_fullscreen(true);
-        return json!({"ok": true, "mode": "fullscreen"});
+        window.set_fullscreen(true).map_err(|error|error.to_string())?;
+        return Ok(json!({"ok": true, "mode": "fullscreen"}));
     }
     if maximized {
-        let _ = w.maximize();
-        return json!({"ok": true, "mode": "maximized"});
+        window.maximize().map_err(|error|error.to_string())?;
+        return Ok(json!({"ok": true, "mode": "maximized"}));
     }
     let x = ws.get("x").and_then(|v| v.as_i64()).unwrap_or(-1);
     let y = ws.get("y").and_then(|v| v.as_i64()).unwrap_or(-1);
 
-    fn fit_dim(v: i64, lo: i64, hi: i64) -> i64 {
-        if v <= 0 { return lo; }
-        v.clamp(lo, hi)
-    }
-    // Monitor work area (fallback 1366x768)
-    let (mw, mh) = (1366i64, 768i64);
-    #[cfg(target_os = "windows")]
-    let (mw, mh) = {
-        use windows_sys::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
-        unsafe { (GetSystemMetrics(SM_CXSCREEN) as i64, GetSystemMetrics(SM_CYSCREEN) as i64) }
-    };
-    let max_w = (mw as f64 * 0.92) as i64;
-    let max_h = (mh as f64 * 0.90) as i64;
-    let width = ws.get("width").and_then(|v| v.as_u64()).unwrap_or(0);
-    let height = ws.get("height").and_then(|v| v.as_u64()).unwrap_or(0);
-    let width = fit_dim(width as i64, 880, max_w) as u64;
-    let height = fit_dim(height as i64, 560, max_h) as u64;
-    if width >= 480 && height >= 360 && x > -20000 && y > -20000 {
-        let _ = w.unmaximize();
-        let _ = w.set_position(PhysicalPosition::new(x as i32, y as i32));
-        let _ = w.set_size(PhysicalSize::new(width as u32, height as u32));
-        return json!({"ok": true, "mode": "normal"});
-    }
-    json!({"ok": false, "reason": "invalid geometry"})
+    let monitors=window.available_monitors().map_err(|error|error.to_string())?;
+    let monitor=monitors.iter().find(|monitor| {
+        let area=monitor.work_area();
+        x>=i64::from(area.position.x) && y>=i64::from(area.position.y) && x<i64::from(area.position.x)+i64::from(area.size.width) && y<i64::from(area.position.y)+i64::from(area.size.height)
+    }).cloned().or(window.current_monitor().map_err(|error|error.to_string())?).ok_or("无法取得当前窗口显示器")?;
+    let area=monitor.work_area();
+    let width=ws.get("width").and_then(Value::as_u64).ok_or("窗口记录缺少宽度")?.clamp(u64::from(area.size.width.min(880)),u64::from(area.size.width));
+    let height=ws.get("height").and_then(Value::as_u64).ok_or("窗口记录缺少高度")?.clamp(u64::from(area.size.height.min(560)),u64::from(area.size.height));
+    let x=x.clamp(i64::from(area.position.x),i64::from(area.position.x)+i64::from(area.size.width)-width as i64);
+    let y=y.clamp(i64::from(area.position.y),i64::from(area.position.y)+i64::from(area.size.height)-height as i64);
+    window.unmaximize().map_err(|error|error.to_string())?;
+    window.set_size(PhysicalSize::new(width as u32,height as u32)).map_err(|error|error.to_string())?;
+    window.set_position(PhysicalPosition::new(x as i32,y as i32)).map_err(|error|error.to_string())?;
+    Ok(json!({"ok":true,"mode":"normal"}))
 }
 
 fn uuid_like() -> u128 {

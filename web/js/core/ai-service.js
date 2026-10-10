@@ -1,194 +1,212 @@
-/**
- * StuartAIService — single AI session orchestration (3.2.0)
- * All streaming UIs (assist panel / companion) go through here.
- */
 (function (global) {
   "use strict";
+  const events = new Map(), conversations = new Map();
+  let document = null, documentVersion = null, active = null, binding = null, starting = false;
+  let eventQueue = Promise.resolve();
+  const api = () => global.pywebview.api;
 
-  const api = () => (global.pywebview && global.pywebview.api) || null;
-
-  const state = {
-    requestId: null,
-    streaming: false,
-    messages: [], // [{role, content}]
-    listeners: { delta: [], done: [], error: [] },
-    bound: false,
-  };
-
-  function emit(type, payload) {
-    (state.listeners[type] || []).forEach((fn) => {
+  function on(type, listener) {
+    if (!events.has(type)) events.set(type, new Set());
+    events.get(type).add(listener);
+    return () => events.get(type).delete(listener);
+  }
+  function emit(type, payload) { for (const listener of events.get(type) || []) listener(payload); }
+  function conversation(documentId = document?.documentId) {
+    if (!documentId) throw new Error("当前文档未注册");
+    if (!conversations.has(documentId)) conversations.set(documentId, { messages: [], sessionId: null });
+    return conversations.get(documentId);
+  }
+  async function digest(text) {
+    const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+    return Array.from(new Uint8Array(bytes), byte => byte.toString(16).padStart(2, "0")).join("");
+  }
+  function sameSource(request) { return document?.documentId === request.documentId && documentVersion?.revision === request.document.revision && documentVersion?.diskHash === request.document.diskRevision?.rawByteSha256; }
+  function current(request) { return active === request && sameSource(request); }
+  async function finish(request, payload) {
+    if (request.finishing) { await request.completion; return; }
+    request.finishing = true;
+    const result = { ...payload, ok: payload.status === "Completed", error: payload.error || (payload.status === "Cancelled" ? "已取消生成" : null) };
+    if (result.ok) {
+      request.conversation.messages = [...request.messages, { role: "assistant", content: payload.text }];
       try {
-        fn(payload);
-      } catch (e) {
-        console.error(e);
+        result.memory = await global.StuartAI.handleMemoryAfterExplain({
+          requestId: request.requestId, sessionId: request.sessionId, documentId: request.documentId,
+          workspaceRoot: request.contextInput.workspaceRoot,
+          sourceAnchor: { documentId: request.documentId, path: request.document.path, revision: request.document.revision, sourceHash: request.contextInput.sourceHash, selection: request.contextInput.selection },
+        }, request.messages.findLast(message => message.role === "user").content, payload.text);
+      } catch (error) { result.memoryError = error.message; global.StuartMD.toast("学习记录保存失败：" + error.message); }
+    }
+    if (active === request) active = null;
+    request.resolve(result);
+    if (!sameSource(request)) return;
+    emit("done", result);
+    await request.handlers?.onDone?.(result);
+  }
+  async function handle(payload, request) {
+    if (!request || active !== request || payload.requestId !== request.requestId || payload.documentId !== request.documentId || payload.sessionId !== request.sessionId) return;
+    if (payload.seq <= request.seq) return;
+    if (payload.type === "delta") {
+      if (payload.seq !== request.seq + 1) {
+        const snapshot = await api().ai_chat_status(request.requestId);
+        if (active !== request) return;
+        if (snapshot.seq < payload.seq) throw new Error("AI请求事件顺序不完整");
+        if (snapshot.type === "done") { await handle(snapshot, request); return; }
+        request.text = snapshot.text; request.seq = snapshot.seq;
+      } else { request.text += payload.text; request.seq = payload.seq; }
+      if (!current(request)) return;
+      const update = { ...payload, text: request.text, full: true };
+      emit("delta", update);
+      await request.handlers?.onDelta?.(update);
+      return;
+    }
+    if (payload.type !== "done") throw new Error("AI请求事件类型无效");
+    if (payload.finalHash !== await digest(payload.text)) throw new Error("AI最终回答校验失败");
+    request.seq = payload.seq;
+    await finish(request, payload);
+  }
+  async function fail(request, error) {
+    global.StuartMD.toast(error.message);
+    if (active !== request) return;
+    await api().ai_chat_cancel(request.requestId);
+    const result = await terminalSnapshot(request);
+    await finish(request, { ...result, status: "Failed", backendStatus: result.status, error: error.message });
+  }
+  async function bind() {
+    if (!binding) binding = Promise.all([
+      api().listen_event("ai-request-event", event => {
+        const request = active;
+        const consume = () => handle(event.payload, request);
+        eventQueue = eventQueue.then(consume, consume).catch(error => fail(request, error));
+      }),
+      api().listen_event("ai-config-changed", async () => {
+        const config = await global.StuartAI.ensureConfig(true);
+        if (!config.enabled) await cancel();
+        emit("config", config);
+      }),
+    ]);
+    await binding;
+  }
+  async function captureContext(captured, selection, options) {
+    const sourceHash = captured.kind === "pdf" ? captured.diskRevision?.rawByteSha256 : await digest(captured.content);
+    if (!sourceHash) throw new Error("当前文档缺少来源指纹");
+    let ref = null;
+    if (selection?.quote || selection?.text) {
+      const quote = String(selection.quote ?? selection.text);
+      ref = {
+        documentId: captured.documentId, revision: captured.revision, kind: captured.kind, quote,
+        from: captured.kind === "markdown" && !selection.inPreview ? selection.start ?? null : null,
+        to: captured.kind === "markdown" && !selection.inPreview ? selection.end ?? null : null,
+        blockIndex: selection.blockIndex ?? null, page: selection.page ?? null,
+        rects: captured.kind === "pdf" ? selection.pdfRects || [] : [], fileFingerprint: captured.kind === "pdf" ? sourceHash : null,
+      };
+    }
+    return { editorRevision: captured.revision, sourceHash, selection: ref, page: captured.kind === "pdf" ? selection?.page || global.StuartMDPdf.getCurrentPage() : null, scope: options.scope || "neighborhood", workspaceRoot: Object.hasOwn(options, "workspaceRoot") ? options.workspaceRoot : global.StuartMD.state.workspaceRoot || null, knowledgeSources: options.knowledgeSources || [] };
+  }
+  async function send(options) {
+    if (starting) throw new Error("AI请求正在准备，请等待当前操作完成");
+    const captured = options.document || global.StuartMD.getDocument();
+    if (!captured.documentId || captured.documentId !== document?.documentId) throw new Error("请求文档身份已经失效");
+    const selection = options.selection === null ? null : options.selection ?? global.StuartMD.getSelectionInfo();
+    starting = true;
+    let request;
+    try {
+      await bind();
+      await cancel();
+      await global.StuartMD.flushDraftJournal();
+      const cfg = await global.StuartAI.ensureConfig(true);
+      if (!cfg.enabled) throw new Error("AI功能未启用");
+      const provider = global.StuartAI.activeProvider(cfg);
+      if (!provider) throw new Error("请配置AI服务商");
+      const contextInput = await captureContext(captured, selection, { ...options, scope: options.scope || cfg.context_scope });
+      const latest = global.StuartMD.getDocument();
+      if (captured.documentId !== latest.documentId || captured.revision !== latest.revision) throw new Error("请求准备期间文档已经变化，请重新选择正文");
+      const history = conversation(captured.documentId);
+      if (!history.sessionId) {
+        const session = await api().session_create(captured.name, contextInput.workspaceRoot, captured.documentId, captured.path);
+        history.sessionId = session.sessionId;
       }
-    });
+      if (captured.documentId !== document?.documentId) throw new Error("请求准备期间已经切换文档");
+      let resolve;
+      const completion = new Promise(done => { resolve = done; });
+      request = { requestId: crypto.randomUUID(), documentId: captured.documentId, sessionId: history.sessionId, document: captured, contextInput, seq: 0, text: "", messages: options.messages, conversation: history, handlers: options.handlers, completion, resolve };
+      active = request;
+      emit("start", { requestId: request.requestId, documentId: request.documentId, sessionId: request.sessionId });
+      const result = await api().ai_chat_start(request.requestId, options.providerId || provider.id, options.model || provider.model,
+        request.messages, options.thinking || cfg.thinking, options.maxTokens ?? cfg.max_output_tokens, request.documentId, request.sessionId, contextInput);
+      if (result.error) throw new Error(result.error);
+      return { ok: true, requestId: request.requestId };
+    } catch (error) {
+      if (request && active === request) {
+        active = null;
+        request.resolve({ ok: false, status: "Failed", error: error.message });
+      }
+      throw error;
+    } finally { starting = false; }
   }
-
-  function on(type, fn) {
-    if (!state.listeners[type]) state.listeners[type] = [];
-    state.listeners[type].push(fn);
-    return () => {
-      state.listeners[type] = state.listeners[type].filter((f) => f !== fn);
-    };
+  async function explainSelection(options = {}, handlers) {
+    const host = global.StuartMD, captured = host.getDocument();
+    const selection = { ...host.getSelectionInfo(), ...options };
+    const quote = String(selection.quote ?? selection.text ?? "");
+    if (!quote.trim()) throw new Error("请选中需要解释的正文");
+    const cfg = await global.StuartAI.ensureConfig();
+    const context = global.StuartAIContext;
+    const built = captured.kind === "pdf" ? context.buildPdfExplain({ ...selection, name: captured.name, quote }) : context.buildMarkdownExplain(host, { ...selection, quote });
+    const result = await send({ document: captured, selection, messages: [{ role: "system", content: context.systemPrompt(global.StuartAI.getStyle(cfg)) }, { role: "user", content: built.promptUser }], handlers });
+    return { ...result, quote, meta: built.meta };
   }
-
-  function bindStream() {
-    if (state.bound) return;
-    state.bound = true;
-    const handleDelta = (payload) => {
-      const p = (payload && (payload.payload || payload)) || {};
-      if (p.requestId && state.requestId && p.requestId !== state.requestId) return;
-      // Canonical field: text (ignore legacy delta)
-      const text = p.text != null ? p.text : p.delta != null ? p.delta : "";
-      emit("delta", { requestId: p.requestId, text, full: p.full });
-    };
-    const handleDone = (payload) => {
-      const p = (payload && (payload.payload || payload)) || {};
-      if (p.requestId && state.requestId && p.requestId !== state.requestId) return;
-      state.streaming = false;
-      const text = p.text != null ? p.text : "";
-      emit("done", {
-        requestId: p.requestId,
-        ok: p.ok !== false && !p.error,
-        text,
-        error: p.error || null,
-      });
-      if (p.error) emit("error", { requestId: p.requestId, error: p.error });
-      state.requestId = null;
-    };
-    const tauri = global.__TAURI__;
-    if (tauri?.event?.listen) {
-      tauri.event.listen("ai-chat-delta", (e) => handleDelta(e.payload || e));
-      tauri.event.listen("ai-chat-done", (e) => handleDone(e.payload || e));
-    } else {
-      global.addEventListener("ai-chat-delta", (e) => handleDelta(e.detail || e));
-      global.addEventListener("ai-chat-done", (e) => handleDone(e.detail || e));
+  async function followUp(text, handlers, options = {}) {
+    if (!String(text).trim()) throw new Error("问题内容为空");
+    const history = conversation();
+    if (!history.messages.length) throw new Error("请先完成一次问答");
+    const config = await global.StuartAI.ensureConfig(true);
+    const system = global.StuartAIContext.systemPrompt(global.StuartAI.getStyle(config));
+    return send({ ...options, messages: [{ role: "system", content: system }, ...history.messages.filter(message => message.role !== "system"), { role: "user", content: text }], handlers });
+  }
+  async function terminalSnapshot(request) {
+    const deadline = Date.now() + 15000;
+    while (Date.now() < deadline) {
+      const snapshot = await api().ai_chat_status(request.requestId);
+      if (snapshot.type === "done") return snapshot;
+      await new Promise(resolve => setTimeout(resolve, 100));
     }
+    throw new Error("AI请求尚未确认结束");
   }
-
-  function rid() {
-    return "ai-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
-  }
-
-  async function ensureConfig(force) {
-    if (global.StuartAI?.ensureConfig) return global.StuartAI.ensureConfig(force);
-    return null;
-  }
-
-  /**
-   * messages: full history to send, or we append `user` if only text given.
-   */
-  async function send({ messages, providerId, model, thinking, maxTokens }) {
-    bindStream();
-    const a = api();
-    if (!a || !a.ai_chat_start) return { error: "bridge missing" };
-    if (state.streaming) await cancel();
-    const cfg = await ensureConfig();
-    const provider = providerId
-      ? null
-      : (cfg && global.StuartAI?.activeProvider?.(cfg)) || null;
-    const msgList = Array.isArray(messages) && messages.length
-      ? messages
-      : state.messages.length
-        ? state.messages
-        : [{ role: "user", content: "" }];
-    if (Array.isArray(messages) && messages.length) state.messages = msgList.slice();
-    const requestId = rid();
-    state.requestId = requestId;
-    state.streaming = true;
-    const res = await a.ai_chat_start(
-      requestId,
-      providerId || (provider && provider.id) || null,
-      model || (provider && provider.model) || null,
-      msgList,
-      thinking || (cfg && cfg.thinking) || "balanced",
-      maxTokens || (cfg && cfg.max_output_tokens) || 2048
-    );
-    return { ok: !res || !res.error, requestId, error: res && res.error };
-  }
-
-  async function explainSelection(opts) {
-    const C = global.StuartAIContext;
-    const host = global.StuartMD;
-    const cfg = await ensureConfig();
-    const style = global.StuartAI?.getStyle?.(cfg) || {};
-    const memoryProfile = (await global.StuartAI?.loadMemoryProfile?.()) || "";
-    let quote = opts?.quote || "";
-    if (!quote) {
-      quote = String(host?.getSelectionInfo?.()?.text || "").trim();
-    }
-    if (!quote) return { error: "请先选中要问答的内容" };
-    let built;
-    if (opts?.kind === "pdf") {
-      let ctx = { quote, page: opts.page, name: opts.name, pageText: "", neighborText: "" };
-      try {
-        if (global.StuartMDPdf?.getAiContext) {
-          ctx = Object.assign(ctx, await global.StuartMDPdf.getAiContext());
-          ctx.quote = quote;
-        }
-      } catch (_) {}
-      built = C.buildPdfExplain(
-        { quote, page: ctx.page, pageText: ctx.pageText, neighborText: ctx.neighborText, name: ctx.name },
-        { memoryProfile, maxChars: cfg?.context_max_chars || 8000 }
-      );
-    } else {
-      built = C.buildMarkdownExplain(host, {
-        quote,
-        scope: cfg?.context_scope || "neighborhood",
-        maxChars: cfg?.context_max_chars || 8000,
-        memoryProfile,
-      });
-    }
-    const messages = [
-      { role: "system", content: C.systemPrompt(style) },
-      { role: "user", content: built.promptUser },
-    ];
-    const res = await send({ messages });
-    return Object.assign({ meta: built.meta, quote }, res);
-  }
-
-  async function followUp(userText) {
-    const q = String(userText || "").trim();
-    if (!q) return { error: "内容为空" };
-    if (!state.messages.length) return { error: "请先进行一次问答" };
-    state.messages.push({ role: "user", content: q });
-    return send({ messages: state.messages });
-  }
-
   async function cancel() {
-    const a = api();
-    const id = state.requestId;
-    state.streaming = false;
-    state.requestId = null;
-    if (a?.ai_chat_cancel && id) {
-      try {
-        await a.ai_chat_cancel(id);
-      } catch (_) {}
-    }
-    return { ok: true, requestId: id };
+    const request = active;
+    if (!request) return;
+    await api().ai_chat_cancel(request.requestId);
+    const snapshot = await terminalSnapshot(request);
+    await handle(snapshot, request);
+    await request.completion;
   }
-
   global.StuartAIService = {
-    on,
-    send,
-    explainSelection,
-    followUp,
-    cancel,
-    ensureConfig,
-    get streaming() {
-      return state.streaming;
+    on, send, explainSelection, followUp, cancel, ensureConfig: force => global.StuartAI.ensureConfig(force),
+    setDocument(next) {
+      const changed = next.documentId !== documentVersion?.documentId || next.revision !== documentVersion?.revision || next.diskRevision?.rawByteSha256 !== documentVersion?.diskHash;
+      document = next;
+      documentVersion = { documentId: next.documentId, revision: next.revision, diskHash: next.diskRevision?.rawByteSha256 };
+      if (!changed) return;
+      emit("document", { documentId: next.documentId, messages: conversation(next.documentId).messages });
+      if (active) cancel().catch(error => global.StuartMD.toast(error.message));
     },
-    get requestId() {
-      return state.requestId;
+    restoreConversation(session, messages) {
+      if (session.documentId !== document?.documentId) throw new Error("恢复的会话与当前文档身份不一致");
+      const history = conversation();
+      const complete = new Set(messages.filter(message => message.role === "assistant" && message.completionStatus === "Completed").map(message => message.requestId));
+      history.sessionId = session.sessionId;
+      history.messages = messages.filter(message => message.completionStatus === "Completed" && (!message.requestId || complete.has(message.requestId))).map(({ role, content }) => ({ role, content }));
+      emit("document", { documentId: document.documentId, messages: history.messages });
     },
-    get messages() {
-      return state.messages;
+    get streaming() { return starting || !!active; }, get requestId() { return active?.requestId; },
+    get messages() { return document ? conversation().messages : []; },
+    async releaseDocument(documentId) {
+      if (active?.documentId === documentId) await cancel();
+      conversations.delete(documentId);
+      if (document?.documentId === documentId) {
+        document = null; documentVersion = null;
+        emit("document", { documentId: null, messages: [] });
+      }
     },
-    reset() {
-      state.messages = [];
-      state.requestId = null;
-      state.streaming = false;
-    },
+    async reset() { await cancel(); if (document) conversations.delete(document.documentId); emit("document", { documentId: document?.documentId, messages: [] }); },
   };
 })(typeof window !== "undefined" ? window : globalThis);

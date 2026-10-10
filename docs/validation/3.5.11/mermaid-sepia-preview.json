@@ -1,0 +1,85 @@
+{
+  "nodes": [
+    {
+      "text": "打开包含中文与English的长文档",
+      "rect": {
+        "x": 905.046875,
+        "y": 143,
+        "width": 209.90625,
+        "height": 31
+      },
+      "label": {
+        "x": 911.046875,
+        "y": 149,
+        "width": 197.90625,
+        "height": 19
+      },
+      "foreignObject": {
+        "x": 911.046875,
+        "y": 149,
+        "width": 197.90625,
+        "height": 19
+      },
+      "labelStyle": {
+        "display": "inline",
+        "lineHeight": "normal",
+        "fontSize": "14px"
+      },
+      "html": "打开包含中文与English的长文档"
+    },
+    {
+      "text": "保存当前修改并保留恢复草稿",
+      "rect": {
+        "x": 913,
+        "y": 224,
+        "width": 194,
+        "height": 31
+      },
+      "label": {
+        "x": 919,
+        "y": 230,
+        "width": 182,
+        "height": 19
+      },
+      "foreignObject": {
+        "x": 919,
+        "y": 230,
+        "width": 182,
+        "height": 19
+      },
+      "labelStyle": {
+        "display": "inline",
+        "lineHeight": "normal",
+        "fontSize": "14px"
+      },
+      "html": "保存当前修改并保留恢复草稿"
+    },
+    {
+      "text": "第一行中文第二行English与中文",
+      "rect": {
+        "x": 940.046875,
+        "y": 305,
+        "width": 139.90625,
+        "height": 50
+      },
+      "label": {
+        "x": 946.046875,
+        "y": 311,
+        "width": 127.90625,
+        "height": 38
+      },
+      "foreignObject": {
+        "x": 946.046875,
+        "y": 311,
+        "width": 127.90625,
+        "height": 38
+      },
+      "labelStyle": {
+        "display": "inline",
+        "lineHeight": "normal",
+        "fontSize": "14px"
+      },
+      "html": "第一行中文<br>第二行English与中文"
+    }
+  ]
+}

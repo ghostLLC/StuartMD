@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default capabilities for StuartMD",
-  "windows": ["main"],
+  "windows": ["main", "document-*"],
   "permissions": [
     "core:default",
     "dialog:default",

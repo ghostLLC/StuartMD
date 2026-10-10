@@ -1,7 +1,4 @@
-/**
- * StuartMD AI UI 3.0.0 — model menu, settings form, explain panel.
- * Host: window.StuartAIUI
- */
+// StuartMD 模型设置与文档问答窗口。
 (function (global) {
   "use strict";
 
@@ -770,20 +767,29 @@
       const AI = global.StuartAI;
       const pid = $("#ai-provider-select")?.value;
       const st = $("#ai-set-status");
+      const button = $("#ai-test-btn");
+      button.disabled = true;
       if (st) st.textContent = "正在测试连接…";
-      await applyFormQuiet();
-      const res = await AI.testProvider(pid);
-      if (res?.error) {
-        if (st)
-          st.textContent = "连接失败：" + res.error + (res.body ? " · " + res.body : "");
-        toast("连接失败：" + res.error);
-      } else {
+      try {
+        await applyFormQuiet();
+        const res = await AI.testProvider(pid);
+        if (!res?.ok) throw new Error(res?.error || "服务商没有确认连接成功");
         const n = (res.models || []).length;
         if (st) st.textContent = `连接成功${n ? " · 可用模型 " + n + " 个" : ""}`;
         toast("连接成功");
+      } catch (error) {
+        const message = error.message || String(error);
+        if (st) st.textContent = "连接失败：" + message;
+        toast("连接失败：" + message);
+      } finally {
+        button.disabled = false;
       }
     });
     applyBtn.addEventListener("click", () => applyForm());
+    $("#ai-counting-btn")?.addEventListener("click", async () => {
+      try { await applyFormQuiet(); await global.StuartMemoryUI.openCountingSettings($("#ai-provider-select").value); }
+      catch (error) { toast(error.message || String(error)); }
+    });
   }
 
   function setFeedbackVisible(v, highlight) {
@@ -867,8 +873,6 @@
     p.cancel?.addEventListener("click", async () => {
       const reqId = uiState.requestId || global.StuartAI?.state?.requestId;
       await global.StuartAI?.cancel(reqId);
-      setThinking(false);
-      finishStreamingChat(uiState.lastAnswer || "", "已取消生成");
     });
     p.copy?.addEventListener("click", () => {
       const text = uiState.lastAnswer || "";
@@ -886,8 +890,7 @@
     p.remember?.addEventListener("click", async () => {
       const AI = global.StuartAI;
       if (!AI) return;
-      const snippet = (uiState.lastQuote || "").slice(0, 80);
-      const res = await AI.rememberSnippet(snippet || (uiState.lastAnswer || "").slice(0, 80));
+      const res = await AI.rememberSnippet(uiState.lastQuote || uiState.lastAnswer || "");
       if (res?.error) toast(res.error);
       else toast("已记入 AI 记忆");
     });
@@ -914,134 +917,38 @@
     });
   }
 
-  async function listenChat(requestId, onDelta, onDone) {
-    const tauri = global.__TAURI__;
-    if (tauri?.event?.listen) {
-      let un1 = null;
-      let un2 = null;
-      const clean = () => {
-        try {
-          if (un1) un1();
-          if (un2) un2();
-        } catch (_) {}
-        un1 = null;
-        un2 = null;
-      };
-      const [u1, u2] = await Promise.all([
-        tauri.event.listen("ai-chat-delta", (e) => {
-          const payload = e.payload || e;
-          if (payload.requestId && payload.requestId !== requestId) return;
-          onDelta(payload);
-        }),
-        tauri.event.listen("ai-chat-done", (e) => {
-          const payload = e.payload || e;
-          if (payload.requestId && payload.requestId !== requestId) return;
-          onDone(payload);
-          clean();
-        }),
-      ]);
-      un1 = u1;
-      un2 = u2;
-      return clean;
-    }
-    const onD = (ev) => {
-      const payload = ev.detail || ev;
-      if (payload.requestId && payload.requestId !== requestId) return;
-      onDelta(payload);
-    };
-    const onE = (ev) => {
-      const payload = ev.detail || ev;
-      if (payload.requestId && payload.requestId !== requestId) return;
-      onDone(payload);
-      global.removeEventListener("ai-chat-delta", onD);
-      global.removeEventListener("ai-chat-done", onE);
-    };
-    global.addEventListener("ai-chat-delta", onD);
-    global.addEventListener("ai-chat-done", onE);
-    return () => {
-      global.removeEventListener("ai-chat-delta", onD);
-      global.removeEventListener("ai-chat-done", onE);
-    };
-  }
-
   async function sendFollowUp() {
     const p = panelEls();
     const q = (p.followInput?.value || "").trim();
     if (!q) return;
     if (p.followInput) p.followInput.value = "";
     const AI = global.StuartAI;
-    const C = global.StuartAIContext;
-    const api = global.pywebview && global.pywebview.api;
-    if (!AI || !api) return;
-    const cfg = await AI.ensureConfig();
-    const provider = currentProvider(cfg);
-    if (!provider) {
-      toast("请先配置 AI 模型");
-      return;
-    }
-    if (!uiState.lastMessages || !uiState.lastMessages.length) {
+    const service = global.StuartAIService;
+    if (!AI || !service) throw new Error("AI服务尚未加载");
+    if (service.streaming) { toast("请等待当前回答完成"); return; }
+    if (!service.messages.length) {
       toast("请先进行一次问答，再追问");
       return;
     }
-    openPanel(); // keep position — no reposition
+    openPanel();
     pushChat("user", q);
-    uiState.lastMessages = [
-      ...(uiState.lastMessages || []),
-      { role: "user", content: q },
-    ];
     uiState.lastAnswer = "";
     uiState.isFirstAnswer = false;
     setFeedbackVisible(false);
     pushChat("ai", "", { streaming: true });
     setThinking(true, "正在思考…");
-    const requestId = "ai-" + Date.now().toString(36) + "-f";
-    uiState.requestId = requestId;
-    if (AI.state) {
-      AI.state.requestId = requestId;
-      AI.state.active = true;
-    }
-    const cleanupListeners = await listenChat(
-      requestId,
-      (payload) => {
-        setThinking(false);
-        uiState.lastAnswer += payload.text || "";
-        updateStreamingChat(uiState.lastAnswer);
-      },
-      (payload) => {
-        if (AI.state && AI.state.requestId === requestId) {
-          AI.state.active = false;
-        }
-        const text = payload.text || uiState.lastAnswer || "";
-        uiState.lastAnswer = text;
-        const errMsg = payload.error && !text ? payload.error : payload.error || null;
-        finishStreamingChat(text, errMsg && !text ? errMsg : null);
-        if (text) {
-          uiState.lastMessages.push({ role: "assistant", content: text });
-        }
-        if (payload.error && text) {
-          // partial + error note
-          const info = classifyAiError(payload.error);
-          toast(info.title);
-        }
-      }
-    );
-    const res = await api.ai_chat_start(
-      requestId,
-      provider.id,
-      provider.model,
-      uiState.lastMessages,
-      cfg.thinking || "balanced",
-      cfg.max_output_tokens || 2048
-    );
-    if (res?.error) {
-      if (cleanupListeners) cleanupListeners();
-      if (AI.state && AI.state.requestId === requestId) {
-        AI.state.active = false;
-      }
-      setThinking(false);
-      finishStreamingChat("", res.error);
-      return;
-    }
+    try {
+      const result = await service.followUp(q, {
+        onDelta: payload => { setThinking(false); updateStreamingChat(payload.text); },
+        onDone: payload => {
+          finishStreamingChat(payload.text, payload.status === "Failed" ? payload.error : null);
+          uiState.lastMessages = service.messages;
+          const badge = $("#ai-panel-badge");
+          if (badge) { badge.textContent = payload.ok ? "完成" : payload.status === "Cancelled" ? "已取消" : "失败"; badge.dataset.state = payload.ok ? "ok" : "err"; }
+        },
+      });
+      uiState.requestId = result.requestId;
+    } catch (error) { finishStreamingChat("", error.message || String(error)); }
   }
 
   function resolveSelectedQuote() {
@@ -1051,7 +958,7 @@
     let inPdf = false;
     try {
       const info = host && host.getSelectionInfo && host.getSelectionInfo();
-      text = String((info && info.text) || "").trim();
+      text = String((info && info.text) || "");
       if (info && info.inPdf) {
         inPdf = true;
         page = info.page != null ? info.page : null;
@@ -1060,7 +967,7 @@
     if (!text) {
       try {
         const cache = host && host.getSelectionCache && host.getSelectionCache();
-        text = String((cache && cache.text) || "").trim();
+        text = String((cache && cache.text) || "");
         if (cache && cache.inPdf) {
           inPdf = true;
           page = cache.page != null ? cache.page : page;
@@ -1096,6 +1003,7 @@
         toast("AI 模块未加载（StuartAI/StuartAIContext）");
         return;
       }
+      if (global.StuartAIService.streaming) { toast("请等待当前回答完成"); return; }
       try {
         global.StuartMD?.captureSelectionCache?.();
       } catch (_) {}
@@ -1135,57 +1043,23 @@
       uiState.isFirstAnswer = true;
       setFeedbackVisible(false);
 
-      let explainInput = { kind: "markdown", quote };
-      let builtForHistory = null;
-      if (pdfMode) {
-        let pdfCtx = { quote, page: (picked && picked.page) || null, name: "PDF", pageText: "", neighborText: "" };
-        try {
-          if (global.StuartMDPdf?.getAiContext) {
-            pdfCtx = Object.assign(pdfCtx, await global.StuartMDPdf.getAiContext());
-            pdfCtx.quote = quote || pdfCtx.quote;
-          }
-        } catch (_) {}
-        explainInput = {
-          kind: "pdf",
-          quote,
-          page: pdfCtx.page,
-          pageText: pdfCtx.pageText || "",
-          neighborText: pdfCtx.neighborText || "",
-          name: pdfCtx.name || "PDF",
-        };
-        const stylePdf = AI.getStyle ? AI.getStyle() : {};
-        builtForHistory = C.buildPdfExplain(explainInput, {
-          maxChars: cfg.context_max_chars || C.DEFAULT_MAX,
-          scope: cfg.context_scope,
-          memoryProfile: "",
-        });
-        void stylePdf;
-      } else {
-        builtForHistory = C.buildMarkdownExplain(global.StuartMD, {
-          quote,
-          scope: (cfg && cfg.context_scope) || "neighborhood",
-          maxChars: (cfg && cfg.context_max_chars) || 8000,
-        });
-      }
+      const explainInput = { ...global.StuartMD.getSelectionInfo(), kind: pdfMode ? "pdf" : "markdown", quote, page: picked.page };
 
       const res = await AI.explain(explainInput, {
-        onDelta: (full) => {
-          if (AI.state?.requestId) {
-            uiState.requestId = AI.state.requestId;
-          }
+        onDelta: (payload) => {
+          uiState.requestId = payload.requestId;
           setThinking(false);
-          uiState.lastAnswer = full;
-          updateStreamingChat(full);
+          updateStreamingChat(payload.text);
         },
         onDone: async (payload) => {
           const text = payload && payload.text != null ? payload.text : uiState.lastAnswer;
           uiState.lastAnswer = text || "";
-          const err = payload && payload.error && !text ? payload.error : null;
+          const err = payload.status === "Failed" ? payload.error : null;
           finishStreamingChat(uiState.lastAnswer, err);
           const badge2 = $("#ai-panel-badge");
           if (badge2) {
-            badge2.textContent = err ? "失败" : "完成";
-            badge2.dataset.state = err ? "err" : "ok";
+            badge2.textContent = payload.ok ? "完成" : payload.status === "Cancelled" ? "已取消" : "失败";
+            badge2.dataset.state = payload.ok ? "ok" : "err";
           }
           if (err) {
             const info = classifyAiError(err);
@@ -1193,21 +1067,9 @@
             if (info.action === "open_settings") openSettingsFocus();
             return;
           }
-          const styleNow = AI.getStyle ? AI.getStyle() : {};
-          uiState.lastMessages = [
-            { role: "system", content: C.systemPrompt(styleNow) },
-            { role: "user", content: (builtForHistory && builtForHistory.promptUser) || quote },
-            { role: "assistant", content: uiState.lastAnswer },
-          ];
-          try {
-            const mm = await AI.handleMemoryAfterExplain(
-              (builtForHistory && builtForHistory.meta) || { name: pdfMode ? "PDF" : "Markdown" },
-              quote,
-              uiState.lastAnswer
-            );
-            if (mm && mm.ask) pushChat("system", "问答完成。可点「记入记忆」保存偏好（记忆策略：询问）。");
-            else if (mm && mm.ok && mm.mode === "always") pushChat("system", "已按「默认学习」记录本次活动。");
-          } catch (_) {}
+          if (!payload.ok) return;
+          uiState.lastMessages = global.StuartAIService.messages;
+          if (payload.memory?.ask) pushChat("system", "可以点击「记入记忆」保存本次内容。");
           if (uiState.isFirstAnswer) {
             setFeedbackVisible(true);
             uiState.isFirstAnswer = false;
@@ -1274,6 +1136,16 @@
     bindModelMenu();
     bindPanel();
     bindSettingsForm();
+    if (!uiState.documentListener) {
+      uiState.documentListener = global.StuartAIService.on("document", payload => {
+        uiState.lastQuote = ""; uiState.lastMeta = null; uiState.lastAnswer = ""; uiState.requestId = null;
+        uiState.lastMessages = payload.messages;
+        uiState.chat = payload.messages.filter(message => message.role !== "system").map(message => ({ role: message.role === "assistant" ? "ai" : "user", text: message.content }));
+        const quote = panelEls().quote;
+        if (quote) { quote.textContent = ""; quote.hidden = true; }
+        setThinking(false); setFeedbackVisible(false); renderChat();
+      });
+    }
     // Direct bind on selection-bar AI button (belt & suspenders)
     document.querySelectorAll('[data-sel="ai-explain"]').forEach((btn) => {
       if (btn.dataset.aiBound === "1") return;

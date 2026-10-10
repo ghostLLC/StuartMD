@@ -1,0 +1,22 @@
+{
+  "name": "stuartmd-validation",
+  "version": "3.5.11",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/project-audit-core.cjs tests/repair-document-state.cjs tests/repair-text-buffer.cjs tests/repair-write-coordinator.cjs",
+    "verify:release": "node scripts/verify-release.cjs"
+  },
+  "dependencies": {
+    "diff": "8.0.2",
+    "pdfjs-dist": "3.11.174"
+  },
+  "devDependencies": {
+    "@iarna/toml": "2.2.5",
+    "@wdio/cli": "9.20.0",
+    "@wdio/local-runner": "9.20.0",
+    "@wdio/mocha-framework": "9.20.0",
+    "@wdio/spec-reporter": "9.20.0",
+    "esbuild": "0.25.11",
+    "playwright": "1.56.0"
+  }
+}

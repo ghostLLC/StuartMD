@@ -15,19 +15,57 @@
     console.error("[StuartMD GlobalError]", event.error || event.message);
   });
 
-  // 3-second draft journaling (Zero-Loss Journaling)
-  let _draftTimer = null;
+  let activeDocument = null;
+  const pendingJournals = new Map();
+  const queuedJournalSnapshots = new Map();
+  function queueDraftSnapshot(document, snapshot) {
+    if (snapshot.documentId !== document.documentId) throw new Error("草稿快照与文档身份不一致");
+    if (document.journalRevision >= snapshot.revision) return Promise.resolve();
+    const previous = pendingJournals.get(document.documentId) || Promise.resolve();
+    if (queuedJournalSnapshots.get(document.documentId)?.revision >= snapshot.revision) return previous;
+    const persist = () => window.pywebview.api.journal_write(snapshot);
+    const next = previous.then(persist, persist).then(result => {
+      if (result.documentId !== snapshot.documentId || result.journalRevision < snapshot.revision) throw new Error("草稿确认与提交版本不一致");
+      document.journalRevision = Math.max(document.journalRevision, result.journalRevision);
+      if (activeDocument === document) updateAutosaveStatus();
+    });
+    pendingJournals.set(document.documentId, next);
+    queuedJournalSnapshots.set(document.documentId, snapshot);
+    next.then(() => {
+      if (pendingJournals.get(document.documentId) === next) pendingJournals.delete(document.documentId);
+    }, () => {
+      if (pendingJournals.get(document.documentId) === next) {
+        pendingJournals.delete(document.documentId);
+        queuedJournalSnapshots.delete(document.documentId);
+      }
+    });
+    return next;
+  }
+
   function scheduleDraftJournal() {
-    clearTimeout(_draftTimer);
-    _draftTimer = setTimeout(async () => {
-      if (!state.content) return;
-      const docId = state.path ? String(state.path) : "untitled_" + (state.activeTabId || "def");
-      try {
-        if (window.pywebview?.api?.save_draft) {
-          await window.pywebview.api.save_draft(docId, state.content);
-        }
-      } catch (_) {}
-    }, 3000);
+    if (!activeDocument || activeDocument.kind === "pdf" || !state.apiReady) return;
+    queueDraftSnapshot(activeDocument, activeDocument.snapshot()).catch(error => toast("草稿保存失败：" + error.message));
+  }
+
+  async function flushDraftJournal() {
+    if (!state.apiReady) return;
+    for (const tab of state.tabs) {
+      const document = tab.document;
+      if (document?.kind === "markdown" && document.accessState === "Editable" && document.journalRevision < document.revision) await queueDraftSnapshot(document, document.snapshot());
+    }
+    await Promise.all(pendingJournals.values());
+    await window.pywebview.api.journal_flush();
+    await window.StuartCore.writeCoord.flush();
+  }
+
+  async function flushCurrentDocument() {
+    let captured;
+    do {
+      commitActiveBlockEdits();
+      saveActiveTabFromEditor();
+      captured = activeDocument?.revision;
+      await flushDraftJournal();
+    } while (activeDocument?.revision !== captured);
   }
 
   // ---------- State ----------
@@ -139,7 +177,6 @@
   let lastPreviewSource = null;
   let lastOutlineSig = "";
   let lastTreePath = null;
-  let mermaidIdleId = null;
   /** P3: last rendered markdown blocks for dirty update */
   let lastPreviewBlocks = [];
 
@@ -153,68 +190,14 @@
 
   function splitMarkdownBlocks(text) {
     const core = CoreDoc();
-    if (core) return core.splitMarkdownBlocks(text);
-    const src = text || "";
-    if (!src.trim()) return [];
-    const lines = src.split("\n");
-    const blocks = [];
-    let buf = [];
-    let inFence = false;
-    let fenceMarker = "";
-    const flush = () => {
-      const raw = buf.join("\n").replace(/\s+$/, "");
-      if (raw.trim().length) blocks.push(raw);
-      buf = [];
-    };
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const fence = line.match(/^\s{0,3}(```+|~~~+)/);
-      if (fence) {
-        if (!inFence) {
-          inFence = true;
-          fenceMarker = fence[1][0];
-          buf.push(line);
-          continue;
-        }
-        if (fence[1][0] === fenceMarker) {
-          buf.push(line);
-          inFence = false;
-          fenceMarker = "";
-          flush();
-          continue;
-        }
-      }
-      if (!inFence && line.trim() === "") {
-        if (buf.length) flush();
-        else blocks.push("");
-        continue;
-      }
-      buf.push(line);
-    }
-    flush();
-    while (blocks.length && blocks[0] === "") blocks.shift();
-    while (blocks.length && blocks[blocks.length - 1] === "") blocks.pop();
-    return blocks;
+    if (!core) throw new Error("Markdown 文档解析依赖尚未加载");
+    return core.splitMarkdownBlocks(activeDocument && text === el.source.value ? activeDocument.source : text);
   }
 
   function joinBlocks(blocks) {
     const core = CoreDoc();
-    if (core) return core.joinBlocks(blocks);
-    const list = (blocks || []).map((b) => (b == null ? "" : String(b)));
-    const out = [];
-    for (let i = 0; i < list.length; i++) {
-      const b = list[i];
-      if (i === 0) {
-        if (b) out.push(...b.split("\n"));
-        else out.push("");
-      } else if (b) {
-        out.push("");
-        out.push(...b.split("\n"));
-      } else {
-        out.push("");
-      }
-    }
-    return out.join("\n");
+    if (!core) throw new Error("Markdown 文档解析依赖尚未加载");
+    return core.joinBlocks(blocks, activeDocument?.source);
   }
 
   function blockNeedsPostProcess(block) {
@@ -448,6 +431,7 @@
     const wrap = document.createElement("div");
     wrap.className = "md-block";
     wrap.dataset.index = String(index);
+    stampBlockVersion(wrap);
     const src = block == null ? "" : String(block);
     wrap._stuartSrc = src;
     if (!src.trim()) {
@@ -524,6 +508,9 @@
    * Never return empty original when the node still carries a non-empty snapshot.
    */
   function resolveBlockSource(node) {
+    if (!activeDocument || activeDocument.accessState !== "Editable" || node.dataset.documentId !== activeDocument.documentId || Number(node.dataset.revision) !== activeDocument.revision) {
+      throw new Error("段落控件与当前文档版本不一致，请重新打开该段落");
+    }
     const blocks = splitMarkdownBlocks(el.source.value || "");
     const idx = Number(node.dataset.index);
     let index = Number.isFinite(idx) ? idx : -1;
@@ -549,6 +536,13 @@
       original = snap;
     }
     return { index, original, blocks, snap };
+  }
+
+  function stampBlockVersion(node) {
+    if (!activeDocument) throw new Error("段落控件缺少文档身份");
+    node.dataset.documentId = activeDocument.documentId;
+    node.dataset.revision = String(activeDocument.revision);
+    node.dataset.renderEpoch = String(activeDocument.renderEpoch);
   }
 
   function postProcessBlock(node) {
@@ -660,6 +654,7 @@
       }
     }
     if (needPP.length) postProcessBlocks(needPP);
+    for (const node of childNodes()) stampBlockVersion(node);
 
     const midStart = prefix;
     const midEnd = blocks.length - suffix;
@@ -2380,6 +2375,7 @@
    */
   function commitBlockSource(idx, nextText, originalText, opts) {
     const o = opts || {};
+    if (o.documentId !== activeDocument?.documentId || o.expectedRevision !== activeDocument?.revision) throw new Error("段落编辑已经失效，当前文档保持现有正文");
     const all = splitMarkdownBlocks(el.source.value || "");
     const snap = originalText != null ? String(originalText) : "";
     if (!Number.isFinite(idx) || idx < 0 || idx >= all.length) {
@@ -2440,10 +2436,14 @@
         next = original;
       }
     }
+    if (o.preserveTrailingSeparators) next += original.match(/(?:\r\n|\r|\n)+$/)?.[0] || "";
+    const buffer = new window.StuartCore.TextBuffer(original, activeDocument.buffer.defaultSeparator);
+    buffer.updateEditor(next);
+    next = buffer.source;
     if (next === all[idx]) {
       return { ok: true, index: idx };
     }
-    const prev = el.source.value || "";
+    const prev = activeDocument.source;
     if (prev) pushHistory(prev);
     all[idx] = next;
     const joined = joinBlocks(all);
@@ -2451,7 +2451,7 @@
     state.content = joined;
     markDirty();
     scheduleAutoSave();
-    pushHistory(joined);
+    pushHistory(activeDocument.source);
     return { ok: true, index: idx };
   }
 
@@ -2508,6 +2508,7 @@
         : String(node._stuartSrc || "");
     exitTableEditChrome(node);
     node._stuartSrc = src;
+    stampBlockVersion(node);
     if (!src.trim()) {
       node.classList.add("md-empty");
       node.innerHTML = '<p class="md-empty-line"><br></p>';
@@ -2550,6 +2551,7 @@
     if (node.classList.contains("editing")) return;
     $$(".md-block.editing", el.preview).forEach((n) => exitBlockEditVisual(n));
     const { index: idx, original: resolved } = resolveBlockSource(node);
+    const editVersion = { documentId: activeDocument.documentId, expectedRevision: activeDocument.revision };
     let original = resolved;
     // KaTeX: recover TeX from the rendered node if the source slot came back empty.
     if (!String(original).trim() && node.querySelector && node.querySelector(".katex, .katex-display")) {
@@ -2611,6 +2613,7 @@
         next = original;
       }
       const written = commitBlockSource(idx, next, original, {
+        ...editVersion,
         allowEmpty: !!userEdited,
         userEdited: !!userEdited,
       });
@@ -2691,6 +2694,7 @@
       exitBlockEditVisual(n);
     });
     const { index: idx, original: originalBlock } = resolveBlockSource(node);
+    const editVersion = { documentId: activeDocument.documentId, expectedRevision: activeDocument.revision };
     // Never open an editor over live structured content we cannot resolve.
     if (!String(originalBlock).trim()) {
       const structured = node.querySelector && node.querySelector("pre, table, .katex, .katex-display, .mermaid-diagram");
@@ -2770,7 +2774,9 @@
       // Unedited session must write the exact opened source — never a lossy
       // htmlToMarkdown reconstruction (footnotes / ref-links / raw HTML).
       const written = commitBlockSource(idx, userEdited ? mdText : original, original, {
+        ...editVersion,
         domText,
+        preserveTrailingSeparators: !!userEdited,
         userEdited: !!userEdited,
         allowEmpty: !!userEdited,
       });
@@ -2855,6 +2861,7 @@
       }
     });
     const { index: idx, original } = resolveBlockSource(node);
+    const editVersion = { documentId: activeDocument.documentId, expectedRevision: activeDocument.revision };
     if (!String(original).trim() && node.querySelector("table")) {
       toast("无法解析该块源文，已保留原文");
       return;
@@ -2911,7 +2918,9 @@
       // Unedited session must write the exact opened source — htmlToMarkdown
       // drops alignment / cell newlines / raw HTML and must not be sole truth.
       const written = commitBlockSource(idx, userEdited ? mdText : original, original, {
+        ...editVersion,
         domText,
+        preserveTrailingSeparators: !!userEdited,
         userEdited: !!userEdited,
         allowEmpty: !!userEdited,
       });
@@ -3011,38 +3020,28 @@
    */
   function extractFenceParts(original) {
     const src = String(original == null ? "" : original);
-    const open = src.match(/^\s*```([\w+-]*)(\r?\n)/);
-    if (!open) return null;
-    const lang = open[1] || "";
-    const eol = open[2] === "\r\n" ? "\r\n" : "\n";
-    const rest = src.slice(open[0].length);
-    const closeRe = /(?:\r?\n)?```(?!\`)/g;
-    let last = null;
-    let m;
-    while ((m = closeRe.exec(rest))) last = m;
-    if (!last) return null;
+    const token = md.parse(src, {}).find(token => token.type === "fence" && token.level === 0 && token.map);
+    if (!token) return null;
+    const lines = src.match(/[^\r\n]*(?:\r\n|\r|\n|$)/g).filter(Boolean);
+    const opening = token.map[0];
+    const closing = token.map[1] - 1;
+    if (closing <= opening || !lines[closing]?.trimStart().startsWith(token.markup)) return null;
     return {
-      lang,
-      eol,
-      body: rest.slice(0, last.index),
-      closeToken: last[0],
-      suffix: rest.slice(last.index + last[0].length),
+      lang: token.info.trim().split(/\s+/)[0],
+      openToken: lines.slice(0, opening + 1).join(""),
+      body: lines.slice(opening + 1, closing).join(""),
+      closeToken: lines[closing],
+      suffix: lines.slice(closing + 1).join(""),
     };
   }
 
   /** Reassemble a fence with a new body; open/close/suffix stay byte-identical. */
   function rebuildFenceFromParts(parts, newBody) {
-    const p = parts || { lang: "", eol: "\n", closeToken: "\n```", suffix: "" };
-    return "```" + p.lang + p.eol + String(newBody == null ? "" : newBody) + (p.closeToken || "\n```") + (p.suffix || "");
-  }
-
-  /** Extract fenced body from a full fence source. */
-  function extractFenceBody(original) {
-    const parts = extractFenceParts(original);
-    if (parts) return parts.body;
-    return String(original == null ? "" : original)
-      .replace(/^\s*```[\w+-]*\r?\n?/, "")
-      .replace(/\r?\n?```\s*$/, "");
+    if (!parts) throw new Error("代码围栏缺少 Markdown 解析范围");
+    const body = new window.StuartCore.TextBuffer(parts.body, activeDocument.buffer.defaultSeparator);
+    body.updateEditor(newBody);
+    if (body.source && !/[\r\n]$/.test(body.source)) body.apply({ from: body.source.length, to: body.source.length, insertedText: body.defaultSeparator });
+    return parts.openToken + body.source + parts.closeToken + parts.suffix;
   }
 
   function enterCodeEdit(node) {
@@ -3063,6 +3062,7 @@
       }
     });
     const { index: idx, original } = resolveBlockSource(node);
+    const editVersion = { documentId: activeDocument.documentId, expectedRevision: activeDocument.revision };
     // Mermaid: source edit preserves the diagram contract
     if (node.querySelector(".mermaid-diagram") || /```\s*mermaid/i.test(original) || /```\s*mermaid/i.test(node._stuartSrc || "")) {
       enterBlockSourceEdit(node);
@@ -3084,16 +3084,14 @@
       enterBlockSourceEdit(node);
       return;
     }
-    const fenceLang = original.match(/^\s*```([\w+-]+)/);
-    const classLang = (codeEl.className || "").match(/language-([\w+-]+)/);
-    const lang = (fenceLang && fenceLang[1]) || (classLang && classLang[1]) || "";
-    // Prefer body from source fence so whitespace is exact
     const fenceParts = extractFenceParts(original);
-    let body = fenceParts ? fenceParts.body : extractFenceBody(original);
-    if (!String(body).trim() && !fenceParts) {
-      // Source is not a well-formed fence — fall back to DOM text only for the editor.
-      body = codeEl.textContent || "";
+    if (!fenceParts) {
+      node.classList.remove("editing", "code-edit");
+      enterBlockSourceEdit(node);
+      return;
     }
+    const lang = fenceParts.lang;
+    const body = fenceParts.body;
 
     const prevScroll = el.previewPane.scrollTop;
     // Keep the reading-mode pre chrome; only swap the body for a matching textarea
@@ -3142,15 +3140,13 @@
       if (!userEdited) {
         // Unedited: always restore the exact opened fence (including trailing blanks).
         next = original;
-      } else if (fenceParts) {
-        // Body-only splice keeps lang, EOL, closing fence and suffix byte-exact.
-        next = rebuildFenceFromParts(fenceParts, ta.value);
       } else {
-        next = rebuildCodeFence(lang, ta.value);
+        next = rebuildFenceFromParts(fenceParts, ta.value);
       }
       // allowEmpty only when the user explicitly edited — empty body then means
       // intentional clear, never an extraction/blur artifact.
       const written = commitBlockSource(idx, next, original, {
+        ...editVersion,
         allowEmpty: !!userEdited,
         userEdited: !!userEdited,
       });
@@ -3200,86 +3196,12 @@
   }
 
   function renderMarkdown(text) {
-    // Prefer block-wise render for Typora-like click editing
-    try {
-      applyBlockEditing();
-      return;
-    } catch (_) {
-      /* fall through */
-    }
-
-    let html = "";
-    try {
-      html = md.render(text || "");
-    } catch (e) {
-      html = `<pre>${escapeHtml(String(e))}</pre>`;
-    }
-    el.preview.innerHTML = sanitizeHtmlStrict(html);
-    // Fallback path replaces the whole preview — drop incremental block cache
-    // or the next applyBlockEditing pass reuses stale nodes.
-    invalidatePreviewBlocks();
-    attachCodeLangBadges(el.preview);
-
-    // KaTeX
-    if (window.renderMathInElement) {
-      try {
-        renderMathInElement(el.preview, {
-          delimiters: [
-            { left: "$$", right: "$$", display: true },
-            { left: "\\[", right: "\\]", display: true },
-            { left: "$", right: "$", display: false },
-            { left: "\\(", right: "\\)", display: false },
-          ],
-          throwOnError: false,
-          ignoredClasses: ["source-pane"],
-        });
-      } catch (_) {}
-    }
-
-    renderMermaid();
-
-    // images: resolve relative paths
-    $$("img", el.preview).forEach((img) => {
-      const src = img.getAttribute("src") || "";
-      if (!src || src.startsWith("http") || src.startsWith("data:") || src.startsWith("file:")) return;
-      if (state.apiReady && state.path && window.pywebview?.api?.resolve_asset) {
-        window.pywebview.api
-          .resolve_asset(state.path, src)
-          .then((uri) => {
-            if (uri) img.src = uri;
-          })
-          .catch(() => {});
-      }
-    });
-
-    // links: open external in system browser via default; prevent in-app nav
-    $$("a", el.preview).forEach((a) => {
-      a.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const href = (a.getAttribute("href") || "").trim();
-        if (!href) return;
-        if (href.startsWith("#")) {
-          const id = decodeURIComponent(href.slice(1));
-          const target =
-            el.preview.querySelector(`[id="${CSS.escape(id)}"]`) ||
-            findHeadingByText(id);
-          if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
-          return;
-        }
-        if (/^https?:\/\//i.test(href) || /^mailto:/i.test(href)) {
-          if (state.apiReady && window.pywebview?.api?.open_url) {
-            window.pywebview.api.open_url(href);
-          }
-        } else {
-          console.warn("[Security] Blocked untrusted external link navigation:", href);
-          toast("已拦截不安全的链接跳转");
-        }
-      });
-    });
-
-    updateOutline();
-    updateStats();
+    if (state.mode === "source") return;
+    const document = activeDocument;
+    const render = document?.beginRender(state.mode, state.theme, 0);
+    // 每个文档版本使用独立的渲染编号。
+    applyBlockEditing();
+    if (document && activeDocument === document && document.confirmRender(render)) lastPreviewSource = document.source;
   }
 
   function findHeadingByText(text) {
@@ -3289,153 +3211,22 @@
     );
   }
 
-  let mermaidReady = null;
-  function ensureMermaid() {
-    if (mermaidReady) return mermaidReady;
-    mermaidReady = (async () => {
-      // mermaid.min.js is deferred — wait briefly instead of caching a hard fail
-      for (let i = 0; i < 20 && !window.mermaid; i++) {
-        await new Promise((r) => setTimeout(r, 50));
-      }
-      if (!window.mermaid) return false;
-      try {
-        window.mermaid.initialize({
-          startOnLoad: false,
-          securityLevel: "strict",
-          theme:
-            state.theme === "dark" || state.theme === "gray"
-              ? "dark"
-              : state.theme === "minion"
-                ? "neutral"
-                : "default",
-          fontFamily: "Segoe UI, PingFang SC, Microsoft YaHei, sans-serif",
-          // Keep htmlLabels so node text (incl. CJK) lives in foreignObject;
-          // sanitizeMermaidSvg keeps that foreignObject alive.
-          htmlLabels: true,
-          themeVariables: {
-            fontSize: "11px",
-            fontFamily: "Segoe UI, PingFang SC, Microsoft YaHei, sans-serif",
-          },
-          flowchart: {
-            htmlLabels: true,
-            // NEVER stretch to container width — that blows up small diagrams.
-            useMaxWidth: false,
-            fontSize: 11,
-            padding: 2,
-            nodeSpacing: 28,
-            rankSpacing: 32,
-            curve: "basis",
-          },
-        });
-        return true;
-      } catch (_) {
-        return false;
-      }
-    })();
-    // Do not cache permanent failure if mermaid simply was not loaded yet
-    return mermaidReady.then((ok) => {
-      if (!ok) mermaidReady = null;
-      return ok;
-    });
-  }
-
+  let pendingMermaid = [];
   function renderMermaid() {
     const nodes = $$("pre.mermaid-src[data-mermaid]", el.preview);
-    if (!nodes.length) return;
-    if (mermaidIdleId) {
-      if (typeof cancelIdleCallback === "function") cancelIdleCallback(mermaidIdleId);
-      else clearTimeout(mermaidIdleId);
-    }
-    // Defer expensive SVG layout off the critical paint path
-    mermaidIdleId = scheduleIdle(() => {
-      mermaidIdleId = null;
-      runMermaidRender(nodes);
+    if (!nodes.length) { pendingMermaid = []; return; }
+    const document = activeDocument;
+    const epoch = document?.renderEpoch;
+    const theme = state.theme;
+    pendingMermaid = nodes.map(node => {
+      const valid = () => node.isConnected && activeDocument === document && document?.renderEpoch === epoch && state.theme === theme;
+      return window.StuartMermaidRenderer.render(node.textContent, theme, valid).then(wrapper => {
+        if (wrapper && valid()) node.replaceWith(wrapper);
+      }).catch(error => {
+        if (valid()) { node.classList.add("mermaid-error"); node.title = error.message; const message = window.document.createElement("div"); message.className = "mermaid-error-message"; message.textContent = "Mermaid 渲染失败：" + error.message; node.before(message); }
+        return error;
+      });
     });
-  }
-
-  function runMermaidRender(nodes) {
-    if (!nodes.length || !document.contains(nodes[0])) return;
-    (async () => {
-      const ok = await ensureMermaid();
-      if (!ok || !window.mermaid) {
-        nodes.forEach((n) => {
-          n.classList.add("mermaid-fallback");
-        });
-        // Deferred lib may arrive late — retry instead of leaving source forever
-        setTimeout(() => {
-          const left = $$("pre.mermaid-src[data-mermaid]", el.preview);
-          if (left.length) renderMermaid();
-        }, 400);
-        return;
-      }
-      let idx = 0;
-      for (const pre of nodes) {
-        const code = pre.textContent || "";
-        const id = `mermaid-${Date.now()}-${idx++}`;
-        const holder = document.createElement("div");
-        holder.className = "mermaid";
-        holder.id = id;
-        holder.style.cssText = "position:absolute;left:-9999px;top:0;visibility:hidden;height:0;overflow:hidden";
-        holder.textContent = code;
-        try {
-          const { svg } = await window.mermaid.render(id + "-svg", code);
-          const wrap = document.createElement("div");
-          wrap.className = "mermaid-diagram";
-          wrap.innerHTML = svg;
-          sanitizeMermaidSvg(wrap);
-          const svgEl = wrap.querySelector("svg");
-          if (svgEl) {
-            // Adaptive figure size: simple diagrams get a comfortable box;
-            // complex ones use more space but stay document-scale (not poster).
-            let w = 0;
-            let h = 0;
-            try {
-              const vb = svgEl.viewBox && svgEl.viewBox.baseVal;
-              if (vb && vb.width > 0 && vb.height > 0) {
-                w = vb.width;
-                h = vb.height;
-              }
-            } catch (_) {}
-            if (!w || !h) {
-              w = Number(svgEl.getAttribute("width")) || 640;
-              h = Number(svgEl.getAttribute("height")) || 480;
-            }
-            const area = w * h;
-            // Size budget grows with content amount.
-            let maxW = 520;
-            let maxH = 300;
-            if (area > 180000 || w > 700 || h > 420) {
-              maxW = 700;
-              maxH = 420;
-            } else if (area > 90000 || w > 520 || h > 320) {
-              maxW = 620;
-              maxH = 360;
-            }
-            let scale = Math.min(maxW / w, maxH / h);
-            // Tiny diagram: grow a bit so labels are not a stamp (never beyond 1.25×).
-            if (scale > 1 && (w < 420 || h < 220)) {
-              scale = Math.min(scale, 1.25);
-            } else if (scale > 1) {
-              scale = 1;
-            }
-            // Don't crush complex diagrams into unreadable type — scroll instead.
-            if (scale < 0.7) scale = 0.7;
-            const dw = Math.round(w * scale);
-            const dh = Math.round(h * scale);
-            svgEl.setAttribute("width", String(dw));
-            svgEl.setAttribute("height", String(dh));
-            svgEl.style.width = dw + "px";
-            svgEl.style.height = dh + "px";
-            svgEl.style.maxWidth = "100%";
-            svgEl.style.maxHeight = maxH + "px";
-          }
-          pre.replaceWith(wrap);
-        } catch (e) {
-          pre.classList.add("mermaid-fallback");
-          pre.setAttribute("title", "Mermaid 渲染失败：" + (e && e.message ? e.message : e));
-        }
-      }
-    })();
   }
 
   function scheduleRender() {
@@ -3447,9 +3238,9 @@
       const len = (el.source.value || "").length;
       const delay = len > 40000 ? 280 : len > 20000 ? 220 : len > 6000 ? 140 : 80;
       scheduleRender._t = setTimeout(() => {
-        const next = el.source.value;
+        const next = activeDocument?.source ?? el.source.value;
         // P0: identical content → skip expensive DOM rebuild
-        if (next === lastPreviewSource) {
+        if (next === lastPreviewSource && activeDocument?.renderRevision === activeDocument?.revision) {
           updateStats();
           return;
         }
@@ -3587,14 +3378,15 @@
   // ---------- Theme ----------
   const THEMES = ["light", "gray", "dark", "sepia", "minion", "wallpaper"];
   function setTheme(theme) {
+    const changed = state.theme !== theme;
     state.theme = theme;
     el.body.dataset.theme = theme;
     const darkish = theme === "dark" || theme === "gray";
     if (el.hlLight) el.hlLight.disabled = darkish;
     if (el.hlDark) el.hlDark.disabled = !darkish;
-    if (mermaidReady) {
-      mermaidReady = null;
-      if (state.mode !== "source") scheduleRender();
+    if (changed && activeDocument && state.mode !== "source") {
+      invalidatePreviewBlocks();
+      renderMarkdown(activeDocument.source);
     }
     if (theme === "wallpaper") applyWallpaperVars(state.wallpaper);
     if (state.apiReady && window.pywebview?.api?.save_settings) {
@@ -3717,6 +3509,18 @@
   function setDocument(payload) {
     // Last line of defense: never swap documents under an open block editor.
     commitActiveEditsForHistory();
+    if (renderTimer) cancelAnimationFrame(renderTimer);
+    clearTimeout(scheduleRender._t);
+    activeDocument = payload?.document || new window.StuartCore.DocumentSession(payload);
+    state._selCache = null;
+    aiUI.lastQuote = "";
+    aiUI.lastMessages = [];
+    window.StuartAIService?.setDocument(activeDocument);
+    window.dispatchEvent(new CustomEvent("stuart-document-changed", { detail: { documentId: activeDocument.documentId } }));
+    lastPreviewSource = null;
+    lastPreviewBlocks = [];
+    _splitCache = { text: null, blocks: null };
+    el.preview.replaceChildren();
     if (window.StuartMDPdf) window.StuartMDPdf.hidePdf();
     const { path, name, content, kind, b64, annotations } = payload || {};
     if (path && !isWelcomeOrSamplePath(path, name)) {
@@ -3741,6 +3545,7 @@
       if (window.StuartMDPdf?.openPdf) {
         window.StuartMDPdf.openPdf({
           path,
+          documentId: activeDocument.documentId,
           name: state.name,
           b64,
           annotations: annotations || [],
@@ -3751,13 +3556,15 @@
       return;
     }
     state.path = path || null;
-    state.name = name || "未命名.md";
-    state.content = content || "";
-    state.dirty = false;
+    state.name = name || activeDocument.title;
+    state.content = activeDocument.source;
+    state.dirty = activeDocument.dirty;
     el.source.value = state.content;
+    el.source.readOnly = activeDocument.accessState !== "Editable";
+    if (activeDocument.accessState === "EncodingConfirmationRequired") window.StuartRecovery.confirmEncoding(payload);
     resetHistory(state.content);
     el.fileTitle.textContent = state.name;
-    el.dirtyDot.hidden = true;
+    el.dirtyDot.hidden = !state.dirty;
     el.welcome.hidden = true;
     el.editorArea.hidden = false;
     const pdfArea = $("#pdf-area");
@@ -3766,24 +3573,54 @@
     updateWindowTitle();
     // applyBlockEditing already fills lastPreviewBlocks / lastPreviewSource
     renderMarkdown(state.content);
-    lastPreviewSource = state.content;
+    if (state.mode !== "source") lastPreviewSource = state.content;
     markActiveTreeItem();
     updatePinUi();
   }
 
   function markDirty() {
-    state.dirty = true;
-    el.dirtyDot.hidden = false;
+    activeDocument?.updateEditor(el.source.value);
+    if (activeDocument) window.StuartAIService?.setDocument(activeDocument);
+    if (activeDocument) state.content = activeDocument.source;
+    state.dirty = !!activeDocument?.dirty;
+    el.dirtyDot.hidden = !state.dirty;
     const tab = state.tabs.find((t) => t.id === state.activeTabId);
     if (tab) {
-      tab.dirty = true;
-      tab.rev = (tab.rev || 0) + 1;
+      tab.dirty = state.dirty;
+      tab.rev = activeDocument.revision;
+      tab.content = activeDocument.source;
     }
     // Patch tab strip only — full renderTabs on every keystroke was costly
     patchTabDirtyUi();
     updateWindowTitle();
     persistSessionSoon();
     scheduleDraftJournal();
+    updateAutosaveStatus();
+  }
+
+  function syncDocumentState(document) {
+    const tab = state.tabs.find(tab => tab.document === document);
+    if (tab) {
+      tab.path = document.path;
+      tab.name = document.title;
+      tab.content = document.source;
+      tab.dirty = document.dirty;
+      tab.rev = document.revision;
+    }
+    if (activeDocument === document) {
+      window.StuartAIService?.setDocument(document);
+      state.path = document.path;
+      state.name = document.title;
+      state.content = document.source;
+      state.dirty = document.dirty;
+      if (el.source.value !== document.buffer.editorText) el.source.value = document.source;
+      el.dirtyDot.hidden = !document.dirty;
+      el.fileTitle.textContent = document.title;
+      el.statusPath.textContent = document.path || "未保存文档";
+      updateWindowTitle();
+      updateAutosaveStatus();
+    }
+    renderTabs();
   }
 
   function patchTabDirtyUi() {
@@ -3811,10 +3648,11 @@
   }
 
   function setContent(text, fromUser) {
-    const prevVal = el.source.value;
+    const prevVal = activeDocument?.source ?? el.source.value;
     const changed = prevVal !== text;
     if (changed) el.source.value = text;
-    if (state.content !== text) state.content = text;
+    if (activeDocument && fromUser) activeDocument.updateEditor(String(text).replace(/\r\n|\r/g, "\n"));
+    state.content = activeDocument?.source ?? text;
     if (fromUser) {
       // Snapshot the pre-change state immediately so undo can restore inserts
       if (changed && _hist.stack.length && _hist.stack[_hist.i] !== prevVal) {
@@ -3822,7 +3660,7 @@
         pushHistory(prevVal);
       }
       if (!_hist.stack.length) resetHistory(prevVal || "");
-      schedulePushHistory(text);
+      schedulePushHistory(activeDocument?.source ?? text);
       markDirty();
       scheduleAutoSave();
     }
@@ -3831,8 +3669,7 @@
     if (changed) emitAgentEvent("document-changed", { fromUser: !!fromUser });
   }
 
-  // ---------- Undo / Redo (Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z / Ctrl+Shift+Y) ----------
-  // Product policy: Ctrl+Shift+Z = undo (same as Ctrl+Z); redo = Ctrl+Y / Ctrl+Shift+Y
+  // Ctrl+Z 撤销，Ctrl+Shift+Z 和 Ctrl+Y 重做。
   const _hist = { stack: [], i: -1, max: 100, maxBytes: 4 * 1024 * 1024 };
   let _histDebounce = 0;
 
@@ -3860,7 +3697,7 @@
 
   function flushHistory() {
     clearTimeout(_histDebounce);
-    pushHistory(el.source.value || "");
+    pushHistory(activeDocument?.source ?? el.source.value ?? "");
   }
 
   function resetHistory(text) {
@@ -3872,13 +3709,9 @@
   /** Commit any in-flight block/source edit so new content enters the undo stack. */
   function commitActiveEditsForHistory() {
     $$(".md-block.editing", el.preview).forEach((n) => {
-      try {
-        if (typeof n._stuartCommit === "function") n._stuartCommit();
-      } catch (_) {}
+      if (typeof n._stuartCommit === "function") n._stuartCommit();
       const ta = n.querySelector("textarea.md-block-source");
-      try {
-        if (ta && typeof ta._stuartCommit === "function") ta._stuartCommit();
-      } catch (_) {}
+      if (ta && typeof ta._stuartCommit === "function") ta._stuartCommit();
     });
   }
 
@@ -3890,11 +3723,11 @@
     const activeBlock = el.preview?.querySelector(".md-block.editing, [contenteditable='true']");
     if (activeBlock) {
       if (typeof activeBlock._stuartCommit === "function") {
-        try { activeBlock._stuartCommit(); } catch (_) {}
+        activeBlock._stuartCommit();
       }
       const ta = activeBlock.querySelector("textarea.md-block-source");
       if (ta && typeof ta._stuartCommit === "function") {
-        try { ta._stuartCommit(); } catch (_) {}
+        ta._stuartCommit();
       }
     }
   }
@@ -3903,6 +3736,7 @@
     clearTimeout(_histDebounce);
     el.source.value = text;
     state.content = text;
+    activeDocument?.updateSource(text);
     // Force a clean preview rebuild (avoid incremental skip on insert undo)
     lastPreviewSource = "";
     lastPreviewBlocks = [];
@@ -3942,68 +3776,67 @@
   }
 
   // ---------- Auto-save ----------
+  async function saveCapturedDocument(document, snapshot, targetPath, targetRevision) {
+    if (snapshot.documentId !== document.documentId || snapshot.revision > document.revision) throw new Error("保存快照与实际文档身份或编辑版本不一致");
+    if (document.kind !== "markdown") throw new Error("当前保存入口仅接受 Markdown 文档");
+    if (document.journalRevision < snapshot.revision) await queueDraftSnapshot(document, snapshot);
+    await pendingJournals.get(document.documentId);
+    return enqueueWrite(`document:${document.documentId}`, () => enqueueWrite(targetPath, async () => {
+      const sourceEdits = window.StuartCore.editsBetween(document.persistedSource, snapshot.source);
+      const result = await window.pywebview.api.save_document({
+        operationId: crypto.randomUUID(), documentId: snapshot.documentId,
+        editorRevision: snapshot.revision, targetPath,
+        expectedDiskRevision: targetRevision || document.diskRevision,
+        payload: { type: "TextEdits", encoding: snapshot.encoding, bom: snapshot.bom, sourceEdits },
+      });
+      document.confirmSave(result, snapshot.source);
+      if (result.result === "Conflict") {
+        clearTimeout(autosaveTimers.get(document.documentId));
+        autosaveTimers.delete(document.documentId);
+        await window.StuartRecovery.showConflict(document, result, snapshot);
+      } else {
+        document.path = targetPath;
+        document.title = targetPath.split(/[\\/]/).pop();
+        syncDocumentState(document);
+        if (result.maintenanceError) throw new Error(result.maintenanceError);
+      }
+      return result;
+    }));
+  }
+
   const AUTOSAVE_MS = 1500;
-  let autosaveTimer = null;
+  const autosaveTimers = new Map();
 
   /** Per-path write queue — prevents autosave vs manual save reordering. */
   function enqueueWrite(path, fn) {
     const coord = globalThis.StuartCore?.writeCoord;
-    if (coord && typeof coord.enqueue === "function") {
-      return coord.enqueue(path, fn);
-    }
-    const key = String(path || "");
-    const prev = (enqueueWrite._q && enqueueWrite._q.get(key)) || Promise.resolve();
-    const next = prev.then(() => fn()).catch((e) => {
-      console.warn("[write]", key, e);
-      return { error: String(e && e.message ? e.message : e) };
-    });
-    if (!enqueueWrite._q) enqueueWrite._q = new Map();
-    enqueueWrite._q.set(key, next);
-    next.finally(() => {
-      if (enqueueWrite._q.get(key) === next) enqueueWrite._q.delete(key);
-    });
-    return next;
+    if (!coord || typeof coord.enqueue !== "function") throw new Error("文档写入协调服务尚未加载");
+    return coord.enqueue(path, fn);
   }
 
   function scheduleAutoSave() {
-    if (!state.autosaveEnabled) return;
-    clearTimeout(autosaveTimer);
-    autosaveTimer = setTimeout(doAutoSave, AUTOSAVE_MS);
+    if (!state.autosaveEnabled || !activeDocument?.path || activeDocument.conflict || activeDocument.kind !== "markdown") return;
+    const document = activeDocument;
+    const snapshot = document.snapshot();
+    clearTimeout(autosaveTimers.get(document.documentId));
+    autosaveTimers.set(document.documentId, setTimeout(() => {
+      autosaveTimers.delete(document.documentId);
+      doAutoSave(document, snapshot);
+    }, AUTOSAVE_MS));
   }
 
-  async function doAutoSave() {
-    if (!state.autosaveEnabled || !state.path || !state.dirty) return;
-    if (String(state.path).toLowerCase().endsWith(".pdf")) return;
-    if (!state.apiReady || !window.pywebview?.api?.write_file) return;
+  async function doAutoSave(document, snapshot) {
+    if (!document || document.conflict || !document.path || !document.dirty) return;
+    if (!state.autosaveEnabled || !state.apiReady) return;
+    if (snapshot.revision < document.persistedRevision || snapshot.path !== document.path) return;
     try {
-      const path = state.path;
-      const tabId = state.activeTabId;
-      const content = el.source.value;
-      const tab = state.tabs.find((t) => t.id === tabId);
-      const saveRev = tab ? tab.rev || 0 : 0;
-      const res = await enqueueWrite(path, () => window.pywebview.api.write_file(path, content));
-      if (res?.error) {
-        toast("自动保存失败：" + res.error);
-        return;
-      }
-      // Stale write: user switched document/tab while IO was in flight
-      if (state.path !== path) return;
-      if (el.source.value !== content) {
-        // newer typing landed during IO — keep dirty
-        return;
-      }
-      state.content = content;
+      const res = await saveCapturedDocument(document, snapshot, snapshot.path);
+      if (res.result === "Conflict") return;
       state.lastAutosaveAt = Date.now();
-      if (!tab || tab.rev === saveRev) {
-        state.dirty = false;
-        el.dirtyDot.hidden = true;
-        if (tab) tab.dirty = false;
-        updateWindowTitle();
-      }
-      updateAutosaveStatus();
-      emitAgentEvent("document-saved", { path });
+      emitAgentEvent("document-saved", { documentId: document.documentId, path: document.path, savedEditorRevision: res.savedEditorRevision });
     } catch (e) {
-      toast("自动保存失败");
+      toast("自动保存失败：" + (e.message || String(e)));
+      throw e;
     }
   }
 
@@ -4011,20 +3844,25 @@
     const el2 = $("#status-autosave");
     if (!el2) return;
     if (!state.autosaveEnabled) {
-      el2.textContent = "自动保存：关";
+      el2.textContent = "自动保存：关闭";
       el2.title = "可在设置中开启自动保存";
       return;
     }
     if (!state.path) {
-      el2.textContent = "自动保存：待另存为";
-      el2.title = "尚未保存到磁盘，自动保存需要先 Ctrl+Shift+S 另存为";
+      el2.textContent = activeDocument?.journalRevision >= activeDocument?.revision ? "草稿已保存 · 原文件待另存为" : "草稿等待保存 · 原文件待另存为";
+      el2.title = "使用 Ctrl+Shift+S 选择原文件保存位置";
+      return;
+    }
+    if (activeDocument?.conflict) {
+      el2.textContent = "保存冲突 · 自动保存已暂停";
+      el2.title = "请检查基础正文、本地正文和实际磁盘正文";
       return;
     }
     if (state.dirty) {
-      el2.textContent = "自动保存：待写入";
-      el2.title = "有未保存修改，约 1.5 秒后自动写入";
+      el2.textContent = activeDocument?.journalRevision >= activeDocument?.revision ? "草稿已保存 · 原文件待保存" : "草稿等待保存 · 原文件待保存";
+      el2.title = "草稿确认版本 " + activeDocument.journalRevision + "，当前编辑版本 " + activeDocument.revision;
     } else {
-      el2.textContent = "自动保存：开";
+      el2.textContent = "原文件已保存";
       el2.title = `已保存到 ${state.path}`;
     }
   }
@@ -4069,7 +3907,8 @@
     const tab = state.tabs.find((t) => t.id === state.activeTabId);
     if (!tab || tab.kind === "pdf") return;
     flushHistory();
-    tab.content = el.source.value;
+    tab.content = activeDocument?.source ?? el.source.value;
+    tab.document = activeDocument;
     tab.dirty = state.dirty;
     tab.path = state.path;
     tab.name = state.name;
@@ -4134,7 +3973,22 @@
     }
   }
 
+  let pendingDocumentTransition = Promise.resolve();
+  function transitionDocument(operation) {
+    const transition = async () => {
+      await flushCurrentDocument();
+      return operation();
+    };
+    const next = pendingDocumentTransition.then(transition, transition);
+    pendingDocumentTransition = next;
+    return next;
+  }
+
   function activateTab(id) {
+    return transitionDocument(() => activateTabNow(id));
+  }
+
+  function activateTabNow(id) {
     if (state.activeTabId === id) {
       renderTabs();
       updatePinUi();
@@ -4152,6 +4006,7 @@
       kind: tab.kind,
       b64: tab.b64,
       annotations: tab.annotations,
+      document: tab.document,
     });
     if (tab.history && tab.history.stack && tab.history.stack.length > 0) {
       clearTimeout(_histDebounce);
@@ -4166,39 +4021,63 @@
     updatePinUi();
   }
 
-  async function addOrFocusTab(payload) {
+  function addOrFocusTab(payload) {
+    return transitionDocument(() => addOrFocusTabNow(payload));
+  }
+
+  async function addOrFocusTabNow(payload) {
     saveActiveTabFromEditor();
+    if (!payload.documentId && !payload.document && state.apiReady) {
+      const registered = payload.path ? await window.pywebview.api.document_read(payload.path) : await window.pywebview.api.document_new();
+      payload = { ...registered, ...payload, documentId: registered.documentId, diskRevision: registered.diskRevision, encoding: registered.encoding, bom: registered.bom };
+    }
     const path = payload.path || null;
-    if (path) {
+    const sameDocument = state.tabs.find(tab => tab.document.documentId === (payload.document?.documentId || payload.documentId));
+    if (sameDocument) {
+      activateTabNow(sameDocument.id);
+      return sameDocument.id;
+    }
+    if (path && !payload.restored) {
       const exist = state.tabs.find((t) => t.path === path);
       if (exist) {
-        activateTab(exist.id);
+        if (payload.documentId && payload.documentId !== exist.document.documentId) await window.pywebview.api.document_release(payload.documentId);
+        activateTabNow(exist.id);
         return exist.id;
       }
     }
     const id = state.tabSeq++;
+    const document = payload.document || new window.StuartCore.DocumentSession(payload);
+    if (!path && payload.source === "" && payload.content) {
+      document.updateSource(payload.content);
+      await queueDraftSnapshot(document, document.snapshot());
+    }
     const tab = {
       id,
       path,
-      name: payload.name || "未命名.md",
-      content: payload.content || "",
-      dirty: false,
+      name: document.title,
+      content: document.source,
+      dirty: document.dirty,
       kind: payload.kind || "markdown",
       b64: payload.b64,
       annotations: payload.annotations || [],
       pinned: !!payload.pinned,
-      rev: 0,
-      history: { stack: [payload.content || ""], i: 0 },
+      rev: document.revision,
+      history: { stack: [document.source], i: 0 },
+      document,
     };
     state.tabs.push(tab);
     state.activeTabId = id;
-    setDocument(payload);
+    setDocument({ ...payload, document: tab.document });
     renderTabs();
     updatePinUi();
     return id;
   }
 
-  async function closeTab(id, opts = {}) {
+  function closeTab(id, opts = {}) {
+    return transitionDocument(() => closeTabNow(id, opts));
+  }
+
+  async function closeTabNow(id, opts = {}) {
     const idx = state.tabs.findIndex((t) => t.id === id);
     if (idx < 0) return;
     const tab = state.tabs[idx];
@@ -4206,6 +4085,9 @@
       const ok = confirm(`「${tabTitleFor(tab)}」有未保存修改，确定关闭？`);
       if (!ok) return;
     }
+    await window.StuartAIService.releaseDocument(tab.document.documentId);
+    await window.StuartMDPdf.releaseDocument(tab.document.documentId);
+    await window.pywebview.api.document_release(tab.document.documentId);
     // Closing the welcome/sample marks it dismissed → next cold start shows home
     if (tab.welcome || isWelcomeOrSamplePath(tab.path, tab.name) || tab.name === "欢迎使用 StuartMD.md") {
       state.sampleDismissed = true;
@@ -4222,6 +4104,7 @@
           kind: next.kind,
           b64: next.b64,
           annotations: next.annotations,
+          document: next.document,
         });
         if (next.history && next.history.stack && next.history.stack.length > 0) {
           clearTimeout(_histDebounce);
@@ -4234,6 +4117,8 @@
         el.dirtyDot.hidden = !next.dirty;
       } else {
         state.activeTabId = null;
+        activeDocument = null;
+        state._selCache = null;
         state.path = null;
         state.name = "未命名.md";
         state.content = "";
@@ -4264,7 +4149,7 @@
       const p = t.path || null;
       if (!p || seen.has(p)) return;
       seen.add(p);
-      tabs.push(p);
+      tabs.push({ path: p, documentId: t.document.documentId, pinned: !!t.pinned });
     });
     window.pywebview.api
       .save_settings({
@@ -4272,7 +4157,7 @@
           tabs,
           active_path: state.path || "",
         },
-        last_open_files: tabs,
+        last_open_files: tabs.map(tab => tab.path),
         last_folder: state.folder || "",
         sample_dismissed: !!state.sampleDismissed,
       })
@@ -4303,7 +4188,7 @@
       if (welcome && !welcome.error) {
         state.isSampleDoc = true;
         state.sampleDismissed = false;
-        setDocument(welcome);
+        await addOrFocusTab(welcome);
         hideBootSplash();
         persistSession();
         return true;
@@ -4316,12 +4201,11 @@
   }
 
   async function restoreSessionTabs(session) {
-    const paths = (session && Array.isArray(session.tabs) ? session.tabs : []).filter(
-      (p) => p && typeof p === "string"
-    );
-    if (!paths.length) return false;
+    const entries = (session && Array.isArray(session.tabs) ? session.tabs : []).map(entry => typeof entry === "string" ? { path: entry } : entry).filter(entry => typeof entry?.path === "string" && entry.path);
+    if (!entries.length) return false;
     let restored = 0;
-    for (const p of paths) {
+    for (const entry of entries) {
+      const p = entry.path;
       try {
         if (window.pywebview.api.file_exists) {
           const ex = await window.pywebview.api.file_exists(p);
@@ -4330,16 +4214,16 @@
         const res = await window.pywebview.api.open_path(p);
         if (!res || res.error || res.kind === "folder") continue;
         if (res.b64 || res.content != null) {
-          await addOrFocusTab(res);
+          await addOrFocusTab({ ...res, pinned: !!entry.pinned });
           restored++;
         }
-      } catch (_) {}
+      } catch (error) { toast("恢复已打开文档失败：" + (error.message || String(error))); throw error; }
     }
     if (!restored) return false;
     const activePath = (session && session.active_path) || "";
     if (activePath) {
       const tab = state.tabs.find((t) => t.path === activePath);
-      if (tab) activateTab(tab.id);
+      if (tab) await activateTab(tab.id);
     }
     hideBootSplash();
     persistSession();
@@ -4501,8 +4385,8 @@
   }
 
   function setWorkspaceFromPath(path) {
-    const root = parentDir(path);
-    if (root) state.workspaceRoot = root;
+    if (state.folder && pathEqualsOrUnder(path, state.folder)) state.workspaceRoot = state.folder;
+    else if (!state.workspaceRoot || !pathEqualsOrUnder(path, state.workspaceRoot)) state.workspaceRoot = "";
   }
 
   /**
@@ -4526,7 +4410,7 @@
         if (!state.apiReady) return;
         const seq = beginOpen();
         payload = await window.pywebview.api.read_file(payload);
-        if (isStale(seq)) return;
+        if (isStale(seq)) { if (payload?.documentId) await window.pywebview.api.document_release(payload.documentId); return; }
         if (payload?.error) {
           toast(payload.error);
           return;
@@ -4551,7 +4435,7 @@
       if (!state.apiReady) return;
       const seq = beginOpen();
       payload = await window.pywebview.api.read_file(payload);
-      if (isStale(seq)) return;
+      if (isStale(seq)) { if (payload?.documentId) await window.pywebview.api.document_release(payload.documentId); return; }
     }
     if (payload?.error) {
       toast(payload.error);
@@ -4573,11 +4457,16 @@
 
     // Outside workspace with real docs open → new window
     await openInNewWindow(path);
+    if (payload.documentId) await window.pywebview.api.document_release(payload.documentId);
     await refreshRecents();
   }
 
   /** Sidebar open: replace unpinned current tab; add tab if current is pinned. */
-  async function openFromSidebar(payload) {
+  function openFromSidebar(payload) {
+    return transitionDocument(() => openFromSidebarNow(payload));
+  }
+
+  async function openFromSidebarNow(payload) {
     if (!payload || payload.error) {
       if (payload?.error) toast(payload.error);
       return;
@@ -4587,7 +4476,8 @@
     if (path) {
       const exist = state.tabs.find((t) => t.path === path);
       if (exist) {
-        activateTab(exist.id);
+        if (payload.documentId && payload.documentId !== exist.document.documentId) await window.pywebview.api.document_release(payload.documentId);
+        activateTabNow(exist.id);
         renderTabs();
         updatePinUi();
         return exist.id;
@@ -4602,8 +4492,14 @@
       saveActiveTabFromEditor();
       if (active.dirty) {
         const ok = confirm(`「${tabTitleFor(active)}」有未保存修改，用新文件替换？`);
-        if (!ok) return;
+        if (!ok) { if (payload.documentId) await window.pywebview.api.document_release(payload.documentId); return; }
       }
+      await window.StuartAIService.releaseDocument(active.document.documentId);
+      await window.StuartMDPdf.releaseDocument(active.document.documentId);
+      await window.pywebview.api.document_release(active.document.documentId);
+      active.document = payload.document || new window.StuartCore.DocumentSession(payload);
+      active.rev = active.document.revision;
+      active.history = { stack: [active.document.source], i: 0 };
       active.path = path;
       active.name = payload.name || "未命名.md";
       active.content = payload.content || "";
@@ -4613,13 +4509,13 @@
       active.dirty = false;
       active.pinned = false;
       state.activeTabId = active.id;
-      setDocument(payload);
+      setDocument({ ...payload, document: active.document });
       renderTabs();
       updatePinUi();
       return active.id;
     }
 
-    const id = await addOrFocusTab(payload);
+    const id = await addOrFocusTabNow(payload);
     updatePinUi();
     return id;
   }
@@ -4706,44 +4602,13 @@
   async function saveFile() {
     if (!state.apiReady) return;
     commitActiveBlockEdits();
-
-    const targetTabId = state.activeTabId;
-    const tab = state.tabs.find((t) => t.id === targetTabId);
-    const targetPath = tab?.path || state.path;
-    const contentToSave = el.source.value;
-    const saveRev = tab ? (tab.rev || 0) : 0;
-
-    if (targetPath) {
-      const res = await enqueueWrite(targetPath, () =>
-        window.pywebview.api.write_file(targetPath, contentToSave)
-      );
-      if (res?.error) {
-        toast("保存失败: " + res.error);
-        return;
-      }
-
-      if (tab) {
-        tab.path = targetPath;
-        if (tab.rev === saveRev) {
-          tab.content = contentToSave;
-          tab.dirty = false;
-        } else {
-          console.log("[StateGuard] 保存期间检测到新打字输入，保留 tab.dirty 标志以防数据丢失");
-        }
-      }
-
-      if (state.activeTabId === targetTabId) {
-        if (tab && tab.dirty === false) {
-          state.dirty = false;
-          el.dirtyDot.hidden = true;
-        }
-        state.content = tab ? tab.content : contentToSave;
-        updateWindowTitle();
-      }
-
-      updateAutosaveStatus();
-      renderTabs();
-      toast("已保存");
+    if (!activeDocument || activeDocument.kind !== "markdown") throw new Error("请在 Markdown 文档中执行保存");
+    const document = activeDocument;
+    const snapshot = document.snapshot();
+    if (snapshot.path) {
+      const res = await saveCapturedDocument(document, snapshot, snapshot.path);
+      if (res.result === "Conflict") return;
+      toast(document.dirty ? "捕获版本已保存，当前正文继续保持待保存状态" : "原文件已保存");
     } else {
       await saveFileAs();
     }
@@ -4752,45 +4617,16 @@
   async function saveFileAs() {
     if (!state.apiReady) return;
     commitActiveBlockEdits();
-
-    const targetTabId = state.activeTabId;
-    const tab = state.tabs.find((t) => t.id === targetTabId);
-    const content = el.source.value;
-    const saveRev = tab ? tab.rev || 0 : 0;
-    const defaultName = tab?.name || state.name || "未命名.md";
-
-    const res = await window.pywebview.api.save_file_dialog(content, defaultName);
-    if (!res || res.error) {
-      if (res?.error) toast(res.error);
-      return;
-    }
-
-    const newName = res.path.split(/[\\/]/).pop();
-    // User may have typed while the dialog was open
-    const stillMatches = !tab || tab.rev === saveRev;
-    const finalContent = stillMatches ? content : el.source.value;
-
-    if (tab) {
-      tab.path = res.path;
-      tab.name = newName;
-      tab.content = finalContent;
-      tab.dirty = !stillMatches;
-    }
-
-    if (state.activeTabId === targetTabId) {
-      state.path = res.path;
-      state.name = newName;
-      state.content = finalContent;
-      state.dirty = !stillMatches;
-      el.dirtyDot.hidden = stillMatches;
-      el.fileTitle.textContent = state.name;
-      el.statusPath.textContent = res.path;
-      updateWindowTitle();
-    }
-
-    renderTabs();
-    toast(stillMatches ? "已保存为: " + newName : "已保存为: " + newName + "（对话框期间有新输入，仍标记为未保存）");
-    updateAutosaveStatus();
+    if (!activeDocument || activeDocument.kind !== "markdown") throw new Error("请在 Markdown 文档中执行另存为");
+    const document = activeDocument;
+    const snapshot = document.snapshot();
+    const targetPath = await window.pywebview.api.choose_save_path(document.title);
+    if (!targetPath) return;
+    const targetRevision = await window.pywebview.api.document_target_revision(targetPath);
+    if (targetRevision.exists && targetPath !== document.path && !confirm("目标文件已经存在，确认保存当前正文覆盖该文件？")) return;
+    const res = await saveCapturedDocument(document, snapshot, targetPath, targetRevision);
+    if (res.result === "Conflict") return;
+    toast(document.dirty ? "捕获版本已另存为，当前正文继续保持待保存状态" : "已保存为：" + document.title);
     await refreshRecents();
     if (state.folder) await loadFolder(state.folder);
   }
@@ -4864,6 +4700,7 @@
     }
     state.folder = res.path;
     state.workspaceRoot = res.path;
+    await window.pywebview.api.rag_set_workspace(res.path);
     el.folderName.textContent = res.name || res.path;
     el.folderName.title = res.path;
     renderTree(res.items || [], el.fileTree, 0);
@@ -5067,19 +4904,35 @@ ${previewHtml}
 
   async function exportHtml() {
     if (!state.apiReady) return;
+    commitActiveBlockEdits();
+    const captured = activeDocument;
+    const snapshot = captured.snapshot();
+    if (state.mode === "source") setMode("preview");
+    renderMarkdown(snapshot.source);
+    const rendered = await Promise.all(pendingMermaid);
+    const failed = rendered.find(result => result instanceof Error);
+    if (failed) throw failed;
+    if (activeDocument !== captured || captured.revision !== snapshot.revision) throw new Error("导出准备期间文档已经变化");
     const html = buildExportHtml();
     const base = (state.name || "export").replace(/\.(md|markdown|txt)$/i, "") + ".html";
-    const res = await window.pywebview.api.export_html(html, base);
-    if (!res) return;
-    if (res.error) toast(res.error);
-    else toast(`已导出：${res.path}`);
+    const targetPath = await window.pywebview.api.choose_save_path(base);
+    if (!targetPath) return;
+    const expectedDiskRevision = await window.pywebview.api.document_target_revision(targetPath, snapshot.documentId);
+    const res = await window.pywebview.api.export_html({ operationId: crypto.randomUUID(), documentId: snapshot.documentId, editorRevision: snapshot.revision, targetPath, expectedDiskRevision, payload: { type: "HtmlExport", html } });
+    if (res.result === "Conflict") { await window.StuartRecovery.showExportConflict(res); return; }
+    if (res.result !== "Saved") throw new Error("HTML 导出没有完成保存");
+    toast(`已导出：${targetPath}`);
   }
 
-  function printPreview() {
+  async function printPreview() {
+    commitActiveBlockEdits();
+    saveActiveTabFromEditor();
+    const captured = activeDocument.snapshot();
     if (state.mode === "source") setMode("preview");
-    // ensure preview is fresh
-    renderMarkdown(el.source.value);
-    // open a print-friendly window
+    renderMarkdown(captured.source);
+    const rendered = await Promise.all(pendingMermaid);
+    if (rendered.some(result => result?.error)) throw new Error("图表渲染失败，打印没有开始");
+    if (activeDocument.documentId !== captured.documentId || activeDocument.revision !== captured.revision) throw new Error("准备打印期间文档已经变化");
     const html = buildExportHtml();
     const w = window.open("", "_blank", "width=900,height=700");
     if (!w) {
@@ -6963,30 +6816,23 @@ ${previewHtml}
 
   function setupWindowLifecycle() {
     const tauri = window.__TAURI__;
+    let closingWindow = false;
     if (tauri?.event?.listen) {
       tauri.event.listen("stuart-window-close-requested", async () => {
-        commitActiveBlockEdits();
-        saveActiveTabFromEditor();
-        const dirtyTabs = state.tabs.filter((t) => t.dirty);
-        if (dirtyTabs.length === 0) {
-          try {
-            await tauri.core.invoke("stuart_exit_app");
-          } catch (e) {
-            console.error("stuart_exit_app invoke error:", e);
-            window.close();
+        if (closingWindow) return;
+        closingWindow = true;
+        try {
+          await flushCurrentDocument();
+          const dirtyTabs = state.tabs.filter(tab => tab.dirty);
+          if (dirtyTabs.length) {
+            const names = dirtyTabs.map(tab => `「${tabTitleFor(tab)}」`).join("、");
+            const confirmed = await window.StuartUIConfirm(`以下文档包含未保存的修改：\n${names}\n\n草稿已经保存。确定关闭当前窗口吗？`);
+            if (!confirmed) return;
           }
-          return;
-        }
-
-        const names = dirtyTabs.map((t) => `「${tabTitleFor(t)}」`).join("、");
-        const ok = confirm(`以下文档包含未保存的修改：\n${names}\n\n确定放弃修改并关闭应用吗？`);
-        if (ok) {
-          try {
-            await tauri.core.invoke("stuart_exit_app");
-          } catch (e) {
-            window.close();
-          }
-        }
+          await window.StuartAIService.cancel();
+          await tauri.core.invoke("stuart_close_window");
+        } catch (error) { toast("关闭窗口失败：" + (error.message || String(error))); }
+        finally { closingWindow = false; }
       });
     }
   }
@@ -7386,6 +7232,7 @@ ${previewHtml}
         const info = await window.pywebview.api.get_app_info();
         state.appInfo = info;
         state.sampleDismissed = !!(s && s.sample_dismissed);
+        await window.StuartRecovery.showRecovery();
 
         // Restore window geometry / fullscreen from last session
         try {
@@ -7483,6 +7330,9 @@ ${previewHtml}
   function getDocumentHost() {
     return {
       kind: state.path && String(state.path).toLowerCase().endsWith(".pdf") ? "pdf" : "markdown",
+      documentId: activeDocument?.documentId,
+      revision: activeDocument?.revision,
+      diskRevision: activeDocument?.diskRevision,
       path: state.path,
       name: state.name,
       mode: state.mode,
@@ -7491,7 +7341,7 @@ ${previewHtml}
       content:
         state.path && String(state.path).toLowerCase().endsWith(".pdf")
           ? ""
-          : el.source.value || "",
+          : activeDocument?.source ?? el.source.value ?? "",
       stats: getStatsHost(),
     };
   }
@@ -7570,6 +7420,7 @@ ${previewHtml}
             inPreview: false,
             inPdf: true,
             page: ps.page,
+            pdfRects: ps.pdfRects || [],
             start: null,
             end: null,
             blockIndex: null,
@@ -7582,6 +7433,7 @@ ${previewHtml}
             inPreview: false,
             inPdf: true,
             page: cachePdf.page || null,
+            pdfRects: cachePdf.pdfRects || [],
             start: null,
             end: null,
             blockIndex: null,
@@ -7603,7 +7455,7 @@ ${previewHtml}
             el.preview.contains(sel.focusNode) ||
             !!(sel.anchorNode && sel.anchorNode.parentElement && el.preview.contains(sel.anchorNode.parentElement));
           const srcOk = ta && (ta === document.activeElement || ta.contains(sel.anchorNode));
-          if (anchorOk || srcOk || raw.trim().length > 0) {
+          if (anchorOk || srcOk) {
             text = raw;
             inPreview = !!(el.preview && (el.preview.contains(sel.anchorNode) || el.preview.contains(sel.focusNode)));
           }
@@ -7630,8 +7482,8 @@ ${previewHtml}
     return {
       text,
       inPreview,
-      start: ta ? ta.selectionStart : null,
-      end: ta ? ta.selectionEnd : null,
+      start: inPreview ? null : cache?.text === text ? cache.start ?? ta?.selectionStart ?? null : ta?.selectionStart ?? null,
+      end: inPreview ? null : cache?.text === text ? cache.end ?? ta?.selectionEnd ?? null : ta?.selectionEnd ?? null,
       blockIndex,
       fromCache: !!(cache && !String(sel && !sel.isCollapsed ? sel.toString() : "").trim() && cache.text === text),
     };
@@ -7699,30 +7551,101 @@ ${previewHtml}
     configurable: true,
   });
 
-  window.openFileByPath = async (filePath) => {
-    if (!window.pywebview?.api?.open_path) return;
-    try {
-      const res = await window.pywebview.api.open_path(filePath);
-      if (res && !res.error) {
-        if (state.openMode === "current_window" || state.tabs.length) {
-          await addOrFocusTab(res);
-        } else {
-          setDocument(res);
-        }
-      }
-    } catch (e) {
-      console.error("[openFileByPath] Error opening:", filePath, e);
-    }
+  window.openFileByPath = async filePath => {
+    const record = await window.pywebview.api.open_path(filePath);
+    if (record.error) throw new Error(record.error);
+    if (record.kind === "folder") throw new Error("打开文件需要实际文件路径");
+    await addOrFocusTab(record);
+    return getDocumentHost();
   };
+
+  async function openKnowledgeSource(hit) {
+    if (!hit?.workspaceRoot || !hit.relPath || !hit.sourceHash) throw new Error("检索来源缺少文件路径或指纹");
+    const path = hit.workspaceRoot.replace(/[\\/]+$/, "") + "/" + hit.relPath;
+    await window.openFileByPath(path);
+    const current = getDocumentHost();
+    if (current.diskRevision.rawByteSha256 !== hit.sourceHash) throw new Error("来源文件已经变化，请重新检索");
+    if (current.dirty) throw new Error("当前文档包含未保存修改，请保存后重新检索来源");
+    if (hit.pageNumber) { await window.StuartMDPdf.openAnchor(hit); return; }
+    if (!Number.isInteger(hit.startLine) || !Number.isInteger(hit.endLine) || hit.startLine < 1 || hit.endLine < hit.startLine) throw new Error("Markdown 来源行号无效");
+    setMode("source");
+    const lines = el.source.value.split("\n");
+    if (hit.endLine > lines.length) throw new Error("检索来源行号超出当前文件");
+    const from = lines.slice(0, hit.startLine - 1).reduce((offset,line) => offset + line.length + 1, 0);
+    const to = lines.slice(0, hit.endLine).reduce((offset,line) => offset + line.length + 1, 0) - 1;
+    el.source.focus(); el.source.setSelectionRange(from, to);
+    const lineHeight = parseFloat(getComputedStyle(el.source).lineHeight);
+    el.source.scrollTop = Math.max(0, (hit.startLine - 2) * lineHeight);
+    captureSelectionCache();
+  }
 
   // expose for debugging + AI/plugins
   window.StuartMD = {
     state,
+    flushDraftJournal,
+    restoreDocument: record => addOrFocusTab({ ...record, content: record.source, diskRevision: record.baseDiskRevision, document: new window.StuartCore.DocumentSession({ ...record, diskRevision: record.baseDiskRevision }) }),
+    openDocumentRecord: record => addOrFocusTab(record),
+    setWorkspaceRoot: async root => {
+      if (root) await loadFolder(root);
+      else {
+        state.folder = ""; state.workspaceRoot = "";
+        await window.pywebview.api.rag_set_workspace(null);
+        el.folderName.textContent = "最近 / 欢迎";
+        el.fileTree.replaceChildren();
+        await refreshRecents();
+        persistSession();
+      }
+    },
+    openKnowledgeSource,
+    saveDocumentSnapshot: (document, snapshot, targetPath, expectedDiskRevision) => saveCapturedDocument(document, snapshot, targetPath, expectedDiskRevision),
+    saveDocumentCopy: async document => {
+      const target = await window.pywebview.api.choose_save_path(document.title);
+      if (!target) return;
+      const revision = await window.pywebview.api.document_target_revision(target);
+      if (revision.exists) throw new Error("副本必须保存到新文件");
+      return saveCapturedDocument(document, document.snapshot(), target, revision);
+    },
+    reloadDocument: document => transitionDocument(async () => {
+      const record = await window.pywebview.api.document_read(document.path);
+      const tab = state.tabs.find(tab => tab.document === document);
+      if (!tab) {
+        await window.pywebview.api.document_release(record.documentId);
+        throw new Error("重新读取的文档已经关闭");
+      }
+      const wasActive = activeDocument === document;
+      await window.StuartAIService.releaseDocument(document.documentId);
+      await window.StuartMDPdf.releaseDocument(document.documentId);
+      await window.pywebview.api.document_release(document.documentId);
+      tab.document = new window.StuartCore.DocumentSession(record);
+      tab.content = record.content;
+      tab.dirty = false;
+      tab.rev = tab.document.revision;
+      tab.history = { stack: [tab.document.source], i: 0 };
+      tab.kind = record.kind;
+      tab.b64 = record.b64;
+      tab.annotations = record.annotations || [];
+      if (wasActive) setDocument({ ...record, document: tab.document });
+    }),
+    confirmDocumentEncoding: async (documentId, encoding) => {
+      const record = await window.pywebview.api.document_confirm_encoding(documentId, encoding);
+      const tab = state.tabs.find(tab => tab.document?.documentId === documentId);
+      if (tab) tab.document = new window.StuartCore.DocumentSession(record);
+      setDocument({ ...record, document: tab?.document });
+    },
     setMode,
     setTheme,
     openFile,
     toast,
     getDocument: getDocumentHost,
+    confirmPdfSave: (documentId, result) => {
+      const session = state.tabs.find(tab => tab.document?.documentId === documentId)?.document || (activeDocument?.documentId === documentId ? activeDocument : null);
+      if (!session || result.documentId !== documentId || result.result !== "Saved") throw new Error("PDF保存结果与文档身份不一致");
+      session.diskRevision = result.diskRevision;
+      if (activeDocument === session) {
+        state._selCache = null;
+        window.StuartAIService?.setDocument(session);
+      }
+    },
     setDocumentText: setDocumentHost,
     getStats: getStatsHost,
     getOutline: getOutlineHost,

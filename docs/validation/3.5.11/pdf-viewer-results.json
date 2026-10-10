@@ -1,0 +1,298 @@
+{
+  "measurements": [
+    {
+      "page": 1,
+      "selection": {
+        "text": "SINGLE COLUMN SOURCE ALPHA",
+        "page": 1,
+        "rects": [
+          {
+            "x": 0.12107763796794235,
+            "y": 0.15174881936245574,
+            "w": 0.3857126657703754,
+            "h": 0.02243211334120425
+          }
+        ],
+        "pdfRects": [
+          [
+            72.0411945909257,
+            695.3396546635183,
+            301.540230724299,
+            714.2274940968123
+          ]
+        ],
+        "pdfQuads": [
+          [
+            72.0411945909257,
+            714.2274940968123,
+            301.540230724299,
+            714.2274940968123,
+            72.0411945909257,
+            695.3396546635183,
+            301.540230724299,
+            695.3396546635183
+          ]
+        ],
+        "fromPdf": true
+      }
+    },
+    {
+      "page": 4,
+      "selection": {
+        "text": "ROTATION SOURCE CHARLIE",
+        "page": 4,
+        "rects": [
+          {
+            "x": 0.766418240850059,
+            "y": 0.1598183052263353,
+            "w": 0.02243211334120425,
+            "h": 0.33730641087558083
+          }
+        ],
+        "pdfRects": [
+          [
+            95.0918916096695,
+            645.3241587957498,
+            295.7892060806401,
+            664.2119982290437
+          ]
+        ],
+        "pdfQuads": [
+          [
+            95.0918916096695,
+            664.2119982290437,
+            295.7892060806401,
+            664.2119982290437,
+            95.0918916096695,
+            645.3241587957498,
+            295.7892060806401,
+            645.3241587957498
+          ]
+        ],
+        "fromPdf": true
+      }
+    },
+    {
+      "page": 5,
+      "selection": {
+        "text": "CROPBOX SOURCE DELTA",
+        "page": 5,
+        "rects": [
+          {
+            "x": 0.10778789632382055,
+            "y": 0.1585207566440411,
+            "w": 0.35846425947217736,
+            "h": 0.02587399195693342
+          }
+        ],
+        "pdfRects": [
+          [
+            94.9718271251485,
+            645.3918335212886,
+            277.78859945595894,
+            664.27984764985
+          ]
+        ],
+        "pdfQuads": [
+          [
+            94.9718271251485,
+            664.27984764985,
+            277.78859945595894,
+            664.27984764985,
+            94.9718271251485,
+            645.3918335212886,
+            277.78859945595894,
+            645.3918335212886
+          ]
+        ],
+        "fromPdf": true
+      }
+    }
+  ],
+  "annotations": [
+    {
+      "page": 1,
+      "items": [
+        {
+          "annotationFlags": 4,
+          "borderStyle": {
+            "width": 0,
+            "style": 1,
+            "dashArray": [
+              3
+            ],
+            "horizontalCornerRadius": 0,
+            "verticalCornerRadius": 0
+          },
+          "color": {
+            "0": 255,
+            "1": 79,
+            "2": 89
+          },
+          "backgroundColor": null,
+          "borderColor": null,
+          "rotation": 0,
+          "contentsObj": {
+            "str": "修改后的评论😀",
+            "dir": "ltr"
+          },
+          "hasAppearance": true,
+          "id": "28R",
+          "modificationDate": null,
+          "rect": [
+            72,
+            699.75,
+            301.488,
+            710.22
+          ],
+          "subtype": "Highlight",
+          "hasOwnCanvas": false,
+          "noRotate": false,
+          "noHTML": false,
+          "titleObj": {
+            "str": "",
+            "dir": "ltr"
+          },
+          "creationDate": null,
+          "popupRef": null,
+          "annotationType": 9,
+          "quadPoints": [
+            [
+              {
+                "x": 72,
+                "y": 710.22
+              },
+              {
+                "x": 301.488,
+                "y": 710.22
+              },
+              {
+                "x": 72,
+                "y": 699.75
+              },
+              {
+                "x": 301.488,
+                "y": 699.75
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "page": 5,
+      "items": [
+        {
+          "annotationFlags": 4,
+          "borderStyle": {
+            "width": 0,
+            "style": 1,
+            "dashArray": [
+              3
+            ],
+            "horizontalCornerRadius": 0,
+            "verticalCornerRadius": 0
+          },
+          "color": {
+            "0": 99,
+            "1": 171,
+            "2": 230
+          },
+          "backgroundColor": null,
+          "borderColor": null,
+          "rotation": 0,
+          "contentsObj": {
+            "str": "中文评论😀",
+            "dir": "ltr"
+          },
+          "hasAppearance": true,
+          "id": "34R",
+          "modificationDate": null,
+          "rect": [
+            95,
+            649.75,
+            277.812,
+            660.22
+          ],
+          "subtype": "StrikeOut",
+          "hasOwnCanvas": false,
+          "noRotate": false,
+          "noHTML": false,
+          "titleObj": {
+            "str": "",
+            "dir": "ltr"
+          },
+          "creationDate": null,
+          "popupRef": null,
+          "annotationType": 12,
+          "quadPoints": [
+            [
+              {
+                "x": 95,
+                "y": 660.22
+              },
+              {
+                "x": 277.812,
+                "y": 660.22
+              },
+              {
+                "x": 95,
+                "y": 649.75
+              },
+              {
+                "x": 277.812,
+                "y": 649.75
+              }
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "resources": [
+    "http://127.0.0.1:64612/web/index.html",
+    "http://127.0.0.1:64612/web/libs/katex.min.css",
+    "http://127.0.0.1:64612/web/libs/github.min.css",
+    "http://127.0.0.1:64612/web/css/recovery.css",
+    "http://127.0.0.1:64612/web/css/app.css",
+    "http://127.0.0.1:64612/web/libs/markdown-it.min.js",
+    "http://127.0.0.1:64612/web/libs/markdown-it-task-lists.min.js",
+    "http://127.0.0.1:64612/web/libs/katex.min.js",
+    "http://127.0.0.1:64612/web/libs/auto-render.min.js",
+    "http://127.0.0.1:64612/web/libs/dompurify.min.js",
+    "http://127.0.0.1:64612/web/js/core/tauri-bridge.js",
+    "http://127.0.0.1:64612/web/js/core/open-policy.js",
+    "http://127.0.0.1:64612/web/js/core/settings-schema.js",
+    "http://127.0.0.1:64612/web/libs/diff.min.js",
+    "http://127.0.0.1:64612/web/js/core/text-buffer.js",
+    "http://127.0.0.1:64612/web/js/core/document-session.js",
+    "http://127.0.0.1:64612/web/js/core/mermaid-renderer.js",
+    "http://127.0.0.1:64612/web/js/core/doc-stats.js",
+    "http://127.0.0.1:64612/web/js/core/html-sanitize.js",
+    "http://127.0.0.1:64612/web/js/core/write-coord.js",
+    "http://127.0.0.1:64612/web/js/core/agent-api.js",
+    "http://127.0.0.1:64612/web/js/core/ai-context.js",
+    "http://127.0.0.1:64612/web/js/core/ai-client.js",
+    "http://127.0.0.1:64612/web/js/core/ai-service.js",
+    "http://127.0.0.1:64612/web/js/ui/ai-ui.js",
+    "http://127.0.0.1:64612/web/js/ui/companion.js",
+    "http://127.0.0.1:64612/web/js/ui/recovery.js",
+    "http://127.0.0.1:64612/web/js/ui/memory.js",
+    "http://127.0.0.1:64612/web/js/i18n.js",
+    "http://127.0.0.1:64612/web/js/app.js",
+    "http://127.0.0.1:64612/web/js/music.js",
+    "http://127.0.0.1:64612/web/libs/highlight.min.js",
+    "http://127.0.0.1:64612/web/js/pdf-viewer.js",
+    "http://127.0.0.1:64612/web/js/plugins.js",
+    "http://127.0.0.1:64612/web/libs/pdf.min.js",
+    "http://127.0.0.1:64612/web/libs/mermaid.min.js",
+    "http://127.0.0.1:64612/tests/fixtures/pdf/layout-and-ocr.pdf",
+    "http://127.0.0.1:64612/web/libs/pdf.worker.min.js",
+    "http://127.0.0.1:64612/web/libs/pdfjs/cmaps/UniGB-UCS2-H.bcmap",
+    "http://127.0.0.1:64612/web/libs/pdfjs/cmaps/Adobe-GB1-UCS2.bcmap",
+    "http://127.0.0.1:64612/web/libs/pdfjs/cmaps/UniCNS-UCS2-H.bcmap",
+    "http://127.0.0.1:64612/web/libs/pdfjs/cmaps/Adobe-CNS1-UCS2.bcmap",
+    "http://127.0.0.1:64612/tests/native-artifacts/pdf-annotations/2d81ae7d-d5cf-4b3a-9a58-5ef18f73bc43/verified.pdf"
+  ],
+  "passed": true
+}

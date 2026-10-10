@@ -18,7 +18,7 @@ pub fn compute_effective_importance(item: &OrganicMemoryItem, now_secs: u64) -> 
         return (item.confidence * 2.0).min(2.0);
     }
 
-    let elapsed_secs = now_secs.saturating_sub(item.last_accessed_at);
+    let elapsed_secs = now_secs.saturating_sub(item.last_accessed_at) / 1000;
     let elapsed_days = (elapsed_secs as f64) / 86400.0;
 
     // Stability S increases with bounded access frequency
@@ -40,7 +40,7 @@ pub fn should_evict_memory(item: &OrganicMemoryItem, now_secs: u64) -> bool {
     }
 
     // 2. Day-0 Newborn Immunity: newly created memories are protected for at least 24 hours
-    let total_age_secs = now_secs.saturating_sub(item.created_at);
+    let total_age_secs = now_secs.saturating_sub(item.created_at) / 1000;
     if total_age_secs < 86400 {
         return false;
     }
@@ -56,17 +56,18 @@ mod tests {
 
     #[test]
     fn test_day_zero_eviction_immunity() {
-        let now = 1000000;
+        let now = 1000000 * 1000;
         let newborn = OrganicMemoryItem {
             memory_id: "mem_1".to_string(),
             tier: 1,
             category: "concept".to_string(),
             content: "Brand new insight".to_string(),
             confidence: 0.1, // very low initial confidence
-            created_at: now - 3600, // 1 hour old
-            last_accessed_at: now - 3600,
+            created_at: now - 3600 * 1000,
+            last_accessed_at: now - 3600 * 1000,
             access_count: 1,
             pinned: false,
+            ..Default::default()
         };
 
         // Even with low confidence, Day-0 immunity MUST protect it
@@ -75,17 +76,18 @@ mod tests {
 
     #[test]
     fn test_pinned_memory_immortality() {
-        let now = 10000000;
+        let now = 10000000 * 1000;
         let pinned = OrganicMemoryItem {
             memory_id: "mem_2".to_string(),
             tier: 1,
             category: "decision".to_string(),
             content: "Architecture Decision Record".to_string(),
             confidence: 0.2,
-            created_at: now - 100 * 86400, // 100 days old
-            last_accessed_at: now - 100 * 86400,
+            created_at: now - 100 * 86400 * 1000,
+            last_accessed_at: now - 100 * 86400 * 1000,
             access_count: 1,
             pinned: true,
+            ..Default::default()
         };
 
         assert!(!should_evict_memory(&pinned, now));
@@ -94,17 +96,18 @@ mod tests {
 
     #[test]
     fn test_aged_neglected_memory_eviction() {
-        let now = 10000000;
+        let now = 10000000 * 1000;
         let neglected = OrganicMemoryItem {
             memory_id: "mem_3".to_string(),
             tier: 2,
             category: "glossary".to_string(),
             content: "Unused transient note".to_string(),
             confidence: 0.5,
-            created_at: now - 60 * 86400, // 60 days old
-            last_accessed_at: now - 60 * 86400,
+            created_at: now - 60 * 86400 * 1000,
+            last_accessed_at: now - 60 * 86400 * 1000,
             access_count: 1,
             pinned: false,
+            ..Default::default()
         };
 
         // 60 days with stability ~8.4 days results in R(t) ~ exp(-7.1) ~ 0.0008, score << 0.25

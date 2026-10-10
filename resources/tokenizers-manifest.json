@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "documentation": {
+    "deepseek": "https://api-docs.deepseek.com/zh-cn/quick_start/token_usage/",
+    "qwen": "https://github.com/dashscope/dashscope-sdk-python/blob/main/dashscope/tokenizers/tokenization.py",
+    "glm": "https://docs.bigmodel.cn/api-reference/模型-api/文本分词器"
+  },
+  "archives": [
+    {
+      "id": "deepseek-v3",
+      "url": "https://cdn.deepseek.com/api-docs/deepseek_v3_tokenizer.zip",
+      "sha256": "c954ca6f6e54281d72d3c27e2430cea7663f81292b39982e2f97890c66c302de",
+      "directory": "deepseek_v3_tokenizer",
+      "files": {
+        "tokenizer.json": "ecb6f9fc369894346f0511f4074ca75cee5cd5f3b06d02f1ba35fcd39f8e121d",
+        "tokenizer_config.json": "144a6d92b6012baeb4f2ac41d48ed3458e758f977a0fb5caf75ff07698fc844c"
+      }
+    },
+    {
+      "id": "deepseek-v4",
+      "url": "https://cdn.deepseek.com/api-docs/deepseek_v4_tokenizer.zip",
+      "sha256": "e7310d1dafe0a86d8a5629fe78a7c763760f651db9b8682718a1781dcd6fe495",
+      "directory": "deepseek_v4_tokenizer",
+      "files": {
+        "tokenizer.json": "89085f12ef79460ac5f66d1119325ddfc694b4ab209d80bbd81d35f081dc9614",
+        "tokenizer_config.json": "841f8cf146e3f0ad1082594a31f68ecf7608c20467ef355081333d85bbaeb1cb"
+      }
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+{"name":"baseline","errors":[],"nodeCount":8}
+{"name":"current","errors":[],"nodeCount":8}
+{"matrixCases":17,"passed":true}
+PDF.js 实际页面、旋转选区、CropBox、原生批注和本地资源检查通过

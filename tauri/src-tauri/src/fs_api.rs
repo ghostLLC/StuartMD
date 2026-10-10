@@ -8,9 +8,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex, OnceLock};
 use tauri::ipc::Response;
+use tauri::Manager;
 
 const APP_ID: &str = "StuartMD";
-pub const VERSION: &str = "3.5.0";
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const PROG_ID: &str = "StuartMD.Markdown";
 pub const PROG_ID_PDF: &str = "StuartMD.PDF";
 pub const SETTINGS_SCHEMA: i64 = 4;
@@ -46,9 +47,21 @@ pub fn exe_dir() -> PathBuf {
 }
 
 pub fn data_dir() -> PathBuf {
-    let base = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+    if let Some(path) = std::env::var_os("STUART_DATA_DIR") {
+        let directory = PathBuf::from(path);
+        assert!(directory.is_absolute(), "应用数据目录必须是绝对路径");
+        fs::create_dir_all(&directory).expect("创建应用数据目录失败");
+        return directory;
+    }
+    #[cfg(test)]
+    let base = {
+        static TEST_DATA:OnceLock<PathBuf>=OnceLock::new();
+        TEST_DATA.get_or_init(||PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/native-artifacts").join(format!("unit-data-{}",uuid::Uuid::new_v4()))).clone()
+    };
+    #[cfg(not(test))]
+    let base = dirs::config_dir().expect("无法取得应用资料目录");
     let d = base.join(APP_ID);
-    let _ = fs::create_dir_all(&d);
+    fs::create_dir_all(&d).expect("创建应用数据目录失败");
     d
 }
 
@@ -143,10 +156,15 @@ pub fn atomic_write_file(path: &Path, content: &[u8]) -> Result<(), String> {
                 if ret != 0 {
                     Ok(())
                 } else {
-                    fs::rename(&tmp_path, path).map_err(|e| format!("Windows ReplaceFileW 及 rename 降级均失败: {e}"))
+                    Err(format!("Windows 原子替换失败: {}", std::io::Error::last_os_error()))
                 }
             } else {
-                fs::rename(&tmp_path, path).map_err(|e| format!("原子文件移动创建失败: {e}"))
+                use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_WRITE_THROUGH};
+                let target: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+                let temporary: Vec<u16> = tmp_path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+                if unsafe { MoveFileExW(temporary.as_ptr(), target.as_ptr(), MOVEFILE_WRITE_THROUGH) } == 0 {
+                    Err(format!("原子文件创建失败: {}", std::io::Error::last_os_error()))
+                } else { Ok(()) }
             };
 
             if let Err(e) = replace_res {
@@ -638,6 +656,27 @@ pub fn ensure_dir_allowed(raw: &str) -> Result<PathBuf, String> {
     Ok(canon)
 }
 
+pub fn register_window_path(window: &tauri::WebviewWindow, raw: &str) -> Result<PathBuf, String> {
+    use tauri::Manager;
+    let canonical = register_allowed_path(raw)?;
+    window.app_handle().state::<crate::app_runtime::AppRuntime>().grant(window.label(), canonical.clone())?;
+    Ok(canonical)
+}
+
+pub fn ensure_window_read_allowed(window: &tauri::WebviewWindow, raw: &str) -> Result<PathBuf, String> {
+    use tauri::Manager;
+    let canonical = ensure_read_allowed(raw)?;
+    window.app_handle().state::<crate::app_runtime::AppRuntime>().ensure_allowed(window.label(), &canonical)?;
+    Ok(canonical)
+}
+
+pub fn ensure_window_write_allowed(window: &tauri::WebviewWindow, raw: &str) -> Result<PathBuf, String> {
+    use tauri::Manager;
+    let canonical = ensure_write_allowed(raw)?;
+    window.app_handle().state::<crate::app_runtime::AppRuntime>().ensure_allowed(window.label(), &canonical)?;
+    Ok(canonical)
+}
+
 /// Adopt a folder the user opened: register it and store it as workspace root.
 pub fn adopt_workspace_dir(raw: &str) -> Result<PathBuf, String> {
     let canon = register_allowed_path(raw)?;
@@ -673,8 +712,8 @@ fn draft_file_for(path: &str) -> PathBuf {
 }
 
 #[tauri::command]
-pub fn stuart_register_allowed_path(path: String) -> Value {
-    match register_allowed_path(&path) {
+pub fn stuart_register_allowed_path(window: tauri::WebviewWindow, path: String) -> Value {
+    match register_window_path(&window, &path) {
         Ok(canon) => json!({"ok": true, "path": display_path(&canon)}),
         Err(e) => json!({"error": e}),
     }
@@ -682,7 +721,7 @@ pub fn stuart_register_allowed_path(path: String) -> Value {
 
 /// Backend open dialog: the picked path is auto-registered (capability grant).
 #[tauri::command]
-pub async fn stuart_dialog_open_file(app: tauri::AppHandle) -> Value {
+pub async fn stuart_dialog_open_file(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Value {
     let picked = tauri::async_runtime::spawn_blocking(move || {
         use tauri_plugin_dialog::DialogExt;
         app.dialog().file().blocking_pick_file()
@@ -700,7 +739,7 @@ pub async fn stuart_dialog_open_file(app: tauri::AppHandle) -> Value {
         Err(e) => return json!({"error": format!("无效路径: {e}")}),
     };
     let raw = path.to_string_lossy().to_string();
-    match register_allowed_path(&raw) {
+    match register_window_path(&window, &raw) {
         Ok(canon) => json!({"ok": true, "path": display_path(&canon), "kind": if canon.is_dir() { "folder" } else { "file" }}),
         Err(e) => json!({"error": e}),
     }
@@ -708,18 +747,21 @@ pub async fn stuart_dialog_open_file(app: tauri::AppHandle) -> Value {
 
 /// Backend save dialog: chosen path is auto-registered even before the file exists.
 #[tauri::command]
-pub async fn stuart_dialog_save_file(app: tauri::AppHandle, default_name: Option<String>) -> Value {
+pub async fn stuart_dialog_save_file(window: tauri::WebviewWindow, app: tauri::AppHandle, default_name: Option<String>) -> Value {
     let name = default_name
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "untitled.md".into());
+    let html_export=Path::new(&name).extension().is_some_and(|extension|extension.eq_ignore_ascii_case("html") || extension.eq_ignore_ascii_case("htm"));
+    let pdf_export=Path::new(&name).extension().is_some_and(|extension|extension.eq_ignore_ascii_case("pdf"));
+    let json_export=Path::new(&name).extension().is_some_and(|extension|extension.eq_ignore_ascii_case("json"));
     let picked = tauri::async_runtime::spawn_blocking(move || {
         use tauri_plugin_dialog::DialogExt;
-        app.dialog()
-            .file()
-            .set_file_name(name)
-            .add_filter("Markdown / 文本", &["md", "markdown", "txt"])
-            .blocking_save_file()
+        let dialog=app.dialog().file().set_file_name(name);
+        if html_export {dialog.add_filter("HTML网页", &["html", "htm"]).blocking_save_file()}
+        else if pdf_export {dialog.add_filter("PDF文档", &["pdf"]).blocking_save_file()}
+        else if json_export {dialog.add_filter("JSON批注", &["json"]).blocking_save_file()}
+        else {dialog.add_filter("Markdown / 文本", &["md", "markdown", "txt"]).blocking_save_file()}
     })
     .await;
     let picked = match picked {
@@ -737,12 +779,12 @@ pub async fn stuart_dialog_save_file(app: tauri::AppHandle, default_name: Option
     if !Path::new(&raw)
         .extension()
         .and_then(|e| e.to_str())
-        .map(|e| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("markdown") || e.eq_ignore_ascii_case("txt"))
+        .map(|e| if html_export {e.eq_ignore_ascii_case("html") || e.eq_ignore_ascii_case("htm")} else if pdf_export {e.eq_ignore_ascii_case("pdf")} else if json_export {e.eq_ignore_ascii_case("json")} else {e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("markdown") || e.eq_ignore_ascii_case("txt")})
         .unwrap_or(false)
     {
-        raw.push_str(".md");
+        raw.push_str(if html_export {".html"} else if pdf_export {".pdf"} else if json_export {".json"} else {".md"});
     }
-    match register_allowed_path(&raw) {
+    match register_window_path(&window, &raw) {
         Ok(canon) => json!({"ok": true, "path": display_path(&canon)}),
         Err(e) => json!({"error": e}),
     }
@@ -750,7 +792,7 @@ pub async fn stuart_dialog_save_file(app: tauri::AppHandle, default_name: Option
 
 /// Backend folder dialog: picked folder is registered and becomes the workspace root.
 #[tauri::command]
-pub async fn stuart_dialog_open_folder(app: tauri::AppHandle) -> Value {
+pub async fn stuart_dialog_open_folder(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Value {
     let picked = tauri::async_runtime::spawn_blocking(move || {
         use tauri_plugin_dialog::DialogExt;
         app.dialog().file().blocking_pick_folder()
@@ -768,35 +810,145 @@ pub async fn stuart_dialog_open_folder(app: tauri::AppHandle) -> Value {
         Err(e) => return json!({"error": format!("无效路径: {e}")}),
     };
     let raw = path.to_string_lossy().to_string();
-    match adopt_workspace_dir(&raw) {
+    match register_window_path(&window, &raw).and_then(|_| adopt_workspace_dir(&raw)) {
         Ok(canon) => json!({"ok": true, "path": display_path(&canon), "workspace": true}),
         Err(e) => json!({"error": e}),
     }
 }
 
-/// Journal draft: `data_dir()/drafts/<sha1>.md` via atomic write.
+#[tauri::command]
+pub fn document_read(window: tauri::WebviewWindow, service: tauri::State<'_, crate::document::DocumentService>, path: String) -> Result<Value, String> {
+    let canonical = ensure_window_read_allowed(&window, &path)?;
+    let is_pdf = canonical.extension().and_then(|extension| extension.to_str()).is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"));
+    let read = if is_pdf { service.read_binary(window.label(), &canonical)? } else { service.read(window.label(), &canonical)? };
+    if is_pdf {service.capture_export_target(window.label(),&read.document_id,&crate::win_api::annot_file(&display_path(&canonical)))?;}
+    crate::memory::get_archive_storage()?.update_document_path(&read.document_id,&display_path(&canonical))?;
+    let mut result = serde_json::to_value(&read).map_err(|error| error.to_string())?;
+    if is_pdf {
+        let state=service.state(window.label(),&read.document_id)?;
+        let sidecar=service.resource_base(window.label(),&read.document_id,&crate::win_api::annot_file(&display_path(&canonical)))?;
+        let annotations=if sidecar.disk_revision.exists {crate::win_api::decode_annotations(&sidecar.bytes)?} else {json!([])};
+        let target = result.as_object_mut().ok_or("PDF 读取结果格式错误")?;
+        target.insert("b64".into(),json!(B64.encode(&state.bytes)));
+        target.insert("size".into(),json!(state.bytes.len()));
+        target.insert("annotations".into(),annotations);
+    }
+    push_recent(&display_path(&canonical), "file");
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn pdf_document_snapshot(window:tauri::WebviewWindow,service:tauri::State<'_,crate::document::DocumentService>,document_id:String)->Result<Value,String> {
+    let state=service.state(window.label(),&document_id)?;
+    if state.kind!="pdf" {return Err("当前文档缺少PDF数据".into());}
+    let path=state.path.as_ref().ok_or("PDF来源路径缺失")?;
+    Ok(json!({"documentId":document_id,"path":display_path(path),"name":path.file_name().ok_or("PDF文件名称缺失")?.to_string_lossy(),"b64":B64.encode(&state.bytes),"diskRevision":state.disk_revision}))
+}
+
+#[tauri::command]
+pub fn document_new(window: tauri::WebviewWindow, service: tauri::State<'_, crate::document::DocumentService>) -> Result<crate::document::DocumentReadResult, String> {
+    service.new_document(window.label())
+}
+
+#[tauri::command]
+pub fn document_release(window:tauri::WebviewWindow,service:tauri::State<'_,crate::document::DocumentService>,document_id:String)->Result<(),String> {
+    service.release_document(window.label(),&document_id)
+}
+
+#[tauri::command]
+pub fn document_confirm_encoding(window: tauri::WebviewWindow, service: tauri::State<'_, crate::document::DocumentService>, document_id: String, encoding: String) -> Result<crate::document::DocumentReadResult, String> {
+    service.confirm_encoding(window.label(), &document_id, &encoding)
+}
+
+#[tauri::command]
+pub fn document_encoding_preview(window: tauri::WebviewWindow, service: tauri::State<'_, crate::document::DocumentService>, document_id: String, encoding: String) -> Result<crate::document::DocumentReadResult, String> {
+    service.encoding_preview(window.label(), &document_id, &encoding)
+}
+
+#[tauri::command]
+pub fn document_target_revision(window: tauri::WebviewWindow, service:tauri::State<'_,crate::document::DocumentService>,path:String,document_id:Option<String>) -> Result<crate::document::DiskRevision, String> {
+    let canonical = ensure_window_write_allowed(&window, &path)?;
+    if let Some(id)=document_id {return service.capture_export_target(window.label(),&id,&canonical);}
+    Ok(crate::document::identity::read_disk(&canonical)?.0)
+}
+
+#[tauri::command]
+pub fn save_document(window: tauri::WebviewWindow, service: tauri::State<'_, crate::document::DocumentService>, mut request: crate::document::SaveRequest) -> Result<crate::document::SaveResult, String> {
+    use tauri::Emitter;
+    let target = ensure_window_write_allowed(&window, &request.target_path)?;
+    request.target_path = display_path(&target);
+    let text_save=matches!(request.payload,crate::document::SavePayload::TextEdits {..});
+    let document_id=request.document_id.clone();
+    let result = service.save(window.label(), request)?;
+    if result.result == crate::document::SaveStatus::Saved {
+        if text_save {push_recent(&display_path(&target), "file");crate::memory::get_archive_storage()?.update_document_path(&document_id,&display_path(&target))?;}
+        window.app_handle().emit("document-saved", &result).map_err(|error| format!("发送保存状态通知失败: {error}"))?;
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn journal_write(window: tauri::WebviewWindow, service: tauri::State<'_, crate::document::DocumentService>, snapshot: crate::document::JournalSnapshot) -> Result<crate::document::JournalAck, String> {
+    service.write_journal(window.label(), snapshot)
+}
+
+#[tauri::command]
+pub fn journal_list(service: tauri::State<'_, crate::document::DocumentService>) -> Result<Vec<crate::document::JournalEntry>, String> { service.journal_list() }
+
+#[tauri::command]
+pub fn journal_read(service: tauri::State<'_, crate::document::DocumentService>, document_id: String) -> Result<crate::document::JournalRecord, String> { service.journal_read(&document_id) }
+
+#[tauri::command]
+pub fn journal_restore(window: tauri::WebviewWindow, service: tauri::State<'_, crate::document::DocumentService>, document_id: String) -> Result<crate::document::JournalRecord, String> {
+    let record = service.journal_read(&document_id)?;
+    if let Some(path) = &record.entry.path { register_window_path(&window, path)?; }
+    service.restore(window.label(), &document_id)
+}
+
+#[tauri::command]
+pub fn journal_discard(service: tauri::State<'_, crate::document::DocumentService>, document_id: String) -> Result<(), String> { service.discard(&document_id) }
+
+#[tauri::command]
+pub fn journal_flush(service: tauri::State<'_, crate::document::DocumentService>) -> Result<(), String> { service.flush() }
+
+#[tauri::command]
+pub fn journal_import_legacy(service: tauri::State<'_, crate::document::DocumentService>) -> Result<usize, String> {
+    let settings = load_settings_migrated();
+    let mut paths = Vec::new();
+    if let Some(recent) = settings.get("recent").and_then(Value::as_array) { for entry in recent { if let Some(path) = entry.get("path").and_then(Value::as_str) { paths.push(path.into()); } } }
+    if let Some(tabs) = settings.pointer("/session/tabs").and_then(Value::as_array) { for entry in tabs { if let Some(path) = entry.get("path").and_then(Value::as_str) { paths.push(path.into()); } } }
+    if let Some(files) = settings.get("last_open_files").and_then(Value::as_array) { for entry in files { if let Some(path) = entry.as_str() { paths.push(path.into()); } } }
+    service.import_legacy(&paths)
+}
+
+#[tauri::command]
+pub fn save_operations_list(service: tauri::State<'_, crate::document::DocumentService>) -> Result<Vec<crate::document::SaveOperation>, String> { service.save_operations() }
+
+#[tauri::command]
+pub fn save_operation_read(service:tauri::State<'_,crate::document::DocumentService>,operation_id:String,version:String,encoding:Option<String>)->Result<crate::document::save::SaveVersion,String> {
+    service.save_operation_read(&operation_id,&version,encoding.as_deref())
+}
+
+#[tauri::command]
+pub fn save_operation_copy(window:tauri::WebviewWindow,service:tauri::State<'_,crate::document::DocumentService>,operation_id:String,version:String,target_path:String)->Result<crate::document::SaveResult,String> {
+    let target=ensure_window_write_allowed(&window,&target_path)?;
+    service.save_operation_copy(window.label(),&operation_id,&version,&target)
+}
+
 #[tauri::command]
 pub fn stuart_save_draft(path: String, content: String) -> Value {
-    const DRAFT_MAX: usize = 16 * 1024 * 1024;
-    if content.len() > DRAFT_MAX {
-        return json!({"error": "草稿过大（>16MB）"});
-    }
-    let f = draft_file_for(&path);
-    match atomic_write_file(&f, content.as_bytes()) {
-        Ok(()) => json!({"ok": true, "draft": display_path(&f)}),
-        Err(e) => json!({"error": e}),
-    }
+    let _ = (path, content);
+    json!({"error": "DraftProtocolRequired: 草稿必须使用 documentId 和编辑版本提交 journal_write"})
 }
 
 #[tauri::command]
 pub fn stuart_clear_draft(path: String) -> Value {
-    let f = draft_file_for(&path);
-    let deleted = f.is_file() && fs::remove_file(&f).is_ok();
-    json!({"ok": true, "deleted": deleted})
+    let _ = path;
+    json!({"error": "DraftProtocolRequired: 草稿只能按已确认保存版本清理或通过 journal_discard 明确丢弃"})
 }
 
 #[tauri::command]
-pub fn stuart_get_app_info() -> Value {
+pub fn stuart_get_app_info(window: tauri::WebviewWindow, runtime: tauri::State<crate::app_runtime::AppRuntime>) -> Value {
     json!({
         "name": APP_ID,
         "version": VERSION,
@@ -804,7 +956,8 @@ pub fn stuart_get_app_info() -> Value {
         "data_dir": data_dir().to_string_lossy(),
         "install_dir": exe_dir().to_string_lossy(),
         "frozen": true,
-        "startup_file": startup_file(),
+        "startup_file": runtime.startup(window.label()),
+        "window_id": window.label(),
         "prog_id": PROG_ID,
         "plugins_dir": plugins_dir().to_string_lossy(),
         "wallpapers_dir": wallpapers_dir().to_string_lossy(),
@@ -878,13 +1031,10 @@ pub fn read_file_trusted(path: &str) -> Value {
         Ok(b) => b,
         Err(e) => return json!({"error": e.to_string()}),
     };
-    // Never silently return empty content on encoding failures
-    let (content, encoding) = match String::from_utf8(bytes) {
-        Ok(s) => (s, "utf-8"),
-        Err(e) => (
-            String::from_utf8_lossy(e.as_bytes()).to_string(),
-            "lossy",
-        ),
+    let (content, encoding, bom) = match crate::document::encoding::detect(&bytes) {
+        Ok(Some((encoding, bom, source))) => (source, encoding, bom),
+        Ok(None) => return json!({"kind":"markdown", "path":display_path(p), "content":null, "source":null, "accessState":"EncodingConfirmationRequired", "encodingCandidates":crate::document::encoding::candidates(&bytes)}),
+        Err(error) => return json!({"error":error}),
     };
     push_recent(&p.to_string_lossy(), "file");
     json!({
@@ -893,13 +1043,15 @@ pub fn read_file_trusted(path: &str) -> Value {
         "name": p.file_name().unwrap_or_default().to_string_lossy(),
         "content": content,
         "size": meta.len(),
-        "encoding": encoding
+        "encoding": encoding,
+        "bom": bom,
+        "accessState": "Editable"
     })
 }
 
 #[tauri::command]
-pub fn stuart_read_file(path: String) -> Value {
-    let canon = match ensure_read_allowed(&path) {
+pub fn stuart_read_file(window: tauri::WebviewWindow, path: String) -> Value {
+    let canon = match ensure_window_read_allowed(&window, &path) {
         Ok(c) => c,
         Err(e) => return json!({"error": e}),
     };
@@ -908,21 +1060,8 @@ pub fn stuart_read_file(path: String) -> Value {
 
 #[tauri::command]
 pub fn stuart_write_file(path: String, content: String) -> Value {
-    let canon = match ensure_write_allowed(&path) {
-        Ok(c) => c,
-        Err(e) => return json!({"error": e}),
-    };
-    match atomic_write_file(&canon, content.as_bytes()) {
-        Ok(()) => {
-            let disp = display_path(&canon);
-            push_recent(&disp, "file");
-            json!({"ok": true, "path": disp})
-        }
-        Err(e) => {
-            eprintln!("[I/O Error] stuart_write_file failed for {}: {}", path, e);
-            json!({"error": e})
-        }
-    }
+    let _ = (path, content);
+    json!({"error":"SaveProtocolRequired: 保存必须提交文档身份、编辑版本和磁盘版本"})
 }
 
 /// Core PDF read. Callers must have already applied the path grant.
@@ -942,7 +1081,7 @@ fn read_pdf_trusted(path: &str) -> Value {
         Ok(b) => b,
         Err(e) => return json!({"error": e.to_string()}),
     };
-    let annotations = crate::win_api::load_annotations_for(p);
+    let annotations = match crate::win_api::load_annotations_for(p) {Ok(items)=>items,Err(error)=>return json!({"error":error})};
     json!({
         "kind": "pdf",
         "path": display_path(p),
@@ -954,8 +1093,8 @@ fn read_pdf_trusted(path: &str) -> Value {
 }
 
 #[tauri::command]
-pub fn stuart_read_pdf(path: String) -> Value {
-    let canon = match ensure_read_allowed(&path) {
+pub fn stuart_read_pdf(window: tauri::WebviewWindow, path: String) -> Value {
+    let canon = match ensure_window_read_allowed(&window, &path) {
         Ok(c) => c,
         Err(e) => return json!({"error": e}),
     };
@@ -963,8 +1102,8 @@ pub fn stuart_read_pdf(path: String) -> Value {
 }
 
 #[tauri::command]
-pub fn stuart_read_pdf_binary(path: String) -> Result<Response, String> {
-    let canon = ensure_read_allowed(&path)?;
+pub fn stuart_read_pdf_binary(window: tauri::WebviewWindow, path: String) -> Result<Response, String> {
+    let canon = ensure_window_read_allowed(&window, &path)?;
 
     let meta = fs::metadata(&canon).map_err(|e| format!("获取 PDF 元数据失败: {e}"))?;
     if !meta.is_file() {
@@ -1044,11 +1183,12 @@ fn walk_md_capped(dir: &Path, depth: i32, max_depth: i32, count: &mut usize) -> 
 }
 
 #[tauri::command]
-pub fn stuart_read_dir_tree(path: String) -> Value {
+pub fn stuart_read_dir_tree(window: tauri::WebviewWindow, path: String) -> Value {
     let root = match ensure_dir_allowed(&path) {
         Ok(r) => r,
         Err(e) => return json!({"error": e}),
     };
+    if let Err(error) = ensure_window_read_allowed(&window, &path) { return json!({"error":error}); }
     json!({
         "path": display_path(&root),
         "name": root.file_name().unwrap_or_default().to_string_lossy(),
@@ -1070,26 +1210,26 @@ pub fn stuart_get_recents() -> Value {
 }
 
 #[tauri::command]
-pub fn stuart_open_path(path: String) -> Value {
+pub fn stuart_open_path(window: tauri::WebviewWindow, path: String) -> Value {
     let p = Path::new(path.trim());
     if p.is_dir() {
         // User opened a folder → session grant + workspace root (stored in settings).
-        if let Err(e) = adopt_workspace_dir(&path) {
+        if let Err(e) = register_window_path(&window, &path).and_then(|_| adopt_workspace_dir(&path)) {
             return json!({"error": e});
         }
         push_recent(&p.to_string_lossy(), "folder");
         return json!({"kind": "folder", "path": display_path(p)});
     }
     // Opening a file is itself the dialog-equivalent user grant.
-    match register_allowed_path(&path) {
+    match register_window_path(&window, &path) {
         Ok(_) => {}
         Err(e) => return json!({"error": e}),
     }
-    stuart_read_file(path)
+    stuart_read_file(window, path)
 }
 
 #[tauri::command]
-pub fn stuart_open_in_new_window(path: Option<String>) -> Value {
+pub fn stuart_open_in_new_window(app: tauri::AppHandle, path: Option<String>) -> Value {
     let Some(path) = path else {
         return json!({"error": "未指定文件路径"});
     };
@@ -1097,10 +1237,7 @@ pub fn stuart_open_in_new_window(path: Option<String>) -> Value {
     if !p.exists() {
         return json!({"error": format!("文件不存在: {path}")});
     }
-    let exe = std::env::current_exe().unwrap_or_default();
-    let mut cmd = std::process::Command::new(&exe);
-    cmd.arg(p);
-    match cmd.spawn() {
+    match crate::app_runtime::create_document_window(&app, Some(path.clone())) {
         Ok(_) => json!({
             "ok": true,
             "path": p.to_string_lossy(),
@@ -1111,9 +1248,8 @@ pub fn stuart_open_in_new_window(path: Option<String>) -> Value {
 }
 
 #[tauri::command]
-pub fn stuart_open_new_window() -> Value {
-    let exe = std::env::current_exe().unwrap_or_default();
-    match std::process::Command::new(&exe).spawn() {
+pub fn stuart_open_new_window(app: tauri::AppHandle) -> Value {
+    match crate::app_runtime::create_document_window(&app, None) {
         Ok(_) => json!({"ok": true}),
         Err(e) => json!({"error": e.to_string()}),
     }
@@ -1344,32 +1480,20 @@ pub fn stuart_clear_wallpaper() -> Value {
 }
 
 #[tauri::command]
-pub fn stuart_export_html(html: String, suggested_name: Option<String>) -> Value {
-    // Frontend prefers dialog plugin; this command is a write fallback when path is known.
-    let name = export_safe_name(&suggested_name.unwrap_or_else(|| "export.html".into()));
-    let path = data_dir().join("exports").join(&name);
-    match atomic_write_file(&path, html.as_bytes()) {
-        Ok(()) => json!({"ok": true, "path": path.to_string_lossy()}),
-        Err(e) => json!({"error": e}),
-    }
+pub fn stuart_export_html(window:tauri::WebviewWindow,service:tauri::State<'_,crate::document::DocumentService>,request:crate::document::SaveRequest)->Result<crate::document::SaveResult,String> {
+    if !matches!(request.payload,crate::document::SavePayload::HtmlExport {..}) {return Err("HTML导出需要完整的HTML保存内容".into());}
+    save_document(window,service,request)
 }
 
 #[tauri::command]
-pub fn stuart_open_welcome() -> Value {
+pub fn stuart_open_welcome(window: tauri::WebviewWindow) -> Value {
     if let Some(cand) = find_sample("欢迎使用 StuartMD.md") {
         // App-shipped samples are trusted content; grant then read.
         let disp = cand.to_string_lossy().to_string();
-        let _ = register_allowed_path(&disp);
+        if let Err(error) = register_window_path(&window, &disp) { return json!({"error":error}); }
         return read_file_trusted(&disp);
     }
-    json!({
-        "path": null,
-        "name": "欢迎使用 StuartMD.md",
-        "kind": "markdown",
-        "welcome": true,
-        "content": "# StuartMD\n\n轻量 Markdown 阅读与编辑器。\n\n**项目仓库：** https://github.com/ghostLLC/StuartMD\n\n**当前版本：** 3.4.10\n\n## 能做什么\n\n- 读文档：美化排版、公式、表格、代码高亮\n- 写笔记：阅读 / 分栏 / 源码，点击段落直接编辑\n- 飞书式交互：块手柄、选中浮动栏、块菜单；单击表格/代码就地编辑；双击只选中；公式/图表进源码编辑\n- 撤销重做：Ctrl+Z / Ctrl+Y\n- 看 PDF：标注批注\n- 多窗口、主题、多语言\n",
-        "size": 0
-    })
+    json!({"error":"安装资源缺少欢迎文档，请检查StuartMD安装目录"})
 }
 
 #[cfg(test)]

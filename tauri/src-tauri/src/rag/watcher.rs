@@ -1,502 +1,197 @@
-// tauri/src-tauri/src/rag/watcher.rs
-//! StuartMD Vault Scanner, Cloud Placeholder Filter, and Bounded Backpressure Indexing Pipeline
-//! Implements DEF-CLOUD-01, DEF-CONC-03, DEF-CONC-04, DEF-CONC-05, and DEF-CONC-06
-
-#![allow(dead_code)]
-
-use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::collections::{HashMap,HashSet};
+use std::path::{Path,PathBuf};
+use std::sync::atomic::{AtomicBool,Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use log::{info, warn, error};
-use regex::Regex;
-use serde::{Deserialize, Serialize};
-
-use super::config::{ChunkInsertPayload, DocumentRecord, RagConfig, RagStatus};
+use std::time::{Instant,UNIX_EPOCH};
+use serde::{Deserialize,Serialize};
+use notify::{RecommendedWatcher,RecursiveMode,Watcher};
+use super::config::{IndexExclusion,IndexFileFailure,RagConfig};
 use super::embedding::LocalEmbeddingEngine;
-use super::indexer::parse_file_to_document;
+use super::indexer::parse_file_with_resources;
+use super::model_registry::file_sha256;
 use super::storage::RagStorage;
 
-/// Hard engineering limits for safe desktop operation
-pub const MAX_RECURSION_DEPTH: usize = 8;
-pub const MAX_VAULT_FILES: usize = 10_000;
-pub const BATCH_EMBED_SIZE: usize = 16;
-pub const BOUNDED_CHANNEL_CAPACITY: usize = 64;
+#[derive(Debug,Clone,Serialize,Deserialize)]
+#[serde(rename_all="camelCase")]
+pub struct IndexProgress {pub total_files:usize,pub processed_files:usize,pub current_file:Option<String>,pub status:String,pub error_message:Option<String>,pub job_id:String,pub workspace_id:String}
 
-/// Indexing progress payload sent to frontend via Tauri event
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IndexProgress {
-    pub total_files: usize,
-    pub processed_files: usize,
-    pub current_file: Option<String>,
-    pub status: String, // "idle" | "scanning" | "indexing" | "completed" | "error"
-    pub error_message: Option<String>,
-}
-
-/// Summary report after indexing run
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug,Clone,Serialize,Deserialize)]
+#[serde(rename_all="camelCase")]
 pub struct IndexSummary {
-    pub total_files_scanned: usize,
-    pub newly_indexed: usize,
-    pub updated_files: usize,
-    pub skipped_unmodified: usize,
-    pub deleted_ghosts: usize,
-    pub skipped_placeholders: usize,
-    pub skipped_temp_files: usize,
-    pub duration_ms: u64,
+    pub job_id:String,pub status:String,pub index_generation:Option<String>,pub total_files_scanned:usize,pub newly_indexed:usize,pub updated_files:usize,pub skipped_unmodified:usize,pub deleted_ghosts:usize,pub skipped_placeholders:usize,pub skipped_temp_files:usize,pub duration_ms:u64,
+    pub failed_files:Vec<IndexFileFailure>,pub excluded_files:Vec<IndexExclusion>,
+    pub scan_root:String,pub max_files:usize,pub max_depth:usize,pub success_files:usize,
 }
 
-// ============================================================================
-// 1. CLOUD PLACEHOLDER DETECTION (DEF-CLOUD-01)
-// ============================================================================
+pub struct WorkspaceWatcher { _watcher: RecommendedWatcher }
 
-/// Windows OneDrive / iCloud cloud-only placeholder check.
-/// Avoids blocking I/O thread hangs on un-hydrated remote files.
+impl WorkspaceWatcher {
+    pub fn start<F>(root:&Path,config:&RagConfig,changed:F)->Result<Self,String>
+    where F:Fn(Result<Vec<String>,String>)+Send+'static {
+        let watched_root=root.to_path_buf();
+        let excluded=config.blacklisted_dirs.clone();
+        let mut watcher=notify::recommended_watcher(move|event:notify::Result<notify::Event>| {
+            let event=match event {Ok(event)=>event,Err(error)=>{changed(Err(format!("知识目录监听失败：{error}")));return;}};
+            if matches!(event.kind,notify::EventKind::Access(_)) {return;}
+            let paths:Vec<String>=event.paths.into_iter().filter_map(|path| {
+                let relative=path.strip_prefix(&watched_root).ok()?;
+                if relative.components().any(|component| {
+                    let name=component.as_os_str().to_string_lossy();
+                    is_ignored_directory(&name)||excluded.iter().any(|item|item.eq_ignore_ascii_case(&name))||is_temporary_or_ignored_file(&name)
+                }) {return None;}
+                if path.extension().is_some() && !is_supported_extension(&path) {return None;}
+                Some(relative.to_string_lossy().replace('\\',"/"))
+            }).collect();
+            if !paths.is_empty() {changed(Ok(paths));}
+        }).map_err(|error|format!("创建知识目录监听失败：{error}"))?;
+        watcher.watch(root,RecursiveMode::Recursive).map_err(|error|format!("监听知识目录失败：{error}"))?;
+        Ok(Self {_watcher:watcher})
+    }
+}
+
+#[derive(Debug,Clone)]
+pub struct DiscoveredFile {pub abs_path:PathBuf,pub rel_path:String,pub file_size:u64,pub file_mtime:i64}
+
 #[cfg(windows)]
-pub fn is_cloud_placeholder(path: &Path) -> bool {
+pub fn is_cloud_placeholder(path:&Path)->bool {
     use std::os::windows::ffi::OsStrExt;
-    let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
-    wide.push(0);
-
-    unsafe {
-        let attrs = windows_sys::Win32::Storage::FileSystem::GetFileAttributesW(wide.as_ptr());
-        if attrs == windows_sys::Win32::Storage::FileSystem::INVALID_FILE_ATTRIBUTES {
-            return false;
-        }
-
-        let is_offline = (attrs & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_OFFLINE) != 0;
-        let is_recall_data = (attrs & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0;
-        let is_recall_open = (attrs & 0x00040000) != 0; // FILE_ATTRIBUTE_RECALL_ON_OPEN
-
-        is_offline || is_recall_data || is_recall_open
-    }
+    let wide:Vec<u16>=path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let attributes=unsafe {windows_sys::Win32::Storage::FileSystem::GetFileAttributesW(wide.as_ptr())};
+    attributes!=windows_sys::Win32::Storage::FileSystem::INVALID_FILE_ATTRIBUTES && attributes&(0x1000|0x400000|0x40000)!=0
 }
-
 #[cfg(not(windows))]
-pub fn is_cloud_placeholder(_path: &Path) -> bool {
-    false
+pub fn is_cloud_placeholder(_path:&Path)->bool {false}
+
+pub fn is_temporary_or_ignored_file(name:&str)->bool {
+    name.starts_with(".~stuart_tmp_")||name.starts_with(".#")||name.starts_with("~$")||name.ends_with('~')||[".tmp",".swp",".swo"].iter().any(|suffix|name.ends_with(suffix))||[".ds_store","thumbs.db","desktop.ini"].contains(&name.to_lowercase().as_str())
+}
+pub fn is_ignored_directory(name:&str)->bool { [".git",".svn",".hg","node_modules","target","dist","build","__pycache__","venv",".env",".stuart",".stuartmd",".trash","$recycle.bin"].contains(&name.to_lowercase().as_str()) }
+pub fn is_supported_extension(path:&Path)->bool {
+    path.extension().and_then(|value|value.to_str()).is_some_and(|value|["md","markdown","pdf","txt","json","rs","js","py","ts","html","css","c","cpp","h","hpp","toml","yaml","yml","go","java","kt","swift","sql","sh","bat","ps1"].contains(&value.to_lowercase().as_str()))
 }
 
-// ============================================================================
-// 2. TEMPORARY FILE FILTERING (DEF-CONC-04)
-// ============================================================================
+pub struct ScanResult {pub files:Vec<DiscoveredFile>,pub excluded:Vec<IndexExclusion>,pub failures:Vec<IndexFileFailure>}
 
-/// Determines if a file is an editor temp file, atomic swap file, or OS artifact
-pub fn is_temporary_or_ignored_file(file_name: &str) -> bool {
-    // 1. StuartMD atomic write temporary files: .~stuart_tmp_*
-    if file_name.starts_with(".~stuart_tmp_") {
-        return true;
-    }
+pub fn scan_workspace_files(root:&Path)->Result<Vec<DiscoveredFile>,String> { Ok(scan_with_config(root,&RagConfig::default())?.files) }
 
-    // 2. Common editor swap/backup files
-    if file_name.ends_with('~') 
-        || file_name.ends_with(".tmp") 
-        || file_name.ends_with(".swp") 
-        || file_name.ends_with(".swo")
-        || file_name.starts_with(".#")
-        || file_name.starts_with("~$")
-    {
-        return true;
-    }
-
-    // 3. OS artifacts
-    if file_name.eq_ignore_ascii_case(".ds_store")
-        || file_name.eq_ignore_ascii_case("thumbs.db")
-        || file_name.eq_ignore_ascii_case("desktop.ini")
-    {
-        return true;
-    }
-
-    false
-}
-
-/// Checks if directory should be skipped during recursive traversal
-pub fn is_ignored_directory(dir_name: &str) -> bool {
-    if dir_name.starts_with('.') && dir_name != "." {
-        return true;
-    }
-
-    match dir_name.to_ascii_lowercase().as_str() {
-        "node_modules" | "target" | "dist" | "build" | "__pycache__" | ".git" 
-        | ".svn" | ".hg" | "venv" | ".env" | ".stuartmd" | ".trash" | "$recycle.bin" => true,
-        _ => false,
-    }
-}
-
-/// Checks if file extension is supported for knowledge ingestion
-pub fn is_supported_extension(path: &Path) -> bool {
-    let ext = match path.extension().and_then(|s| s.to_str()) {
-        Some(e) => e.to_ascii_lowercase(),
-        None => return false,
-    };
-
-    matches!(
-        ext.as_str(),
-        "md" | "markdown" | "pdf" | "txt" | "json" | "rs" | "js" | "py" | "ts" 
-        | "html" | "css" | "c" | "cpp" | "h" | "hpp" | "toml" | "yaml" | "yml" 
-        | "go" | "java" | "kt" | "swift" | "sql" | "sh" | "bat" | "ps1"
-    )
-}
-
-// ============================================================================
-// 3. BOUNDED DIRECTORY DISCOVERY & TRAVERSAL
-// ============================================================================
-
-/// Discovered file entry in workspace
-#[derive(Debug, Clone)]
-pub struct DiscoveredFile {
-    pub abs_path: PathBuf,
-    pub rel_path: String,
-    pub file_size: u64,
-    pub file_mtime: i64,
-}
-
-/// Recursively discovers all candidate files within workspace root with 8-level cap
-pub fn scan_workspace_files(root: &Path) -> Result<Vec<DiscoveredFile>, String> {
-    let mut files = Vec::new();
-    let mut visited_depth = 0;
-    scan_dir_recursive(root, root, &mut visited_depth, &mut files)?;
-    Ok(files)
-}
-
-fn scan_dir_recursive(
-    root: &Path,
-    current_dir: &Path,
-    current_depth: &mut usize,
-    results: &mut Vec<DiscoveredFile>,
-) -> Result<(), String> {
-    if *current_depth > MAX_RECURSION_DEPTH {
-        warn!("[Watcher] Recursion depth limit ({}) reached at {:?}", MAX_RECURSION_DEPTH, current_dir);
-        return Ok(());
-    }
-
-    if results.len() >= MAX_VAULT_FILES {
-        warn!("[Watcher] Maximum vault file count ({}) reached.", MAX_VAULT_FILES);
-        return Ok(());
-    }
-
-    let entries = match std::fs::read_dir(current_dir) {
-        Ok(e) => e,
-        Err(err) => {
-            warn!("[Watcher] Cannot read dir {:?}: {}", current_dir, err);
-            return Ok(());
+pub fn scan_with_config(root:&Path,config:&RagConfig)->Result<ScanResult,String> {
+    let mut result=ScanResult {files:Vec::new(),excluded:Vec::new(),failures:Vec::new()};
+    let mut directories=vec![(root.to_path_buf(),0usize)];
+    while let Some((directory,depth))=directories.pop() {
+        let entries=match std::fs::read_dir(&directory) {Ok(entries)=>entries,Err(error)=>{result.failures.push(IndexFileFailure {path:directory.to_string_lossy().into_owned(),stage:"Scanning".into(),message:error.to_string()});continue;}};
+        for entry in entries {
+            let entry=entry.map_err(|error|error.to_string())?;
+            let path=entry.path();
+            let relative=path.strip_prefix(root).map_err(|error|error.to_string())?.to_string_lossy().replace('\\',"/");
+            let name=entry.file_name().to_string_lossy().into_owned();
+            let kind=entry.file_type().map_err(|error|error.to_string())?;
+            let exclusion=if kind.is_symlink() {Some("符号链接不属于已授权扫描范围")} else if kind.is_dir() && (is_ignored_directory(&name)||config.blacklisted_dirs.contains(&name)) {Some("配置排除的目录")} else if kind.is_file() && is_temporary_or_ignored_file(&name) {Some("临时文件")} else if kind.is_file() && !is_supported_extension(&path) {Some("不支持的文件类型")} else if kind.is_file() && is_cloud_placeholder(&path) {Some("云端占位文件尚未下载")} else {None};
+            if let Some(reason)=exclusion { result.excluded.push(IndexExclusion {path:relative,reason:reason.into()});continue; }
+            if kind.is_dir() {
+                if depth>=config.max_vault_depth { return Err(format!("目录递归范围超过配置限制 {}：{}",config.max_vault_depth,path.display())); }
+                directories.push((path,depth+1));
+            } else if kind.is_file() {
+                if result.files.len()>=config.max_vault_files {return Err(format!("文件数量超过配置限制 {}：请调整知识目录范围",config.max_vault_files));}
+                let metadata=entry.metadata().map_err(|error|error.to_string())?;
+                let file_mtime=metadata.modified().map_err(|error|error.to_string())?.duration_since(UNIX_EPOCH).map_err(|error|error.to_string())?.as_millis() as i64;
+                result.files.push(DiscoveredFile {abs_path:path,rel_path:relative,file_size:metadata.len(),file_mtime});
+            }
         }
-    };
+    }
+    result.files.sort_by(|left,right|left.rel_path.cmp(&right.rel_path));
+    Ok(result)
+}
 
-    for entry_res in entries {
-        if results.len() >= MAX_VAULT_FILES {
-            break;
-        }
-
-        let entry = match entry_res {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-
-        let path = entry.path();
-        let file_type = match entry.file_type() {
-            Ok(ft) => ft,
-            Err(_) => continue,
-        };
-
-        let file_name = entry.file_name().to_string_lossy().to_string();
-
-        if file_type.is_dir() {
-            if is_ignored_directory(&file_name) {
+pub async fn sync_vault_pipeline<F>(root:&Path,storage:&Arc<RagStorage>,engine:&Arc<LocalEmbeddingEngine>,config:&RagConfig,cancel:&Arc<AtomicBool>,mut progress:F)->Result<IndexSummary,String>
+where F:FnMut(IndexProgress) {
+    let start=Instant::now();
+    let job_id=uuid::Uuid::new_v4().to_string();
+    let scan=scan_with_config(root,config)?;
+    let total=scan.files.len();
+    let mut failures=scan.failures;
+    let mut newly_indexed=0;
+    let existing:HashMap<String,String>=storage.get_all_documents()?.into_iter().map(|(path,hash,_)|(path,hash)).collect();
+    let current_paths:HashSet<&str>=scan.files.iter().map(|file|file.rel_path.as_str()).collect();
+    let mut deleted=0;
+    for relative in existing.keys() { if !current_paths.contains(relative.as_str()) {storage.delete_document(relative)?;deleted+=1;} }
+    let mut updated=0;
+    let mut skipped=0;
+    let workspace_id=super::generation::workspace_id(root);
+    for (position,file) in scan.files.iter().enumerate() {
+        if cancel.load(Ordering::Acquire) {return Err("Cancelled".into());}
+        progress(IndexProgress {total_files:total,processed_files:position,current_file:Some(file.rel_path.clone()),status:"Indexing".into(),error_message:None,job_id:job_id.clone(),workspace_id:workspace_id.clone()});
+        let hash=match file_sha256(&file.abs_path) {Ok(hash)=>hash,Err(message)=>{failures.push(IndexFileFailure {path:file.rel_path.clone(),stage:"Fingerprint".into(),message});continue;}};
+        if existing.get(&file.rel_path)==Some(&hash) {skipped+=1;continue;}
+        let mut success=false;
+        for attempt in 0..3 {
+            let path=file.abs_path.clone();let relative=file.rel_path.clone();let native=config.native_resources.clone();let size=config.chunk_size;let overlap=config.chunk_overlap;let cancel_parse=cancel.clone();
+            let parsed=tokio::task::spawn_blocking(move||parse_file_with_resources(&relative,&path,size,overlap,&native,&cancel_parse)).await.map_err(|error|error.to_string())?;
+            let mut parsed=match parsed {Ok(parsed)=>parsed,Err(message)=>{ if message=="Cancelled" || message.starts_with("Resources：") {return Err(message);} failures.push(IndexFileFailure {path:file.rel_path.clone(),stage:"Parsing".into(),message});break;}};
+            let texts:Vec<String>=parsed.chunks.iter().map(|chunk|chunk.content.clone()).collect();
+            let vectors=engine.embed_batch(&texts).await.map_err(|error|format!("Embedding：{error}"))?;
+            if cancel.load(Ordering::Acquire) {return Err("Cancelled".into());}
+            if file_sha256(&file.abs_path)? != parsed.document.content_hash {
+                if attempt==2 {return Err(format!("资料在索引期间持续变化：{}",file.rel_path));}
                 continue;
             }
-            *current_depth += 1;
-            let _ = scan_dir_recursive(root, &path, current_depth, results);
-            *current_depth -= 1;
-        } else if file_type.is_file() {
-            if is_temporary_or_ignored_file(&file_name) {
-                continue;
-            }
-
-            if !is_supported_extension(&path) {
-                continue;
-            }
-
-            let rel_path = match path.strip_prefix(root) {
-                Ok(p) => p.to_string_lossy().replace('\\', "/"),
-                Err(_) => continue,
-            };
-
-            let metadata = match entry.metadata() {
-                Ok(m) => m,
-                Err(_) => continue,
-            };
-
-            let file_size = metadata.len();
-            let file_mtime = metadata
-                .modified()
-                .map(|t| t.duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as i64)
-                .unwrap_or(0);
-
-            results.push(DiscoveredFile {
-                abs_path: path,
-                rel_path,
-                file_size,
-                file_mtime,
-            });
+            if parsed.chunks.len()!=vectors.len() {return Err("模型返回的片段数量不一致".into());}
+            for (chunk,vector) in parsed.chunks.iter_mut().zip(vectors) {chunk.embedding=Some(vector);}
+            if let Some(message)=parsed.scan_warning {failures.push(IndexFileFailure {path:file.rel_path.clone(),stage:"OcrReview".into(),message});}
+            storage.insert_document_batch(parsed.document,parsed.chunks)?;
+            if existing.contains_key(&file.rel_path) {updated+=1;}else{newly_indexed+=1;}success=true;break;
         }
+        if !success {progress(IndexProgress {total_files:total,processed_files:position+1,current_file:Some(file.rel_path.clone()),status:"Partial".into(),error_message:failures.last().map(|failure|failure.message.clone()),job_id:job_id.clone(),workspace_id:workspace_id.clone()});}
     }
-
-    Ok(())
-}
-
-// ============================================================================
-// 4. BOUNDED PIPELINE SYNCHRONIZATION WITH BACKPRESSURE & ADAPTIVE THROTTLING
-// ============================================================================
-
-/// Full incremental synchronization pipeline with ghost chunk purging and backpressure
-pub async fn sync_vault_pipeline<F>(
-    root: &Path,
-    storage: &Arc<RagStorage>,
-    embedding_engine: &Arc<LocalEmbeddingEngine>,
-    config: &RagConfig,
-    cancel_flag: &Arc<AtomicBool>,
-    mut progress_callback: F,
-) -> Result<IndexSummary, String>
-where
-    F: FnMut(IndexProgress),
-{
-    let start_time = Instant::now();
-    info!("[Watcher] Starting vault synchronization on {:?}", root);
-
-    progress_callback(IndexProgress {
-        total_files: 0,
-        processed_files: 0,
-        current_file: None,
-        status: "scanning".to_string(),
-        error_message: None,
-    });
-
-    // 1. Scan filesystem
-    let discovered_files = scan_workspace_files(root)?;
-    let total_scanned = discovered_files.len();
-
-    // 2. Fetch existing DB document index (DEF-CONC-03 ghost detection)
-    let existing_records = storage.get_all_documents().unwrap_or_default();
-    let mut db_docs_map: HashMap<String, (String, i64)> = HashMap::new(); // rel_path -> (content_hash, mtime)
-    for (rel_path, hash, mtime) in existing_records {
-        db_docs_map.insert(rel_path, (hash, mtime));
-    }
-
-    let current_disk_paths: HashSet<String> = discovered_files
-        .iter()
-        .map(|f| f.rel_path.clone())
-        .collect();
-
-    // 3. Purge ghost chunks for deleted files (DEF-CONC-03)
-    let mut deleted_ghosts = 0;
-    for db_rel_path in db_docs_map.keys() {
-        if !current_disk_paths.contains(db_rel_path) {
-            info!("[Watcher] Purging ghost chunks for deleted file: {}", db_rel_path);
-            let _ = storage.delete_document(db_rel_path);
-            deleted_ghosts += 1;
-        }
-    }
-
-    // 4. Filter files needing re-indexing
-    let mut newly_indexed = 0;
-    let mut updated_files = 0;
-    let mut skipped_unmodified = 0;
-    let mut skipped_placeholders = 0;
-    let skipped_temp = 0;
-
-    let mut files_to_process = Vec::new();
-    for file in discovered_files {
-        // Cloud placeholder check (DEF-CLOUD-01)
-        if is_cloud_placeholder(&file.abs_path) {
-            info!("[Watcher] Skipping cloud offline placeholder: {}", file.rel_path);
-            skipped_placeholders += 1;
-            continue;
-        }
-
-        if let Some((_, old_mtime)) = db_docs_map.get(&file.rel_path) {
-            if *old_mtime == file.file_mtime && file.file_mtime > 0 {
-                // File modified time identical, skip parsing
-                skipped_unmodified += 1;
-                continue;
-            }
-            files_to_process.push((file, true)); // is_update = true
-        } else {
-            files_to_process.push((file, false)); // is_new = true
-        }
-    }
-
-    let files_count = files_to_process.len();
-    info!(
-        "[Watcher] Files to index: {}, unmodified: {}, placeholders: {}, ghosts deleted: {}",
-        files_count, skipped_unmodified, skipped_placeholders, deleted_ghosts
-    );
-
-    // 5. Ingestion with bounded batching and adaptive sleep (DEF-CONC-06)
-    let mut processed_count = 0;
-
-    for (file, is_update) in files_to_process {
-        if cancel_flag.load(Ordering::Relaxed) {
-            info!("[Watcher] Ingestion cancelled by user.");
-            break;
-        }
-
-        progress_callback(IndexProgress {
-            total_files: files_count,
-            processed_files: processed_count,
-            current_file: Some(file.rel_path.clone()),
-            status: "indexing".to_string(),
-            error_message: None,
-        });
-
-        let t_parse_start = Instant::now();
-
-        // Parse file to AST chunks
-        let parsed = match parse_file_to_document(
-            &file.rel_path,
-            &file.abs_path,
-            config.chunk_size,
-            config.chunk_overlap,
-        ) {
-            Ok(p) => p,
-            Err(e) => {
-                warn!("[Watcher] Failed to parse document {:?}: {}", file.abs_path, e);
-                processed_count += 1;
-                continue;
-            }
-        };
-
-        // Extract chunk texts for local embedding
-        let chunk_texts: Vec<String> = parsed.chunks.iter().map(|c| c.content.clone()).collect();
-        let mut embeddings = Vec::new();
-
-        if !chunk_texts.is_empty() {
-            match embedding_engine.embed_batch(&chunk_texts).await {
-                Ok(embs) => {
-                    embeddings = embs;
-                }
-                Err(err) => {
-                    error!("[Watcher] Embedding generation failed for {}: {}", file.rel_path, err);
-                    processed_count += 1;
-                    continue;
-                }
-            }
-        }
-
-        // Prepare insertion payload
-        let doc_record = DocumentRecord {
-            doc_id: parsed.document.doc_id.clone(),
-            rel_path: parsed.document.rel_path.clone(),
-            file_format: parsed.document.file_format.clone(),
-            content_hash: parsed.document.content_hash.clone(),
-            file_size: parsed.document.file_size,
-            file_mtime: parsed.document.file_mtime,
-            indexed_at: parsed.document.indexed_at,
-        };
-
-        let mut insert_payloads = Vec::with_capacity(parsed.chunks.len());
-        for (i, chunk) in parsed.chunks.into_iter().enumerate() {
-            let emb = embeddings.get(i).cloned();
-            insert_payloads.push(ChunkInsertPayload {
-                chunk_id: chunk.chunk_id,
-                doc_id: chunk.doc_id,
-                rel_path: file.rel_path.clone(),
-                chunk_index: chunk.chunk_index,
-                heading_path: chunk.heading_path,
-                start_line: chunk.start_line,
-                end_line: chunk.end_line,
-                page_number: chunk.page_number,
-                bounding_box: chunk.bounding_box,
-                char_offset: chunk.char_offset,
-                char_length: chunk.char_length,
-                content: chunk.content,
-                token_count: chunk.token_count,
-                embedding: emb,
-            });
-        }
-
-        // Atomic write to SQLite
-        if let Err(e) = storage.insert_document_batch(doc_record, insert_payloads) {
-            error!("[Watcher] SQLite insert batch failed for {}: {}", file.rel_path, e);
-        } else if is_update {
-            updated_files += 1;
-        } else {
-            newly_indexed += 1;
-        }
-
-        processed_count += 1;
-        let _ = t_parse_start.elapsed();
-    }
-
-    let elapsed = start_time.elapsed().as_millis() as u64;
-    info!(
-        "[Watcher] Pipeline finished in {}ms: {} new, {} updated, {} ghosts purged",
-        elapsed, newly_indexed, updated_files, deleted_ghosts
-    );
-
-    progress_callback(IndexProgress {
-        total_files: files_count,
-        processed_files: processed_count,
-        current_file: None,
-        status: "completed".to_string(),
-        error_message: None,
-    });
-
-    Ok(IndexSummary {
-        total_files_scanned: total_scanned,
-        newly_indexed,
-        updated_files,
-        skipped_unmodified,
-        deleted_ghosts,
-        skipped_placeholders,
-        skipped_temp_files: skipped_temp,
-        duration_ms: elapsed,
-    })
+    for (path,hash,_) in storage.get_all_documents()? {if file_sha256(&root.join(&path)).map_err(|error|format!("读取索引来源 {path}：{error}"))?!=hash {return Err(format!("完成校验时资料版本发生变化：{path}"));}}
+    let next_scan=scan_with_config(root,config)?;
+    let next_paths:HashSet<&str>=next_scan.files.iter().map(|file|file.rel_path.as_str()).collect();
+    if current_paths!=next_paths {return Err("索引期间工作区资料范围发生变化，请重新建立索引".into());}
+    let status=if failures.is_empty() && !scan.excluded.iter().any(|file|file.reason=="云端占位文件尚未下载") {"Ready"}else{"Partial"};
+    storage.validate_and_flush()?;
+    progress(IndexProgress {total_files:total,processed_files:total,current_file:None,status:status.into(),error_message:None,job_id:job_id.clone(),workspace_id});
+    Ok(IndexSummary {job_id,status:status.into(),index_generation:None,total_files_scanned:total,newly_indexed,updated_files:updated,skipped_unmodified:skipped,deleted_ghosts:deleted,skipped_placeholders:scan.excluded.iter().filter(|file|file.reason=="云端占位文件尚未下载").count(),skipped_temp_files:scan.excluded.iter().filter(|file|file.reason=="临时文件").count(),duration_ms:start.elapsed().as_millis() as u64,failed_files:failures,excluded_files:scan.excluded,scan_root:root.to_string_lossy().into_owned(),max_files:config.max_vault_files,max_depth:config.max_vault_depth,success_files:newly_indexed+updated+skipped})
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
-    fn test_temporary_file_filter_rules() {
-        assert!(is_temporary_or_ignored_file(".~stuart_tmp_document.md"));
-        assert!(is_temporary_or_ignored_file(".~stuart_tmp_1739281729_test.md"));
-        assert!(is_temporary_or_ignored_file("notes.md~"));
-        assert!(is_temporary_or_ignored_file("tempfile.tmp"));
-        assert!(is_temporary_or_ignored_file(".#document.org"));
-        assert!(is_temporary_or_ignored_file("~$paper.docx"));
-        assert!(is_temporary_or_ignored_file(".DS_Store"));
-        assert!(is_temporary_or_ignored_file("Thumbs.db"));
-
-        // Valid files must NOT be filtered
-        assert!(!is_temporary_or_ignored_file("paper.md"));
-        assert!(!is_temporary_or_ignored_file("analysis.pdf"));
-        assert!(!is_temporary_or_ignored_file("main.rs"));
+    fn actual_workspace_changes_report_create_write_rename_delete() {
+        let directory=std::env::temp_dir().join(format!("stuart-watch-{}",uuid::Uuid::new_v4()));std::fs::create_dir_all(&directory).unwrap();
+        let (sender,receiver)=std::sync::mpsc::channel();
+        let watcher=WorkspaceWatcher::start(&directory,&RagConfig::default(),move|event|sender.send(event).unwrap()).unwrap();
+        let wait=|expected:&str| {
+            let deadline=Instant::now()+std::time::Duration::from_secs(15);
+            loop {
+                let paths=receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())).expect("实际目录事件没有到达").unwrap();
+                if paths.iter().any(|path|path==expected) {break;}
+            }
+        };
+        let first=directory.join("actual.md");let renamed=directory.join("renamed.md");
+        std::fs::write(&first,"# 新建资料\n").unwrap();wait("actual.md");
+        while receiver.try_recv().is_ok() {}
+        std::fs::write(&first,"# 修改资料\n\n保存新的正文。\n").unwrap();wait("actual.md");
+        while receiver.try_recv().is_ok() {}
+        std::fs::rename(&first,&renamed).unwrap();wait("renamed.md");
+        while receiver.try_recv().is_ok() {}
+        std::fs::remove_file(&renamed).unwrap();wait("renamed.md");
+        drop(watcher);std::fs::remove_dir_all(directory).unwrap();
     }
-
     #[test]
-    fn test_ignored_directory_rules() {
-        assert!(is_ignored_directory(".git"));
-        assert!(is_ignored_directory("node_modules"));
-        assert!(is_ignored_directory("target"));
-        assert!(is_ignored_directory("__pycache__"));
-        assert!(is_ignored_directory(".stuartmd"));
-
-        // Valid directories
-        assert!(!is_ignored_directory("docs"));
-        assert!(!is_ignored_directory("chapters"));
-        assert!(!is_ignored_directory("src"));
+    fn scanner_includes_more_than_two_hundred_real_documents() {
+        let directory=std::env::temp_dir().join(format!("stuart-scan-{}",uuid::Uuid::new_v4()));std::fs::create_dir_all(&directory).unwrap();
+        for index in 0..201 {std::fs::write(directory.join(format!("document-{index}.md")),format!("# Document {index}\nActual text\n")).unwrap();}
+        assert_eq!(scan_workspace_files(&directory).unwrap().len(),201);
+        let mut config=RagConfig::default();config.max_vault_files=200;assert!(scan_with_config(&directory,&config).is_err());
+        std::fs::remove_dir_all(directory).unwrap();
     }
-
     #[test]
-    fn test_supported_extensions() {
-        assert!(is_supported_extension(Path::new("doc.md")));
-        assert!(is_supported_extension(Path::new("paper.pdf")));
-        assert!(is_supported_extension(Path::new("code.rs")));
-        assert!(is_supported_extension(Path::new("data.json")));
-        assert!(!is_supported_extension(Path::new("binary.exe")));
-        assert!(!is_supported_extension(Path::new("image.png")));
+    fn temporary_files_and_ignored_directories_have_explicit_rules() {
+        for name in [".~stuart_tmp_document.md","notes.md~","tempfile.tmp",".#document.org","~$paper.docx",".DS_Store","Thumbs.db"] {assert!(is_temporary_or_ignored_file(name));}
+        for name in ["paper.md","analysis.pdf","main.rs"] {assert!(!is_temporary_or_ignored_file(name));}
+        for name in [".git","node_modules","target","__pycache__",".stuartmd"] {assert!(is_ignored_directory(name));}
+        for name in ["docs","chapters","src"] {assert!(!is_ignored_directory(name));}
+        for name in ["doc.md","paper.pdf","code.rs","data.json"] {assert!(is_supported_extension(Path::new(name)));}
+        for name in ["binary.exe","image.png"] {assert!(!is_supported_extension(Path::new(name)));}
     }
 }

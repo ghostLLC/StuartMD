@@ -1,0 +1,88 @@
+        Info Looking up installed tauri packages to check mismatched versions...
+        Warn The bundle identifier "com.stuartmd.app" set in `"tauri.conf.json" identifier` ends with `.app`. This is not recommended because it conflicts with the application bundle extension on macOS.
+   Compiling stuartmd v3.5.11 (C:\Users\Administrator\Desktop\Stuart\tauri\src-tauri)
+warning: unused import: `PathBuf`
+ --> src\document\journal.rs:5:23
+  |
+5 | use std::path::{Path, PathBuf};
+  |                       ^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `ConflictDetails`
+ --> src\document\mod.rs:9:16
+  |
+9 | pub use save::{ConflictDetails, SaveOperation, SavePayload, SaveRequest, SaveResult, SaveStatus, SourceEdit};
+  |                ^^^^^^^^^^^^^^^
+
+warning: unused import: `std::path::PathBuf`
+ --> src\rag_ipc.rs:2:5
+  |
+2 | use std::path::PathBuf;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `Manager`
+  --> src\win_api.rs:12:13
+   |
+12 | use tauri::{Manager, PhysicalPosition, PhysicalSize};
+   |             ^^^^^^^
+
+warning: method `document_for_path` is never used
+   --> src\document\mod.rs:167:12
+    |
+ 74 | impl DocumentService {
+    | -------------------- method in this implementation
+...
+167 |     pub fn document_for_path(&self, owner: &str, path: &Path) -> Result<String, String> {
+    |            ^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `rects` is never read
+  --> src\document\pdf_annotations.rs:19:9
+   |
+ 8 | pub struct Annotation {
+   |            ---------- field in this struct
+...
+19 |     pub rects: Vec<Value>,
+   |         ^^^^^
+   |
+   = note: `Annotation` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: function `export_safe_name` is never used
+   --> src\fs_api.rs:283:8
+    |
+283 | pub fn export_safe_name(name: &str) -> String {
+    |        ^^^^^^^^^^^^^^^^
+
+warning: function `drafts_dir` is never used
+   --> src\fs_api.rs:698:4
+    |
+698 | fn drafts_dir() -> PathBuf {
+    |    ^^^^^^^^^^
+
+warning: function `draft_file_for` is never used
+   --> src\fs_api.rs:704:4
+    |
+704 | fn draft_file_for(path: &str) -> PathBuf {
+    |    ^^^^^^^^^^^^^^
+
+warning: type alias `RrfRankedChunk` is never used
+  --> src\rag_ipc.rs:27:10
+   |
+27 | pub type RrfRankedChunk=RagHitPayload;
+   |          ^^^^^^^^^^^^^^
+
+warning: linker stdout: 正在创建库 C:\Users\Administrator\Desktop\Stuart\tauri\src-tauri\target\release\deps\stuartmd.lib 和对象 C:\Users\Administrator\Desktop\Stuart\tauri\src-tauri\target\release\deps\stuartmd.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `stuartmd` (bin "stuartmd") generated 11 warnings (run `cargo fix --bin "stuartmd" -p stuartmd` to apply 3 suggestions)
+    Finished `release` profile [optimized] target(s) in 3m 02s
+       Built application at: C:\Users\Administrator\Desktop\Stuart\tauri\src-tauri\target\release\stuartmd.exe
+        Info Patching C:\Users\Administrator\Desktop\Stuart\tauri\src-tauri\target\release\stuartmd.exe with bundle type information: nsis
+        Info Target: x64
+     Running makensis to produce C:\Users\Administrator\Desktop\Stuart\tauri\src-tauri\target\release\bundle\nsis\StuartMD_3.5.11_x64-setup.exe
+    Finished 1 bundle at:
+        C:\Users\Administrator\Desktop\Stuart\tauri\src-tauri\target\release\bundle\nsis\StuartMD_3.5.11_x64-setup.exe
+

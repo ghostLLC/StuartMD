@@ -1,0 +1,82 @@
+[
+  {
+    "theme": "light",
+    "mode": "preview",
+    "nodeCount": 3
+  },
+  {
+    "theme": "light",
+    "mode": "split",
+    "nodeCount": 3
+  },
+  {
+    "theme": "gray",
+    "mode": "preview",
+    "nodeCount": 3
+  },
+  {
+    "theme": "gray",
+    "mode": "split",
+    "nodeCount": 3
+  },
+  {
+    "theme": "dark",
+    "mode": "preview",
+    "nodeCount": 3
+  },
+  {
+    "theme": "dark",
+    "mode": "split",
+    "nodeCount": 3
+  },
+  {
+    "theme": "sepia",
+    "mode": "preview",
+    "nodeCount": 3
+  },
+  {
+    "theme": "sepia",
+    "mode": "split",
+    "nodeCount": 3
+  },
+  {
+    "theme": "minion",
+    "mode": "preview",
+    "nodeCount": 3
+  },
+  {
+    "theme": "minion",
+    "mode": "split",
+    "nodeCount": 3
+  },
+  {
+    "theme": "wallpaper",
+    "mode": "preview",
+    "nodeCount": 3
+  },
+  {
+    "theme": "wallpaper",
+    "mode": "split",
+    "nodeCount": 3
+  },
+  {
+    "diagram": "sequenceDiagram",
+    "valid": true
+  },
+  {
+    "diagram": "classDiagram",
+    "valid": true
+  },
+  {
+    "diagram": "stateDiagram-v2",
+    "valid": true
+  },
+  {
+    "diagram": "pie title 文档类型",
+    "valid": true
+  },
+  {
+    "rapidDocumentSwitch": true,
+    "viewportWidth": 1000
+  }
+]
