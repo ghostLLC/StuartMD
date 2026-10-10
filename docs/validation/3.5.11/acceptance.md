@@ -1,8 +1,8 @@
 # 3.5.11 验收
 
-本次实际服务商范围为 DeepSeek。Kimi、Qwen、GLM 的在线接口验收没有包含在本次范围内。
+本次实际服务商范围为 DeepSeek。
 
-软件源代码 SHA-256：`3b7c3ae892fbb4f3ec3a56802527fd6e11328fbd140079aa8f3e40ef126019dc`。该指纹覆盖前端、Rust、样例、依赖锁定文件和资源清单；每个验收脚本记录实际执行前后的指纹。
+软件源代码 SHA-256：`b219aee8c8f01b4cdbe4338dc19e5981c3c76964f5d9fd73486cc0e1403202ab`。该指纹覆盖前端、Rust、样例、依赖锁定文件和资源清单；每个验收脚本记录实际执行前后的指纹。
 
 ## 已运行的检查
 
@@ -15,13 +15,14 @@
 | 写入权限拒绝 | 真实 Windows ACL 拒绝写入，原文件及恢复内容保持完整 | `core-tests.log` |
 | 保存期间终止进程 | 在 Preparing 阶段终止真实进程，持久化草稿恢复正确，未完成历史内容拒绝读取 | `core-tests.log` |
 | Mermaid | 17 项实际 Edge 浏览器检查通过，包括中文、换行、多个图表类型、阅读与分栏、六种主题 | `browser-tests.log`、`mermaid-matrix.json`、`mermaid-current.png` |
+| 块手柄 | 120 项实际鼠标悬浮检查通过，涵盖粗体、行内代码、链接、公式、列表、表格和代码块；复制、撤销、正文选择、侧栏关闭和源码模式检查通过 | `browser-tests.log`、`block-handle-matrix.json`、`block-handle-current.png` |
 | PDF.js | 实际中文与繁体中文 PDF、旋转、CropBox、真实选区、原生批注和本地资源通过 | `browser-tests.log`、`pdf-viewer-results.json` |
 | 安装资源 | 版本、原生运行库、PDF.js、168 个 CMaps、16 个字体、tokenizer 文件指纹通过 | `version-resources.json` |
 | 嵌入模型及索引 | 3 项真实模型、索引和 PDF 检查通过；独立 ONNX Runtime 参考计算通过；202 个真实文件进入索引 | `models-status.json`、`actual-models.json`、`actual-generations.json`、`actual-pdf.json` |
-| DeepSeek | 实际模型 deepseek-flash、32 个流式片段、usage、来源摘要、在线取消及关闭 AI 检查通过 | `providers-status.json`、`actual-deepseek.json` |
-| 本机安装及数据保留 | 3.5.10 升级到 3.5.11；安装包内的程序与实际安装文件指纹一致；19 项资源、15 个资料文件、4 个数据库和备份内容检查通过 | `installer-results.json`、`installer-tests.log` |
+| DeepSeek | 实际模型 deepseek-flash、38 个流式片段、usage、来源摘要、在线取消及关闭 AI 检查通过 | `providers-status.json`、`actual-deepseek.json` |
+| 本机安装及数据保留 | 本机 3.5.11 安装更新；安装包内的程序与实际安装文件指纹一致；19 项资源、16 个资料文件、5 个数据库、88 条记录和备份内容检查通过 | `installer-results.json`、`installer-tests.log` |
 | 安装后的进程启动 | 在用户资料的独立副本中启动实际安装程序，进程及 WebView2 运行正常，数据库完整性通过 | `installer-results.json` |
-| 原生界面完整操作 | 已安装程序的 WebDriver 会话建立超时；文件对话框、连续问答及多窗口操作未验收 | `native-status.json`、`native-ui-tests.log` |
+| 原生界面完整操作 | 文件对话框、连续问答及多窗口操作尚未验收 | `native-status.json`、`native-ui-tests.log` |
 | 公开发布 | 必要原生验收未完成，检查返回失败并阻止发布 | `publication-tests.log` |
 
 ## 审查编号验收范围
@@ -53,12 +54,12 @@
 
 `scripts/verify-release.ps1 -Publication` 要求 Core、Browser、Native、Models、Providers、Installer 全部执行通过，并具有当前源代码指纹。
 
-原生 WebDriver 的会话建立目前超时。原生文件对话框、两个问答界面、多窗口完整操作，以及隔离 Windows 环境的 3.5.10 到 3.5.11 升级尚未取得完整验收证据。公开发布检查继续阻止发布。
+原生文件对话框、两个问答界面、多窗口完整操作，以及隔离 Windows 环境的 3.5.10 到 3.5.11 升级尚未取得完整验收证据。公开发布检查继续阻止发布。
 
 本机安装检查对原有程序和用户数据建立备份；SQLite 使用在线备份接口，包含已提交的 WAL 内容。结果仅记录文件指纹、数量和数据库完整性，密钥正文及私有文档正文保留在本机。
 
 安装路径：`C:/Users/Administrator/AppData/Local/StuartMD/stuartmd.exe`。
 
-安装包：`tauri/src-tauri/target/release/bundle/nsis/StuartMD_3.5.11_x64-setup.exe`，SHA-256 为 `f5c8c73dc53542e946af2ce40dc4f7c1d0249f3a0d4cf7801ec7a968a4778ef9`。
+安装包：`tauri/src-tauri/target/release/bundle/nsis/StuartMD_3.5.11_x64-setup.exe`，SHA-256 为 `49b22ed16a99b065ab3815775ef40894583a0dc68527ace0fc13dba9056ff4ef`。
 
-实际安装程序 SHA-256：`6221f2e69f0781aa482f3b5823f5f0ef6a332be7a19d9eac4f26fb2f9f65d50c`。
+实际安装程序 SHA-256：`0a1e3e71efcbd740dc6b643c302a444990faf05bd538e18d1d63d3b21b12b3d9`。

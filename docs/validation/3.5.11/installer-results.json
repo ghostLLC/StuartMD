@@ -1,21 +1,21 @@
 {
   "schemaVersion": 1,
-  "previousVersion": "3.5.10",
+  "previousVersion": "3.5.11",
   "startedWithVersion": "3.5.11",
   "installedVersion": "3.5.11",
-  "applicationSha256": "6221f2e69f0781aa482f3b5823f5f0ef6a332be7a19d9eac4f26fb2f9f65d50c",
-  "installerSha256": "f5c8c73dc53542e946af2ce40dc4f7c1d0249f3a0d4cf7801ec7a968a4778ef9",
+  "applicationSha256": "0a1e3e71efcbd740dc6b643c302a444990faf05bd538e18d1d63d3b21b12b3d9",
+  "installerSha256": "49b22ed16a99b065ab3815775ef40894583a0dc68527ace0fc13dba9056ff4ef",
   "verifiedResources": 19,
   "userDataPreservation": {
-    "preservedFiles": 15,
-    "preservedDatabases": 4,
-    "preservedRows": 11
+    "preservedFiles": 16,
+    "preservedDatabases": 5,
+    "preservedRows": 88
   },
   "installedProcessStartup": "Passed",
   "webviewVersion": "154.0.4258.62",
-  "backupDirectory": "C:\\Users\\Administrator\\Desktop\\Stuart\\tests\\native-artifacts\\installer-ce6e1ca2-e359-4e76-9fb0-0c5a677faa05",
-  "upgradeBaselineDirectory": "C:/Users/Administrator/Desktop/Stuart/tests/native-artifacts/installer-1c5602f5-0126-43fc-b75d-d2837436f194",
+  "backupDirectory": "C:\\Users\\Administrator\\Desktop\\Stuart\\tests\\native-artifacts\\installer-1ec039fc-844f-4a16-aaca-30fb43428b0c",
+  "upgradeBaselineDirectory": "",
   "isolatedWindowsUpgrade": "NotVerified",
   "nativeUiAcceptance": "NotVerified",
-  "completedAt": "2026-10-10T09:16:59.9066424Z"
+  "completedAt": "2026-10-10T10:16:19.0452353Z"
 }

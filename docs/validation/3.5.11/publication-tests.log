@@ -24,8 +24,3 @@ AssertionError [ERR_ASSERTION]: Native 必要验收尚未通过
 }
 
 Node.js v24.19.0
-Exception: C:\Users\Administrator\Desktop\Stuart\scripts\verify-release.ps1:6
-Line |
-   6 |  if ($LASTEXITCODE -ne 0) { throw '版本与资源检查失败' }
-     |                             ~~~~~~~~~~~~~~~~~
-     | 版本与资源检查失败

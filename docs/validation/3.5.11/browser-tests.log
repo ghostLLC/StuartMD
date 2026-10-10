@@ -1,3 +1,4 @@
+{"passed":true,"hoverCases":120,"blockAction":"duplicate-and-undo","mediaHidden":true,"selectionHidden":true,"sourceModeHidden":true}
 {"name":"baseline","errors":[],"nodeCount":8}
 {"name":"current","errors":[],"nodeCount":8}
 {"matrixCases":17,"passed":true}

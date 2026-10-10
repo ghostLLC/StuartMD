@@ -1767,8 +1767,8 @@
       "confidence": 93.95986,
       "needsReview": false,
       "ocrOutputs": [
-        "C:\\Users\\Administrator\\Desktop\\Stuart\\tauri\\src-tauri\\../..\\tests/native-artifacts/models\\ocr-28df81db-ec55-4369-8f33-653f80a93246\\8ed0a4c63b65ae886ff96661d9b1ae84d66f94a7ac9eb078d77516e8db3a0e11\\3b8ded7e-fd70-4179-8ad8-b760b56901d6\\page-7.tsv",
-        "C:\\Users\\Administrator\\Desktop\\Stuart\\tauri\\src-tauri\\../..\\tests/native-artifacts/models\\ocr-28df81db-ec55-4369-8f33-653f80a93246\\8ed0a4c63b65ae886ff96661d9b1ae84d66f94a7ac9eb078d77516e8db3a0e11\\3b8ded7e-fd70-4179-8ad8-b760b56901d6\\page-7.150.tsv"
+        "C:\\Users\\Administrator\\Desktop\\Stuart\\tauri\\src-tauri\\../..\\tests/native-artifacts/models\\ocr-ffe762fa-6ffa-44ab-bb08-daed8a72b9c8\\8ed0a4c63b65ae886ff96661d9b1ae84d66f94a7ac9eb078d77516e8db3a0e11\\42658cc3-65ab-4671-8bef-428bc5ec54af\\page-7.tsv",
+        "C:\\Users\\Administrator\\Desktop\\Stuart\\tauri\\src-tauri\\../..\\tests/native-artifacts/models\\ocr-ffe762fa-6ffa-44ab-bb08-daed8a72b9c8\\8ed0a4c63b65ae886ff96661d9b1ae84d66f94a7ac9eb078d77516e8db3a0e11\\42658cc3-65ab-4671-8bef-428bc5ec54af\\page-7.150.tsv"
       ]
     },
     {
@@ -1980,8 +1980,8 @@
       "confidence": 95.72902,
       "needsReview": false,
       "ocrOutputs": [
-        "C:\\Users\\Administrator\\Desktop\\Stuart\\tauri\\src-tauri\\../..\\tests/native-artifacts/models\\ocr-28df81db-ec55-4369-8f33-653f80a93246\\8ed0a4c63b65ae886ff96661d9b1ae84d66f94a7ac9eb078d77516e8db3a0e11\\3b8ded7e-fd70-4179-8ad8-b760b56901d6\\page-8.tsv",
-        "C:\\Users\\Administrator\\Desktop\\Stuart\\tauri\\src-tauri\\../..\\tests/native-artifacts/models\\ocr-28df81db-ec55-4369-8f33-653f80a93246\\8ed0a4c63b65ae886ff96661d9b1ae84d66f94a7ac9eb078d77516e8db3a0e11\\3b8ded7e-fd70-4179-8ad8-b760b56901d6\\page-8.150.tsv"
+        "C:\\Users\\Administrator\\Desktop\\Stuart\\tauri\\src-tauri\\../..\\tests/native-artifacts/models\\ocr-ffe762fa-6ffa-44ab-bb08-daed8a72b9c8\\8ed0a4c63b65ae886ff96661d9b1ae84d66f94a7ac9eb078d77516e8db3a0e11\\42658cc3-65ab-4671-8bef-428bc5ec54af\\page-8.tsv",
+        "C:\\Users\\Administrator\\Desktop\\Stuart\\tauri\\src-tauri\\../..\\tests/native-artifacts/models\\ocr-ffe762fa-6ffa-44ab-bb08-daed8a72b9c8\\8ed0a4c63b65ae886ff96661d9b1ae84d66f94a7ac9eb078d77516e8db3a0e11\\42658cc3-65ab-4671-8bef-428bc5ec54af\\page-8.150.tsv"
       ]
     }
   ]

@@ -1,0 +1,3272 @@
+{
+  "cases": [
+    {
+      "name": "paragraph-bold",
+      "viewportWidth": 1340,
+      "mode": "preview",
+      "contentWidth": "default",
+      "handle": {
+        "left": 432,
+        "right": 478,
+        "top": 421.53125,
+        "bottom": 449.53125
+      },
+      "block": {
+        "left": 486,
+        "right": 1130,
+        "top": 407.9375,
+        "bottom": 491.125
+      },
+      "pane": {
+        "left": 262,
+        "right": 1340,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 17,
+      "handleIndex": 17
+    },
+    {
+      "name": "paragraph-code",
+      "viewportWidth": 1340,
+      "mode": "preview",
+      "contentWidth": "default",
+      "handle": {
+        "left": 432,
+        "right": 478,
+        "top": 567.515625,
+        "bottom": 595.515625
+      },
+      "block": {
+        "left": 486,
+        "right": 1130,
+        "top": 553.921875,
+        "bottom": 637.109375
+      },
+      "pane": {
+        "left": 262,
+        "right": 1340,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 33,
+      "handleIndex": 33
+    },
+    {
+      "name": "paragraph-link",
+      "viewportWidth": 1340,
+      "mode": "preview",
+      "contentWidth": "default",
+      "handle": {
+        "left": 432,
+        "right": 478,
+        "top": 650.703125,
+        "bottom": 678.703125
+      },
+      "block": {
+        "left": 486,
+        "right": 1130,
+        "top": 637.109375,
+        "bottom": 692.296875
+      },
+      "pane": {
+        "left": 262,
+        "right": 1340,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 34,
+      "handleIndex": 34
+    },
+    {
+      "name": "paragraph-emphasis",
+      "viewportWidth": 1340,
+      "mode": "preview",
+      "contentWidth": "default",
+      "handle": {
+        "left": 432,
+        "right": 478,
+        "top": 421.96875,
+        "bottom": 449.96875
+      },
+      "block": {
+        "left": 486,
+        "right": 1130,
+        "top": 408.375,
+        "bottom": 463.5625
+      },
+      "pane": {
+        "left": 262,
+        "right": 1340,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 27,
+      "handleIndex": 27
+    },
+    {
+      "name": "paragraph-underline",
+      "viewportWidth": 1340,
+      "mode": "preview",
+      "contentWidth": "default",
+      "handle": {
+        "left": 432,
+        "right": 478,
+        "top": 421.96875,
+        "bottom": 449.96875
+      },
+      "block": {
+        "left": 486,
+        "right": 1130,
+        "top": 408.375,
+        "bottom": 463.5625
+      },
+      "pane": {
+        "left": 262,
+        "right": 1340,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 27,
+      "handleIndex": 27
+    },
+    {
+      "name": "paragraph-math",
+      "viewportWidth": 1340,
+      "mode": "preview",
+      "contentWidth": "default",
+      "handle": {
+        "left": 432,
+        "right": 478,
+        "top": 421.515625,
+        "bottom": 449.515625
+      },
+      "block": {
+        "left": 486,
+        "right": 1130,
+        "top": 407.921875,
+        "bottom": 463.109375
+      },
+      "pane": {
+        "left": 262,
+        "right": 1340,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 12,
+      "handleIndex": 12
+    },
+    {
+      "name": "heading",
+      "viewportWidth": 1340,
+      "mode": "preview",
+      "contentWidth": "default",
+      "handle": {
+        "left": 432,
+        "right": 478,
+        "top": 416.015625,
+        "bottom": 444.015625
+      },
+      "block": {
+        "left": 486,
+        "right": 1130,
+        "top": 377.625,
+        "bottom": 471
+      },
+      "pane": {
+        "left": 262,
+        "right": 1340,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "H2",
+      "blockIndex": 31,
+      "handleIndex": 31
+    },
+    {
+      "name": "list-bold",
+      "viewportWidth": 1340,
+      "mode": "preview",
+      "contentWidth": "default",
+      "handle": {
+        "left": 432,
+        "right": 478,
+        "top": 421.3125,
+        "bottom": 449.3125
+      },
+      "block": {
+        "left": 486,
+        "right": 1130,
+        "top": 408.515625,
+        "bottom": 560.5
+      },
+      "pane": {
+        "left": 262,
+        "right": 1340,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "LI",
+      "blockIndex": 4,
+      "handleIndex": 4
+    },
+    {
+      "name": "table-code",
+      "viewportWidth": 1340,
+      "mode": "preview",
+      "contentWidth": "default",
+      "handle": {
+        "left": 432,
+        "right": 478,
+        "top": 413.796875,
+        "bottom": 441.796875
+      },
+      "block": {
+        "left": 486,
+        "right": 1130,
+        "top": 355,
+        "bottom": 721.921875
+      },
+      "pane": {
+        "left": 262,
+        "right": 1340,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "TR",
+      "blockIndex": 32,
+      "handleIndex": 32
+    },
+    {
+      "name": "code-block",
+      "viewportWidth": 1340,
+      "mode": "preview",
+      "contentWidth": "default",
+      "handle": {
+        "left": 432,
+        "right": 478,
+        "top": 363.15625,
+        "bottom": 391.15625
+      },
+      "block": {
+        "left": 486,
+        "right": 1130,
+        "top": 345.5625,
+        "bottom": 522.75
+      },
+      "pane": {
+        "left": 262,
+        "right": 1340,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "PRE",
+      "blockIndex": 28,
+      "handleIndex": 28
+    },
+    {
+      "name": "paragraph-bold",
+      "viewportWidth": 1340,
+      "mode": "preview",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 421.609375,
+        "bottom": 449.609375
+      },
+      "block": {
+        "left": 334,
+        "right": 1282,
+        "top": 408.015625,
+        "bottom": 491.203125
+      },
+      "pane": {
+        "left": 262,
+        "right": 1340,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 17,
+      "handleIndex": 17
+    },
+    {
+      "name": "paragraph-code",
+      "viewportWidth": 1340,
+      "mode": "preview",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 567.59375,
+        "bottom": 595.59375
+      },
+      "block": {
+        "left": 334,
+        "right": 1282,
+        "top": 554,
+        "bottom": 637.1875
+      },
+      "pane": {
+        "left": 262,
+        "right": 1340,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 33,
+      "handleIndex": 33
+    },
+    {
+      "name": "paragraph-link",
+      "viewportWidth": 1340,
+      "mode": "preview",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 650.78125,
+        "bottom": 678.78125
+      },
+      "block": {
+        "left": 334,
+        "right": 1282,
+        "top": 637.1875,
+        "bottom": 692.375
+      },
+      "pane": {
+        "left": 262,
+        "right": 1340,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 34,
+      "handleIndex": 34
+    },
+    {
+      "name": "paragraph-emphasis",
+      "viewportWidth": 1340,
+      "mode": "preview",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 421.046875,
+        "bottom": 449.046875
+      },
+      "block": {
+        "left": 334,
+        "right": 1282,
+        "top": 407.453125,
+        "bottom": 462.640625
+      },
+      "pane": {
+        "left": 262,
+        "right": 1340,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 27,
+      "handleIndex": 27
+    },
+    {
+      "name": "paragraph-underline",
+      "viewportWidth": 1340,
+      "mode": "preview",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 421.046875,
+        "bottom": 449.046875
+      },
+      "block": {
+        "left": 334,
+        "right": 1282,
+        "top": 407.453125,
+        "bottom": 462.640625
+      },
+      "pane": {
+        "left": 262,
+        "right": 1340,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 27,
+      "handleIndex": 27
+    },
+    {
+      "name": "paragraph-math",
+      "viewportWidth": 1340,
+      "mode": "preview",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 421.59375,
+        "bottom": 449.59375
+      },
+      "block": {
+        "left": 334,
+        "right": 1282,
+        "top": 408,
+        "bottom": 463.1875
+      },
+      "pane": {
+        "left": 262,
+        "right": 1340,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 12,
+      "handleIndex": 12
+    },
+    {
+      "name": "heading",
+      "viewportWidth": 1340,
+      "mode": "preview",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 416.09375,
+        "bottom": 444.09375
+      },
+      "block": {
+        "left": 334,
+        "right": 1282,
+        "top": 377.703125,
+        "bottom": 471.078125
+      },
+      "pane": {
+        "left": 262,
+        "right": 1340,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "H2",
+      "blockIndex": 31,
+      "handleIndex": 31
+    },
+    {
+      "name": "list-bold",
+      "viewportWidth": 1340,
+      "mode": "preview",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 421.3125,
+        "bottom": 449.3125
+      },
+      "block": {
+        "left": 334,
+        "right": 1282,
+        "top": 408.515625,
+        "bottom": 560.5
+      },
+      "pane": {
+        "left": 262,
+        "right": 1340,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "LI",
+      "blockIndex": 4,
+      "handleIndex": 4
+    },
+    {
+      "name": "table-code",
+      "viewportWidth": 1340,
+      "mode": "preview",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 413.875,
+        "bottom": 441.875
+      },
+      "block": {
+        "left": 334,
+        "right": 1282,
+        "top": 355.078125,
+        "bottom": 722
+      },
+      "pane": {
+        "left": 262,
+        "right": 1340,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "TR",
+      "blockIndex": 32,
+      "handleIndex": 32
+    },
+    {
+      "name": "code-block",
+      "viewportWidth": 1340,
+      "mode": "preview",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 363.234375,
+        "bottom": 391.234375
+      },
+      "block": {
+        "left": 334,
+        "right": 1282,
+        "top": 345.640625,
+        "bottom": 522.828125
+      },
+      "pane": {
+        "left": 262,
+        "right": 1340,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "PRE",
+      "blockIndex": 28,
+      "handleIndex": 28
+    },
+    {
+      "name": "paragraph-bold",
+      "viewportWidth": 1340,
+      "mode": "preview",
+      "contentWidth": "full",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 421.609375,
+        "bottom": 449.609375
+      },
+      "block": {
+        "left": 334,
+        "right": 1282,
+        "top": 408.015625,
+        "bottom": 491.203125
+      },
+      "pane": {
+        "left": 262,
+        "right": 1340,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 17,
+      "handleIndex": 17
+    },
+    {
+      "name": "paragraph-code",
+      "viewportWidth": 1340,
+      "mode": "preview",
+      "contentWidth": "full",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 567.59375,
+        "bottom": 595.59375
+      },
+      "block": {
+        "left": 334,
+        "right": 1282,
+        "top": 554,
+        "bottom": 637.1875
+      },
+      "pane": {
+        "left": 262,
+        "right": 1340,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 33,
+      "handleIndex": 33
+    },
+    {
+      "name": "paragraph-link",
+      "viewportWidth": 1340,
+      "mode": "preview",
+      "contentWidth": "full",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 650.78125,
+        "bottom": 678.78125
+      },
+      "block": {
+        "left": 334,
+        "right": 1282,
+        "top": 637.1875,
+        "bottom": 692.375
+      },
+      "pane": {
+        "left": 262,
+        "right": 1340,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 34,
+      "handleIndex": 34
+    },
+    {
+      "name": "paragraph-emphasis",
+      "viewportWidth": 1340,
+      "mode": "preview",
+      "contentWidth": "full",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 421.046875,
+        "bottom": 449.046875
+      },
+      "block": {
+        "left": 334,
+        "right": 1282,
+        "top": 407.453125,
+        "bottom": 462.640625
+      },
+      "pane": {
+        "left": 262,
+        "right": 1340,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 27,
+      "handleIndex": 27
+    },
+    {
+      "name": "paragraph-underline",
+      "viewportWidth": 1340,
+      "mode": "preview",
+      "contentWidth": "full",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 421.046875,
+        "bottom": 449.046875
+      },
+      "block": {
+        "left": 334,
+        "right": 1282,
+        "top": 407.453125,
+        "bottom": 462.640625
+      },
+      "pane": {
+        "left": 262,
+        "right": 1340,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 27,
+      "handleIndex": 27
+    },
+    {
+      "name": "paragraph-math",
+      "viewportWidth": 1340,
+      "mode": "preview",
+      "contentWidth": "full",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 421.59375,
+        "bottom": 449.59375
+      },
+      "block": {
+        "left": 334,
+        "right": 1282,
+        "top": 408,
+        "bottom": 463.1875
+      },
+      "pane": {
+        "left": 262,
+        "right": 1340,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 12,
+      "handleIndex": 12
+    },
+    {
+      "name": "heading",
+      "viewportWidth": 1340,
+      "mode": "preview",
+      "contentWidth": "full",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 416.09375,
+        "bottom": 444.09375
+      },
+      "block": {
+        "left": 334,
+        "right": 1282,
+        "top": 377.703125,
+        "bottom": 471.078125
+      },
+      "pane": {
+        "left": 262,
+        "right": 1340,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "H2",
+      "blockIndex": 31,
+      "handleIndex": 31
+    },
+    {
+      "name": "list-bold",
+      "viewportWidth": 1340,
+      "mode": "preview",
+      "contentWidth": "full",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 421.3125,
+        "bottom": 449.3125
+      },
+      "block": {
+        "left": 334,
+        "right": 1282,
+        "top": 408.515625,
+        "bottom": 560.5
+      },
+      "pane": {
+        "left": 262,
+        "right": 1340,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "LI",
+      "blockIndex": 4,
+      "handleIndex": 4
+    },
+    {
+      "name": "table-code",
+      "viewportWidth": 1340,
+      "mode": "preview",
+      "contentWidth": "full",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 413.875,
+        "bottom": 441.875
+      },
+      "block": {
+        "left": 334,
+        "right": 1282,
+        "top": 355.078125,
+        "bottom": 722
+      },
+      "pane": {
+        "left": 262,
+        "right": 1340,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "TR",
+      "blockIndex": 32,
+      "handleIndex": 32
+    },
+    {
+      "name": "code-block",
+      "viewportWidth": 1340,
+      "mode": "preview",
+      "contentWidth": "full",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 363.234375,
+        "bottom": 391.234375
+      },
+      "block": {
+        "left": 334,
+        "right": 1282,
+        "top": 345.640625,
+        "bottom": 522.828125
+      },
+      "pane": {
+        "left": 262,
+        "right": 1340,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "PRE",
+      "blockIndex": 28,
+      "handleIndex": 28
+    },
+    {
+      "name": "paragraph-bold",
+      "viewportWidth": 1340,
+      "mode": "split",
+      "contentWidth": "default",
+      "handle": {
+        "left": 288,
+        "right": 334,
+        "top": 393.21875,
+        "bottom": 421.21875
+      },
+      "block": {
+        "left": 342,
+        "right": 730,
+        "top": 379.625,
+        "bottom": 490.8125
+      },
+      "pane": {
+        "left": 262,
+        "right": 796,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 17,
+      "handleIndex": 17
+    },
+    {
+      "name": "paragraph-code",
+      "viewportWidth": 1340,
+      "mode": "split",
+      "contentWidth": "default",
+      "handle": {
+        "left": 288,
+        "right": 334,
+        "top": 511.203125,
+        "bottom": 539.203125
+      },
+      "block": {
+        "left": 342,
+        "right": 730,
+        "top": 497.609375,
+        "bottom": 636.796875
+      },
+      "pane": {
+        "left": 262,
+        "right": 796,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 33,
+      "handleIndex": 33
+    },
+    {
+      "name": "paragraph-link",
+      "viewportWidth": 1340,
+      "mode": "split",
+      "contentWidth": "default",
+      "handle": {
+        "left": 288,
+        "right": 334,
+        "top": 650.390625,
+        "bottom": 678.390625
+      },
+      "block": {
+        "left": 342,
+        "right": 730,
+        "top": 636.796875,
+        "bottom": 691.984375
+      },
+      "pane": {
+        "left": 262,
+        "right": 796,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 34,
+      "handleIndex": 34
+    },
+    {
+      "name": "paragraph-emphasis",
+      "viewportWidth": 1340,
+      "mode": "split",
+      "contentWidth": "default",
+      "handle": {
+        "left": 288,
+        "right": 334,
+        "top": 421.65625,
+        "bottom": 449.65625
+      },
+      "block": {
+        "left": 342,
+        "right": 730,
+        "top": 408.0625,
+        "bottom": 463.25
+      },
+      "pane": {
+        "left": 262,
+        "right": 796,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 27,
+      "handleIndex": 27
+    },
+    {
+      "name": "paragraph-underline",
+      "viewportWidth": 1340,
+      "mode": "split",
+      "contentWidth": "default",
+      "handle": {
+        "left": 288,
+        "right": 334,
+        "top": 421.65625,
+        "bottom": 449.65625
+      },
+      "block": {
+        "left": 342,
+        "right": 730,
+        "top": 408.0625,
+        "bottom": 463.25
+      },
+      "pane": {
+        "left": 262,
+        "right": 796,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 27,
+      "handleIndex": 27
+    },
+    {
+      "name": "paragraph-math",
+      "viewportWidth": 1340,
+      "mode": "split",
+      "contentWidth": "default",
+      "handle": {
+        "left": 288,
+        "right": 334,
+        "top": 422.203125,
+        "bottom": 450.203125
+      },
+      "block": {
+        "left": 342,
+        "right": 730,
+        "top": 408.609375,
+        "bottom": 463.796875
+      },
+      "pane": {
+        "left": 262,
+        "right": 796,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 12,
+      "handleIndex": 12
+    },
+    {
+      "name": "heading",
+      "viewportWidth": 1340,
+      "mode": "split",
+      "contentWidth": "default",
+      "handle": {
+        "left": 288,
+        "right": 334,
+        "top": 415.703125,
+        "bottom": 443.703125
+      },
+      "block": {
+        "left": 342,
+        "right": 730,
+        "top": 377.3125,
+        "bottom": 470.6875
+      },
+      "pane": {
+        "left": 262,
+        "right": 796,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "H2",
+      "blockIndex": 31,
+      "handleIndex": 31
+    },
+    {
+      "name": "list-bold",
+      "viewportWidth": 1340,
+      "mode": "split",
+      "contentWidth": "default",
+      "handle": {
+        "left": 288,
+        "right": 334,
+        "top": 421.3125,
+        "bottom": 449.3125
+      },
+      "block": {
+        "left": 342,
+        "right": 730,
+        "top": 408.515625,
+        "bottom": 672.5
+      },
+      "pane": {
+        "left": 262,
+        "right": 796,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "LI",
+      "blockIndex": 4,
+      "handleIndex": 4
+    },
+    {
+      "name": "table-code",
+      "viewportWidth": 1340,
+      "mode": "split",
+      "contentWidth": "default",
+      "handle": {
+        "left": 288,
+        "right": 334,
+        "top": 413.484375,
+        "bottom": 441.484375
+      },
+      "block": {
+        "left": 342,
+        "right": 730,
+        "top": 354.6875,
+        "bottom": 721.609375
+      },
+      "pane": {
+        "left": 262,
+        "right": 796,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "TR",
+      "blockIndex": 32,
+      "handleIndex": 32
+    },
+    {
+      "name": "code-block",
+      "viewportWidth": 1340,
+      "mode": "split",
+      "contentWidth": "default",
+      "handle": {
+        "left": 288,
+        "right": 334,
+        "top": 363.84375,
+        "bottom": 391.84375
+      },
+      "block": {
+        "left": 342,
+        "right": 730,
+        "top": 346.25,
+        "bottom": 523.4375
+      },
+      "pane": {
+        "left": 262,
+        "right": 796,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "PRE",
+      "blockIndex": 28,
+      "handleIndex": 28
+    },
+    {
+      "name": "paragraph-bold",
+      "viewportWidth": 1340,
+      "mode": "split",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 393.75,
+        "bottom": 421.75
+      },
+      "block": {
+        "left": 334,
+        "right": 738,
+        "top": 380.15625,
+        "bottom": 491.34375
+      },
+      "pane": {
+        "left": 262,
+        "right": 796,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 17,
+      "handleIndex": 17
+    },
+    {
+      "name": "paragraph-code",
+      "viewportWidth": 1340,
+      "mode": "split",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 538.734375,
+        "bottom": 566.734375
+      },
+      "block": {
+        "left": 334,
+        "right": 738,
+        "top": 525.140625,
+        "bottom": 636.328125
+      },
+      "pane": {
+        "left": 262,
+        "right": 796,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 33,
+      "handleIndex": 33
+    },
+    {
+      "name": "paragraph-link",
+      "viewportWidth": 1340,
+      "mode": "split",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 649.921875,
+        "bottom": 677.921875
+      },
+      "block": {
+        "left": 334,
+        "right": 738,
+        "top": 636.328125,
+        "bottom": 691.515625
+      },
+      "pane": {
+        "left": 262,
+        "right": 796,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 34,
+      "handleIndex": 34
+    },
+    {
+      "name": "paragraph-emphasis",
+      "viewportWidth": 1340,
+      "mode": "split",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 421.1875,
+        "bottom": 449.1875
+      },
+      "block": {
+        "left": 334,
+        "right": 738,
+        "top": 407.59375,
+        "bottom": 462.78125
+      },
+      "pane": {
+        "left": 262,
+        "right": 796,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 27,
+      "handleIndex": 27
+    },
+    {
+      "name": "paragraph-underline",
+      "viewportWidth": 1340,
+      "mode": "split",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 421.1875,
+        "bottom": 449.1875
+      },
+      "block": {
+        "left": 334,
+        "right": 738,
+        "top": 407.59375,
+        "bottom": 462.78125
+      },
+      "pane": {
+        "left": 262,
+        "right": 796,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 27,
+      "handleIndex": 27
+    },
+    {
+      "name": "paragraph-math",
+      "viewportWidth": 1340,
+      "mode": "split",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 421.734375,
+        "bottom": 449.734375
+      },
+      "block": {
+        "left": 334,
+        "right": 738,
+        "top": 408.140625,
+        "bottom": 463.328125
+      },
+      "pane": {
+        "left": 262,
+        "right": 796,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 12,
+      "handleIndex": 12
+    },
+    {
+      "name": "heading",
+      "viewportWidth": 1340,
+      "mode": "split",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 416.234375,
+        "bottom": 444.234375
+      },
+      "block": {
+        "left": 334,
+        "right": 738,
+        "top": 377.84375,
+        "bottom": 471.21875
+      },
+      "pane": {
+        "left": 262,
+        "right": 796,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "H2",
+      "blockIndex": 31,
+      "handleIndex": 31
+    },
+    {
+      "name": "list-bold",
+      "viewportWidth": 1340,
+      "mode": "split",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 421.3125,
+        "bottom": 449.3125
+      },
+      "block": {
+        "left": 334,
+        "right": 738,
+        "top": 408.515625,
+        "bottom": 672.5
+      },
+      "pane": {
+        "left": 262,
+        "right": 796,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "LI",
+      "blockIndex": 4,
+      "handleIndex": 4
+    },
+    {
+      "name": "table-code",
+      "viewportWidth": 1340,
+      "mode": "split",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 413.015625,
+        "bottom": 441.015625
+      },
+      "block": {
+        "left": 334,
+        "right": 738,
+        "top": 354.21875,
+        "bottom": 721.140625
+      },
+      "pane": {
+        "left": 262,
+        "right": 796,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "TR",
+      "blockIndex": 32,
+      "handleIndex": 32
+    },
+    {
+      "name": "code-block",
+      "viewportWidth": 1340,
+      "mode": "split",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 363.375,
+        "bottom": 391.375
+      },
+      "block": {
+        "left": 334,
+        "right": 738,
+        "top": 345.78125,
+        "bottom": 522.96875
+      },
+      "pane": {
+        "left": 262,
+        "right": 796,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "PRE",
+      "blockIndex": 28,
+      "handleIndex": 28
+    },
+    {
+      "name": "paragraph-bold",
+      "viewportWidth": 1340,
+      "mode": "split",
+      "contentWidth": "full",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 393.75,
+        "bottom": 421.75
+      },
+      "block": {
+        "left": 334,
+        "right": 738,
+        "top": 380.15625,
+        "bottom": 491.34375
+      },
+      "pane": {
+        "left": 262,
+        "right": 796,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 17,
+      "handleIndex": 17
+    },
+    {
+      "name": "paragraph-code",
+      "viewportWidth": 1340,
+      "mode": "split",
+      "contentWidth": "full",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 538.734375,
+        "bottom": 566.734375
+      },
+      "block": {
+        "left": 334,
+        "right": 738,
+        "top": 525.140625,
+        "bottom": 636.328125
+      },
+      "pane": {
+        "left": 262,
+        "right": 796,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 33,
+      "handleIndex": 33
+    },
+    {
+      "name": "paragraph-link",
+      "viewportWidth": 1340,
+      "mode": "split",
+      "contentWidth": "full",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 649.921875,
+        "bottom": 677.921875
+      },
+      "block": {
+        "left": 334,
+        "right": 738,
+        "top": 636.328125,
+        "bottom": 691.515625
+      },
+      "pane": {
+        "left": 262,
+        "right": 796,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 34,
+      "handleIndex": 34
+    },
+    {
+      "name": "paragraph-emphasis",
+      "viewportWidth": 1340,
+      "mode": "split",
+      "contentWidth": "full",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 421.1875,
+        "bottom": 449.1875
+      },
+      "block": {
+        "left": 334,
+        "right": 738,
+        "top": 407.59375,
+        "bottom": 462.78125
+      },
+      "pane": {
+        "left": 262,
+        "right": 796,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 27,
+      "handleIndex": 27
+    },
+    {
+      "name": "paragraph-underline",
+      "viewportWidth": 1340,
+      "mode": "split",
+      "contentWidth": "full",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 421.1875,
+        "bottom": 449.1875
+      },
+      "block": {
+        "left": 334,
+        "right": 738,
+        "top": 407.59375,
+        "bottom": 462.78125
+      },
+      "pane": {
+        "left": 262,
+        "right": 796,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 27,
+      "handleIndex": 27
+    },
+    {
+      "name": "paragraph-math",
+      "viewportWidth": 1340,
+      "mode": "split",
+      "contentWidth": "full",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 421.734375,
+        "bottom": 449.734375
+      },
+      "block": {
+        "left": 334,
+        "right": 738,
+        "top": 408.140625,
+        "bottom": 463.328125
+      },
+      "pane": {
+        "left": 262,
+        "right": 796,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 12,
+      "handleIndex": 12
+    },
+    {
+      "name": "heading",
+      "viewportWidth": 1340,
+      "mode": "split",
+      "contentWidth": "full",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 416.234375,
+        "bottom": 444.234375
+      },
+      "block": {
+        "left": 334,
+        "right": 738,
+        "top": 377.84375,
+        "bottom": 471.21875
+      },
+      "pane": {
+        "left": 262,
+        "right": 796,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "H2",
+      "blockIndex": 31,
+      "handleIndex": 31
+    },
+    {
+      "name": "list-bold",
+      "viewportWidth": 1340,
+      "mode": "split",
+      "contentWidth": "full",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 421.3125,
+        "bottom": 449.3125
+      },
+      "block": {
+        "left": 334,
+        "right": 738,
+        "top": 408.515625,
+        "bottom": 672.5
+      },
+      "pane": {
+        "left": 262,
+        "right": 796,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "LI",
+      "blockIndex": 4,
+      "handleIndex": 4
+    },
+    {
+      "name": "table-code",
+      "viewportWidth": 1340,
+      "mode": "split",
+      "contentWidth": "full",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 413.015625,
+        "bottom": 441.015625
+      },
+      "block": {
+        "left": 334,
+        "right": 738,
+        "top": 354.21875,
+        "bottom": 721.140625
+      },
+      "pane": {
+        "left": 262,
+        "right": 796,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "TR",
+      "blockIndex": 32,
+      "handleIndex": 32
+    },
+    {
+      "name": "code-block",
+      "viewportWidth": 1340,
+      "mode": "split",
+      "contentWidth": "full",
+      "handle": {
+        "left": 280,
+        "right": 326,
+        "top": 363.375,
+        "bottom": 391.375
+      },
+      "block": {
+        "left": 334,
+        "right": 738,
+        "top": 345.78125,
+        "bottom": 522.96875
+      },
+      "pane": {
+        "left": 262,
+        "right": 796,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "PRE",
+      "blockIndex": 28,
+      "handleIndex": 28
+    },
+    {
+      "name": "paragraph-bold",
+      "viewportWidth": 760,
+      "mode": "preview",
+      "contentWidth": "default",
+      "handle": {
+        "left": 28,
+        "right": 74,
+        "top": 421.484375,
+        "bottom": 449.484375
+      },
+      "block": {
+        "left": 82,
+        "right": 694,
+        "top": 407.890625,
+        "bottom": 491.078125
+      },
+      "pane": {
+        "left": 2,
+        "right": 760,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 17,
+      "handleIndex": 17
+    },
+    {
+      "name": "paragraph-code",
+      "viewportWidth": 760,
+      "mode": "preview",
+      "contentWidth": "default",
+      "handle": {
+        "left": 28,
+        "right": 74,
+        "top": 573.875,
+        "bottom": 601.875
+      },
+      "block": {
+        "left": 82,
+        "right": 694,
+        "top": 573.875,
+        "bottom": 657.0625
+      },
+      "pane": {
+        "left": 2,
+        "right": 760,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 33,
+      "handleIndex": 33
+    },
+    {
+      "name": "paragraph-link",
+      "viewportWidth": 760,
+      "mode": "preview",
+      "contentWidth": "default",
+      "handle": {
+        "left": 28,
+        "right": 74,
+        "top": 657.0625,
+        "bottom": 685.0625
+      },
+      "block": {
+        "left": 82,
+        "right": 694,
+        "top": 657.0625,
+        "bottom": 712.25
+      },
+      "pane": {
+        "left": 2,
+        "right": 760,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 34,
+      "handleIndex": 34
+    },
+    {
+      "name": "paragraph-emphasis",
+      "viewportWidth": 760,
+      "mode": "preview",
+      "contentWidth": "default",
+      "handle": {
+        "left": 28,
+        "right": 74,
+        "top": 408.328125,
+        "bottom": 436.328125
+      },
+      "block": {
+        "left": 82,
+        "right": 694,
+        "top": 408.328125,
+        "bottom": 463.515625
+      },
+      "pane": {
+        "left": 2,
+        "right": 760,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 27,
+      "handleIndex": 27
+    },
+    {
+      "name": "paragraph-underline",
+      "viewportWidth": 760,
+      "mode": "preview",
+      "contentWidth": "default",
+      "handle": {
+        "left": 28,
+        "right": 74,
+        "top": 421.921875,
+        "bottom": 449.921875
+      },
+      "block": {
+        "left": 82,
+        "right": 694,
+        "top": 408.328125,
+        "bottom": 463.515625
+      },
+      "pane": {
+        "left": 2,
+        "right": 760,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 27,
+      "handleIndex": 27
+    },
+    {
+      "name": "paragraph-math",
+      "viewportWidth": 760,
+      "mode": "preview",
+      "contentWidth": "default",
+      "handle": {
+        "left": 28,
+        "right": 74,
+        "top": 408.875,
+        "bottom": 436.875
+      },
+      "block": {
+        "left": 82,
+        "right": 694,
+        "top": 408.875,
+        "bottom": 464.0625
+      },
+      "pane": {
+        "left": 2,
+        "right": 760,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 12,
+      "handleIndex": 12
+    },
+    {
+      "name": "heading",
+      "viewportWidth": 760,
+      "mode": "preview",
+      "contentWidth": "default",
+      "handle": {
+        "left": 28,
+        "right": 74,
+        "top": 377.578125,
+        "bottom": 405.578125
+      },
+      "block": {
+        "left": 82,
+        "right": 694,
+        "top": 377.578125,
+        "bottom": 470.953125
+      },
+      "pane": {
+        "left": 2,
+        "right": 760,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 31,
+      "handleIndex": 31
+    },
+    {
+      "name": "list-bold",
+      "viewportWidth": 760,
+      "mode": "preview",
+      "contentWidth": "default",
+      "handle": {
+        "left": 28,
+        "right": 74,
+        "top": 421.3125,
+        "bottom": 449.3125
+      },
+      "block": {
+        "left": 82,
+        "right": 694,
+        "top": 408.515625,
+        "bottom": 560.5
+      },
+      "pane": {
+        "left": 2,
+        "right": 760,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "LI",
+      "blockIndex": 4,
+      "handleIndex": 4
+    },
+    {
+      "name": "table-code",
+      "viewportWidth": 760,
+      "mode": "preview",
+      "contentWidth": "default",
+      "handle": {
+        "left": 28,
+        "right": 74,
+        "top": 413.75,
+        "bottom": 441.75
+      },
+      "block": {
+        "left": 82,
+        "right": 694,
+        "top": 354.953125,
+        "bottom": 721.875
+      },
+      "pane": {
+        "left": 2,
+        "right": 760,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "TR",
+      "blockIndex": 32,
+      "handleIndex": 32
+    },
+    {
+      "name": "code-block",
+      "viewportWidth": 760,
+      "mode": "preview",
+      "contentWidth": "default",
+      "handle": {
+        "left": 28,
+        "right": 74,
+        "top": 345.515625,
+        "bottom": 373.515625
+      },
+      "block": {
+        "left": 82,
+        "right": 694,
+        "top": 345.515625,
+        "bottom": 522.703125
+      },
+      "pane": {
+        "left": 2,
+        "right": 760,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 28,
+      "handleIndex": 28
+    },
+    {
+      "name": "paragraph-bold",
+      "viewportWidth": 760,
+      "mode": "preview",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 421.421875,
+        "bottom": 449.421875
+      },
+      "block": {
+        "left": 74,
+        "right": 730,
+        "top": 407.828125,
+        "bottom": 491.015625
+      },
+      "pane": {
+        "left": 2,
+        "right": 760,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 17,
+      "handleIndex": 17
+    },
+    {
+      "name": "paragraph-code",
+      "viewportWidth": 760,
+      "mode": "preview",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 573.8125,
+        "bottom": 601.8125
+      },
+      "block": {
+        "left": 74,
+        "right": 730,
+        "top": 573.8125,
+        "bottom": 657
+      },
+      "pane": {
+        "left": 2,
+        "right": 760,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 33,
+      "handleIndex": 33
+    },
+    {
+      "name": "paragraph-link",
+      "viewportWidth": 760,
+      "mode": "preview",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 657,
+        "bottom": 685
+      },
+      "block": {
+        "left": 74,
+        "right": 730,
+        "top": 657,
+        "bottom": 712.1875
+      },
+      "pane": {
+        "left": 2,
+        "right": 760,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 34,
+      "handleIndex": 34
+    },
+    {
+      "name": "paragraph-emphasis",
+      "viewportWidth": 760,
+      "mode": "preview",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 408.265625,
+        "bottom": 436.265625
+      },
+      "block": {
+        "left": 74,
+        "right": 730,
+        "top": 408.265625,
+        "bottom": 463.453125
+      },
+      "pane": {
+        "left": 2,
+        "right": 760,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 27,
+      "handleIndex": 27
+    },
+    {
+      "name": "paragraph-underline",
+      "viewportWidth": 760,
+      "mode": "preview",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 421.859375,
+        "bottom": 449.859375
+      },
+      "block": {
+        "left": 74,
+        "right": 730,
+        "top": 408.265625,
+        "bottom": 463.453125
+      },
+      "pane": {
+        "left": 2,
+        "right": 760,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 27,
+      "handleIndex": 27
+    },
+    {
+      "name": "paragraph-math",
+      "viewportWidth": 760,
+      "mode": "preview",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 408.8125,
+        "bottom": 436.8125
+      },
+      "block": {
+        "left": 74,
+        "right": 730,
+        "top": 408.8125,
+        "bottom": 464
+      },
+      "pane": {
+        "left": 2,
+        "right": 760,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 12,
+      "handleIndex": 12
+    },
+    {
+      "name": "heading",
+      "viewportWidth": 760,
+      "mode": "preview",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 377.515625,
+        "bottom": 405.515625
+      },
+      "block": {
+        "left": 74,
+        "right": 730,
+        "top": 377.515625,
+        "bottom": 470.890625
+      },
+      "pane": {
+        "left": 2,
+        "right": 760,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 31,
+      "handleIndex": 31
+    },
+    {
+      "name": "list-bold",
+      "viewportWidth": 760,
+      "mode": "preview",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 421.3125,
+        "bottom": 449.3125
+      },
+      "block": {
+        "left": 74,
+        "right": 730,
+        "top": 408.515625,
+        "bottom": 560.5
+      },
+      "pane": {
+        "left": 2,
+        "right": 760,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "LI",
+      "blockIndex": 4,
+      "handleIndex": 4
+    },
+    {
+      "name": "table-code",
+      "viewportWidth": 760,
+      "mode": "preview",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 413.6875,
+        "bottom": 441.6875
+      },
+      "block": {
+        "left": 74,
+        "right": 730,
+        "top": 354.890625,
+        "bottom": 721.8125
+      },
+      "pane": {
+        "left": 2,
+        "right": 760,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "TR",
+      "blockIndex": 32,
+      "handleIndex": 32
+    },
+    {
+      "name": "code-block",
+      "viewportWidth": 760,
+      "mode": "preview",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 345.453125,
+        "bottom": 373.453125
+      },
+      "block": {
+        "left": 74,
+        "right": 730,
+        "top": 345.453125,
+        "bottom": 522.640625
+      },
+      "pane": {
+        "left": 2,
+        "right": 760,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 28,
+      "handleIndex": 28
+    },
+    {
+      "name": "paragraph-bold",
+      "viewportWidth": 760,
+      "mode": "preview",
+      "contentWidth": "full",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 421.421875,
+        "bottom": 449.421875
+      },
+      "block": {
+        "left": 74,
+        "right": 730,
+        "top": 407.828125,
+        "bottom": 491.015625
+      },
+      "pane": {
+        "left": 2,
+        "right": 760,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 17,
+      "handleIndex": 17
+    },
+    {
+      "name": "paragraph-code",
+      "viewportWidth": 760,
+      "mode": "preview",
+      "contentWidth": "full",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 573.8125,
+        "bottom": 601.8125
+      },
+      "block": {
+        "left": 74,
+        "right": 730,
+        "top": 573.8125,
+        "bottom": 657
+      },
+      "pane": {
+        "left": 2,
+        "right": 760,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 33,
+      "handleIndex": 33
+    },
+    {
+      "name": "paragraph-link",
+      "viewportWidth": 760,
+      "mode": "preview",
+      "contentWidth": "full",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 657,
+        "bottom": 685
+      },
+      "block": {
+        "left": 74,
+        "right": 730,
+        "top": 657,
+        "bottom": 712.1875
+      },
+      "pane": {
+        "left": 2,
+        "right": 760,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 34,
+      "handleIndex": 34
+    },
+    {
+      "name": "paragraph-emphasis",
+      "viewportWidth": 760,
+      "mode": "preview",
+      "contentWidth": "full",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 408.265625,
+        "bottom": 436.265625
+      },
+      "block": {
+        "left": 74,
+        "right": 730,
+        "top": 408.265625,
+        "bottom": 463.453125
+      },
+      "pane": {
+        "left": 2,
+        "right": 760,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 27,
+      "handleIndex": 27
+    },
+    {
+      "name": "paragraph-underline",
+      "viewportWidth": 760,
+      "mode": "preview",
+      "contentWidth": "full",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 421.859375,
+        "bottom": 449.859375
+      },
+      "block": {
+        "left": 74,
+        "right": 730,
+        "top": 408.265625,
+        "bottom": 463.453125
+      },
+      "pane": {
+        "left": 2,
+        "right": 760,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 27,
+      "handleIndex": 27
+    },
+    {
+      "name": "paragraph-math",
+      "viewportWidth": 760,
+      "mode": "preview",
+      "contentWidth": "full",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 408.8125,
+        "bottom": 436.8125
+      },
+      "block": {
+        "left": 74,
+        "right": 730,
+        "top": 408.8125,
+        "bottom": 464
+      },
+      "pane": {
+        "left": 2,
+        "right": 760,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 12,
+      "handleIndex": 12
+    },
+    {
+      "name": "heading",
+      "viewportWidth": 760,
+      "mode": "preview",
+      "contentWidth": "full",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 377.515625,
+        "bottom": 405.515625
+      },
+      "block": {
+        "left": 74,
+        "right": 730,
+        "top": 377.515625,
+        "bottom": 470.890625
+      },
+      "pane": {
+        "left": 2,
+        "right": 760,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 31,
+      "handleIndex": 31
+    },
+    {
+      "name": "list-bold",
+      "viewportWidth": 760,
+      "mode": "preview",
+      "contentWidth": "full",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 421.3125,
+        "bottom": 449.3125
+      },
+      "block": {
+        "left": 74,
+        "right": 730,
+        "top": 408.515625,
+        "bottom": 560.5
+      },
+      "pane": {
+        "left": 2,
+        "right": 760,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "LI",
+      "blockIndex": 4,
+      "handleIndex": 4
+    },
+    {
+      "name": "table-code",
+      "viewportWidth": 760,
+      "mode": "preview",
+      "contentWidth": "full",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 413.6875,
+        "bottom": 441.6875
+      },
+      "block": {
+        "left": 74,
+        "right": 730,
+        "top": 354.890625,
+        "bottom": 721.8125
+      },
+      "pane": {
+        "left": 2,
+        "right": 760,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "TR",
+      "blockIndex": 32,
+      "handleIndex": 32
+    },
+    {
+      "name": "code-block",
+      "viewportWidth": 760,
+      "mode": "preview",
+      "contentWidth": "full",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 345.453125,
+        "bottom": 373.453125
+      },
+      "block": {
+        "left": 74,
+        "right": 730,
+        "top": 345.453125,
+        "bottom": 522.640625
+      },
+      "pane": {
+        "left": 2,
+        "right": 760,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 28,
+      "handleIndex": 28
+    },
+    {
+      "name": "paragraph-bold",
+      "viewportWidth": 760,
+      "mode": "split",
+      "contentWidth": "default",
+      "handle": {
+        "left": 28,
+        "right": 74,
+        "top": 227.625,
+        "bottom": 255.625
+      },
+      "block": {
+        "left": 82,
+        "right": 310,
+        "top": 214.03125,
+        "bottom": 409.21875
+      },
+      "pane": {
+        "left": 2,
+        "right": 376,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 17,
+      "handleIndex": 17
+    },
+    {
+      "name": "paragraph-code",
+      "viewportWidth": 760,
+      "mode": "split",
+      "contentWidth": "default",
+      "handle": {
+        "left": 28,
+        "right": 74,
+        "top": 461.46875,
+        "bottom": 489.46875
+      },
+      "block": {
+        "left": 82,
+        "right": 310,
+        "top": 461.46875,
+        "bottom": 628.65625
+      },
+      "pane": {
+        "left": 2,
+        "right": 376,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 33,
+      "handleIndex": 33
+    },
+    {
+      "name": "paragraph-link",
+      "viewportWidth": 760,
+      "mode": "split",
+      "contentWidth": "default",
+      "handle": {
+        "left": 28,
+        "right": 74,
+        "top": 628.65625,
+        "bottom": 656.65625
+      },
+      "block": {
+        "left": 82,
+        "right": 310,
+        "top": 628.65625,
+        "bottom": 711.84375
+      },
+      "pane": {
+        "left": 2,
+        "right": 376,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 34,
+      "handleIndex": 34
+    },
+    {
+      "name": "paragraph-emphasis",
+      "viewportWidth": 760,
+      "mode": "split",
+      "contentWidth": "default",
+      "handle": {
+        "left": 28,
+        "right": 74,
+        "top": 407.46875,
+        "bottom": 435.46875
+      },
+      "block": {
+        "left": 82,
+        "right": 310,
+        "top": 407.46875,
+        "bottom": 490.65625
+      },
+      "pane": {
+        "left": 2,
+        "right": 376,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 27,
+      "handleIndex": 27
+    },
+    {
+      "name": "paragraph-underline",
+      "viewportWidth": 760,
+      "mode": "split",
+      "contentWidth": "default",
+      "handle": {
+        "left": 28,
+        "right": 74,
+        "top": 407.46875,
+        "bottom": 435.46875
+      },
+      "block": {
+        "left": 82,
+        "right": 310,
+        "top": 407.46875,
+        "bottom": 490.65625
+      },
+      "pane": {
+        "left": 2,
+        "right": 376,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 27,
+      "handleIndex": 27
+    },
+    {
+      "name": "paragraph-math",
+      "viewportWidth": 760,
+      "mode": "split",
+      "contentWidth": "default",
+      "handle": {
+        "left": 28,
+        "right": 74,
+        "top": 408.015625,
+        "bottom": 436.015625
+      },
+      "block": {
+        "left": 82,
+        "right": 310,
+        "top": 408.015625,
+        "bottom": 463.203125
+      },
+      "pane": {
+        "left": 2,
+        "right": 376,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 12,
+      "handleIndex": 12
+    },
+    {
+      "name": "heading",
+      "viewportWidth": 760,
+      "mode": "split",
+      "contentWidth": "default",
+      "handle": {
+        "left": 28,
+        "right": 74,
+        "top": 377.21875,
+        "bottom": 405.21875
+      },
+      "block": {
+        "left": 82,
+        "right": 310,
+        "top": 377.21875,
+        "bottom": 470.59375
+      },
+      "pane": {
+        "left": 2,
+        "right": 376,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 31,
+      "handleIndex": 31
+    },
+    {
+      "name": "list-bold",
+      "viewportWidth": 760,
+      "mode": "split",
+      "contentWidth": "default",
+      "handle": {
+        "left": 28,
+        "right": 74,
+        "top": 421.90625,
+        "bottom": 449.90625
+      },
+      "block": {
+        "left": 82,
+        "right": 310,
+        "top": 409.109375,
+        "bottom": 757.09375
+      },
+      "pane": {
+        "left": 2,
+        "right": 376,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "LI",
+      "blockIndex": 4,
+      "handleIndex": 4
+    },
+    {
+      "name": "table-code",
+      "viewportWidth": 760,
+      "mode": "split",
+      "contentWidth": "default",
+      "handle": {
+        "left": 28,
+        "right": 74,
+        "top": 389.390625,
+        "bottom": 417.390625
+      },
+      "block": {
+        "left": 82,
+        "right": 310,
+        "top": 330.59375,
+        "bottom": 893.46875
+      },
+      "pane": {
+        "left": 2,
+        "right": 376,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "TR",
+      "blockIndex": 32,
+      "handleIndex": 32
+    },
+    {
+      "name": "code-block",
+      "viewportWidth": 760,
+      "mode": "split",
+      "contentWidth": "default",
+      "handle": {
+        "left": 28,
+        "right": 74,
+        "top": 345.65625,
+        "bottom": 373.65625
+      },
+      "block": {
+        "left": 82,
+        "right": 310,
+        "top": 345.65625,
+        "bottom": 522.84375
+      },
+      "pane": {
+        "left": 2,
+        "right": 376,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 28,
+      "handleIndex": 28
+    },
+    {
+      "name": "paragraph-bold",
+      "viewportWidth": 760,
+      "mode": "split",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 379.96875,
+        "bottom": 407.96875
+      },
+      "block": {
+        "left": 74,
+        "right": 346,
+        "top": 379.96875,
+        "bottom": 519.15625
+      },
+      "pane": {
+        "left": 2,
+        "right": 376,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 17,
+      "handleIndex": 17
+    },
+    {
+      "name": "paragraph-code",
+      "viewportWidth": 760,
+      "mode": "split",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 490,
+        "bottom": 518
+      },
+      "block": {
+        "left": 74,
+        "right": 346,
+        "top": 490,
+        "bottom": 629.1875
+      },
+      "pane": {
+        "left": 2,
+        "right": 376,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 33,
+      "handleIndex": 33
+    },
+    {
+      "name": "paragraph-link",
+      "viewportWidth": 760,
+      "mode": "split",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 629.1875,
+        "bottom": 657.1875
+      },
+      "block": {
+        "left": 74,
+        "right": 346,
+        "top": 629.1875,
+        "bottom": 712.375
+      },
+      "pane": {
+        "left": 2,
+        "right": 376,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 34,
+      "handleIndex": 34
+    },
+    {
+      "name": "paragraph-emphasis",
+      "viewportWidth": 760,
+      "mode": "split",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 407.40625,
+        "bottom": 435.40625
+      },
+      "block": {
+        "left": 74,
+        "right": 346,
+        "top": 407.40625,
+        "bottom": 490.59375
+      },
+      "pane": {
+        "left": 2,
+        "right": 376,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 27,
+      "handleIndex": 27
+    },
+    {
+      "name": "paragraph-underline",
+      "viewportWidth": 760,
+      "mode": "split",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 421,
+        "bottom": 449
+      },
+      "block": {
+        "left": 74,
+        "right": 346,
+        "top": 407.40625,
+        "bottom": 490.59375
+      },
+      "pane": {
+        "left": 2,
+        "right": 376,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 27,
+      "handleIndex": 27
+    },
+    {
+      "name": "paragraph-math",
+      "viewportWidth": 760,
+      "mode": "split",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 407.953125,
+        "bottom": 435.953125
+      },
+      "block": {
+        "left": 74,
+        "right": 346,
+        "top": 407.953125,
+        "bottom": 463.140625
+      },
+      "pane": {
+        "left": 2,
+        "right": 376,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 12,
+      "handleIndex": 12
+    },
+    {
+      "name": "heading",
+      "viewportWidth": 760,
+      "mode": "split",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 377.15625,
+        "bottom": 405.15625
+      },
+      "block": {
+        "left": 74,
+        "right": 346,
+        "top": 377.15625,
+        "bottom": 470.53125
+      },
+      "pane": {
+        "left": 2,
+        "right": 376,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 31,
+      "handleIndex": 31
+    },
+    {
+      "name": "list-bold",
+      "viewportWidth": 760,
+      "mode": "split",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 421.90625,
+        "bottom": 449.90625
+      },
+      "block": {
+        "left": 74,
+        "right": 346,
+        "top": 409.109375,
+        "bottom": 701.09375
+      },
+      "pane": {
+        "left": 2,
+        "right": 376,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "LI",
+      "blockIndex": 4,
+      "handleIndex": 4
+    },
+    {
+      "name": "table-code",
+      "viewportWidth": 760,
+      "mode": "split",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 401.328125,
+        "bottom": 429.328125
+      },
+      "block": {
+        "left": 74,
+        "right": 346,
+        "top": 342.53125,
+        "bottom": 832
+      },
+      "pane": {
+        "left": 2,
+        "right": 376,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "TR",
+      "blockIndex": 32,
+      "handleIndex": 32
+    },
+    {
+      "name": "code-block",
+      "viewportWidth": 760,
+      "mode": "split",
+      "contentWidth": "wide",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 345.59375,
+        "bottom": 373.59375
+      },
+      "block": {
+        "left": 74,
+        "right": 346,
+        "top": 345.59375,
+        "bottom": 522.78125
+      },
+      "pane": {
+        "left": 2,
+        "right": 376,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 28,
+      "handleIndex": 28
+    },
+    {
+      "name": "paragraph-bold",
+      "viewportWidth": 760,
+      "mode": "split",
+      "contentWidth": "full",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 379.96875,
+        "bottom": 407.96875
+      },
+      "block": {
+        "left": 74,
+        "right": 346,
+        "top": 379.96875,
+        "bottom": 519.15625
+      },
+      "pane": {
+        "left": 2,
+        "right": 376,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 17,
+      "handleIndex": 17
+    },
+    {
+      "name": "paragraph-code",
+      "viewportWidth": 760,
+      "mode": "split",
+      "contentWidth": "full",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 490,
+        "bottom": 518
+      },
+      "block": {
+        "left": 74,
+        "right": 346,
+        "top": 490,
+        "bottom": 629.1875
+      },
+      "pane": {
+        "left": 2,
+        "right": 376,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 33,
+      "handleIndex": 33
+    },
+    {
+      "name": "paragraph-link",
+      "viewportWidth": 760,
+      "mode": "split",
+      "contentWidth": "full",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 629.1875,
+        "bottom": 657.1875
+      },
+      "block": {
+        "left": 74,
+        "right": 346,
+        "top": 629.1875,
+        "bottom": 712.375
+      },
+      "pane": {
+        "left": 2,
+        "right": 376,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 34,
+      "handleIndex": 34
+    },
+    {
+      "name": "paragraph-emphasis",
+      "viewportWidth": 760,
+      "mode": "split",
+      "contentWidth": "full",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 407.40625,
+        "bottom": 435.40625
+      },
+      "block": {
+        "left": 74,
+        "right": 346,
+        "top": 407.40625,
+        "bottom": 490.59375
+      },
+      "pane": {
+        "left": 2,
+        "right": 376,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 27,
+      "handleIndex": 27
+    },
+    {
+      "name": "paragraph-underline",
+      "viewportWidth": 760,
+      "mode": "split",
+      "contentWidth": "full",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 421,
+        "bottom": 449
+      },
+      "block": {
+        "left": 74,
+        "right": 346,
+        "top": 407.40625,
+        "bottom": 490.59375
+      },
+      "pane": {
+        "left": 2,
+        "right": 376,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "P",
+      "blockIndex": 27,
+      "handleIndex": 27
+    },
+    {
+      "name": "paragraph-math",
+      "viewportWidth": 760,
+      "mode": "split",
+      "contentWidth": "full",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 407.953125,
+        "bottom": 435.953125
+      },
+      "block": {
+        "left": 74,
+        "right": 346,
+        "top": 407.953125,
+        "bottom": 463.140625
+      },
+      "pane": {
+        "left": 2,
+        "right": 376,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 12,
+      "handleIndex": 12
+    },
+    {
+      "name": "heading",
+      "viewportWidth": 760,
+      "mode": "split",
+      "contentWidth": "full",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 377.15625,
+        "bottom": 405.15625
+      },
+      "block": {
+        "left": 74,
+        "right": 346,
+        "top": 377.15625,
+        "bottom": 470.53125
+      },
+      "pane": {
+        "left": 2,
+        "right": 376,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 31,
+      "handleIndex": 31
+    },
+    {
+      "name": "list-bold",
+      "viewportWidth": 760,
+      "mode": "split",
+      "contentWidth": "full",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 421.90625,
+        "bottom": 449.90625
+      },
+      "block": {
+        "left": 74,
+        "right": 346,
+        "top": 409.109375,
+        "bottom": 701.09375
+      },
+      "pane": {
+        "left": 2,
+        "right": 376,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "LI",
+      "blockIndex": 4,
+      "handleIndex": 4
+    },
+    {
+      "name": "table-code",
+      "viewportWidth": 760,
+      "mode": "split",
+      "contentWidth": "full",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 401.328125,
+        "bottom": 429.328125
+      },
+      "block": {
+        "left": 74,
+        "right": 346,
+        "top": 342.53125,
+        "bottom": 832
+      },
+      "pane": {
+        "left": 2,
+        "right": 376,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "TR",
+      "blockIndex": 32,
+      "handleIndex": 32
+    },
+    {
+      "name": "code-block",
+      "viewportWidth": 760,
+      "mode": "split",
+      "contentWidth": "full",
+      "handle": {
+        "left": 20,
+        "right": 66,
+        "top": 345.59375,
+        "bottom": 373.59375
+      },
+      "block": {
+        "left": 74,
+        "right": 346,
+        "top": 345.59375,
+        "bottom": 522.78125
+      },
+      "pane": {
+        "left": 2,
+        "right": 376,
+        "top": 78,
+        "bottom": 792
+      },
+      "anchorTag": "DIV",
+      "blockIndex": 28,
+      "handleIndex": 28
+    }
+  ],
+  "closedSidebar": {
+    "handle": {
+      "left": 18,
+      "right": 64,
+      "top": 595.59375,
+      "bottom": 623.59375
+    },
+    "block": {
+      "left": 72,
+      "right": 1282,
+      "top": 582,
+      "bottom": 637.1875
+    },
+    "pane": {
+      "left": 0,
+      "right": 1340,
+      "top": 78,
+      "bottom": 792
+    },
+    "anchorTag": "P",
+    "blockIndex": 33,
+    "handleIndex": 33
+  },
+  "blockAction": "duplicate-and-undo",
+  "mediaHidden": true,
+  "selectionHidden": true,
+  "sourceModeHidden": true,
+  "errors": []
+}

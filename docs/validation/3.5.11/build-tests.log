@@ -78,7 +78,7 @@ warning: linker stdout: 正在创建库 C:\Users\Administrator\Desktop\Stuart\ta
   = note: `#[warn(linker_messages)]` on by default
 
 warning: `stuartmd` (bin "stuartmd") generated 11 warnings (run `cargo fix --bin "stuartmd" -p stuartmd` to apply 3 suggestions)
-    Finished `release` profile [optimized] target(s) in 3m 02s
+    Finished `release` profile [optimized] target(s) in 4m 41s
        Built application at: C:\Users\Administrator\Desktop\Stuart\tauri\src-tauri\target\release\stuartmd.exe
         Info Patching C:\Users\Administrator\Desktop\Stuart\tauri\src-tauri\target\release\stuartmd.exe with bundle type information: nsis
         Info Target: x64

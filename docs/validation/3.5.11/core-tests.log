@@ -2,21 +2,21 @@
 > stuartmd-validation@3.5.11 test
 > node --test tests/project-audit-core.cjs tests/repair-document-state.cjs tests/repair-text-buffer.cjs tests/repair-write-coordinator.cjs
 
-✔ LF 换行 (1.7846ms)
-✔ CRLF 换行 (0.3679ms)
-✔ 混合 LF 和 CRLF 换行 (42.5461ms)
-✔ 同一个文件的窗口分别拥有文档身份和编辑版本 (54.3023ms)
-✔ 旧保存完成不能清除新编辑 (1.1655ms)
-✔ 渲染确认只接受对应文档版本和epoch (0.5548ms)
-✔ 保存快照冻结磁盘版本和编辑操作 (0.504ms)
-✔ 恢复正文保留草稿版本和原文件保存版本 (0.4106ms)
-✔ 源码编辑保留未编辑的混合换行和尾部空行 (6.6475ms)
-✔ UTF-16编辑不能拆开emoji (33.5327ms)
-✔ 新增换行使用记录的默认分隔符并保留其他换行 (0.6573ms)
-✔ 段落源码编辑只改变编辑文字并保留该段落的混合换行 (0.448ms)
-✔ 成熟Markdown解析保留段落外的全部字符 (71.3891ms)
-✔ 实际文件写入失败后，同一路径的后续写入可以完成 (148.3333ms)
-✔ Windows大小写路径别名依次执行实际文件写入 (26.9494ms)
+✔ LF 换行 (1.5ms)
+✔ CRLF 换行 (0.2812ms)
+✔ 混合 LF 和 CRLF 换行 (0.181ms)
+✔ 同一个文件的窗口分别拥有文档身份和编辑版本 (12.925ms)
+✔ 旧保存完成不能清除新编辑 (1.0069ms)
+✔ 渲染确认只接受对应文档版本和epoch (0.5004ms)
+✔ 保存快照冻结磁盘版本和编辑操作 (0.4376ms)
+✔ 恢复正文保留草稿版本和原文件保存版本 (0.3434ms)
+✔ 源码编辑保留未编辑的混合换行和尾部空行 (5.2973ms)
+✔ UTF-16编辑不能拆开emoji (0.8674ms)
+✔ 新增换行使用记录的默认分隔符并保留其他换行 (0.5467ms)
+✔ 段落源码编辑只改变编辑文字并保留该段落的混合换行 (0.3488ms)
+✔ 成熟Markdown解析保留段落外的全部字符 (26.5848ms)
+✔ 实际文件写入失败后，同一路径的后续写入可以完成 (25.9132ms)
+✔ Windows大小写路径别名依次执行实际文件写入 (15.9577ms)
 ℹ tests 15
 ℹ suites 0
 ℹ pass 15
@@ -24,7 +24,7 @@
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms 1557.4075
+ℹ duration_ms 657.2118
    Compiling stuartmd v3.5.11 (C:\Users\Administrator\Desktop\Stuart\tauri\src-tauri)
 warning: unused import: `PathBuf`
  --> src\document\journal.rs:5:23
@@ -93,7 +93,7 @@ warning: linker stdout: 正在创建库 C:\Users\Administrator\Desktop\Stuart\ta
   = note: `#[warn(linker_messages)]` on by default
 
 warning: `stuartmd` (bin "stuartmd" test) generated 9 warnings (run `cargo fix --bin "stuartmd" -p stuartmd --tests` to apply 3 suggestions)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 01s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 53.59s
      Running unittests src\main.rs (tauri\src-tauri\target\debug\deps\stuartmd-b736c5b0f8880e8d.exe)
 
 running 68 tests
@@ -166,7 +166,7 @@ test security::diff_guard::tests::test_save_companion_note ... ok
 test win_api::tests::test_reveal_local_path_accepts_existing_local ... ok
 test win_api::tests::test_reveal_local_path_rejects_unc_urls_ads ... ok
 
-test result: ok. 63 passed; 0 failed; 5 ignored; 0 measured; 0 filtered out; finished in 24.79s
+test result: ok. 63 passed; 0 failed; 5 ignored; 0 measured; 0 filtered out; finished in 8.07s
 
 warning: unused import: `PathBuf`
  --> src\..\..\..\tauri\src-tauri\src\document\journal.rs:5:23
@@ -558,7 +558,7 @@ warning: field `rects` is never read
 
 warning: `stuart-document-verification` (test "processes") generated 6 warnings (run `cargo fix --test "processes" -p stuart-document-verification` to apply 3 suggestions)
 warning: `stuart-document-verification` (bin "stuart-document-verification" test) generated 6 warnings (2 duplicates) (run `cargo fix --bin "stuart-document-verification" -p stuart-document-verification --tests` to apply 1 suggestion)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.24s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.67s
      Running unittests src\main.rs (tests\native-documents\target\debug\deps\stuart_document_verification-02479a542672489e.exe)
 
 running 11 tests
@@ -574,7 +574,7 @@ test document::tests::save_as_retains_journal_captured_before_target_change ... 
 test document::tests::stale_disk_revision_retains_base_local_and_external_content ... ok
 test document::tests::utf16_edits_preserve_mixed_newlines_and_validate_surrogate_boundaries ... ok
 
-test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.08s
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.34s
 
      Running tests\processes.rs (tests\native-documents\target\debug\deps\processes-869d2b186218e998.exe)
 
@@ -595,5 +595,5 @@ test independent_real_processes_detect_stale_save_and_preserve_all_versions ... 
 test terminating_real_save_process_retains_durable_draft_and_rejects_incomplete_versions ... 实际终止阶段：Preparing，重启恢复版本：Preparing
 ok
 
-test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 11.62s
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.37s
 

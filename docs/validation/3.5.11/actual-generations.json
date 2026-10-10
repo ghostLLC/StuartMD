@@ -2,7 +2,7 @@
   "cancelDuringIndex": true,
   "first": {
     "deletedGhosts": 0,
-    "durationMs": 21298,
+    "durationMs": 46921,
     "excludedFiles": [
       {
         "path": ".stuart",
@@ -10,12 +10,12 @@
       }
     ],
     "failedFiles": [],
-    "indexGeneration": "58fff274-4129-42d9-8cd5-8dd46e3101df",
-    "jobId": "499310f4-d3bf-4669-96b6-25f640f44c3a",
+    "indexGeneration": "3534a1a9-9047-43f5-8aa6-78c6ad8955c4",
+    "jobId": "5583f621-f9ee-464e-99d0-404ecf9bad96",
     "maxDepth": 8,
     "maxFiles": 10000,
     "newlyIndexed": 202,
-    "scanRoot": "C:\\Users\\Administrator\\Desktop\\Stuart\\tauri\\src-tauri\\../..\\tests/native-artifacts/models\\generation-d022a43a-65c1-4db2-8318-5dcaa9a65495",
+    "scanRoot": "C:\\Users\\Administrator\\Desktop\\Stuart\\tauri\\src-tauri\\../..\\tests/native-artifacts/models\\generation-30046fa4-20bc-447c-8855-542af1841bc9",
     "skippedPlaceholders": 0,
     "skippedTempFiles": 0,
     "skippedUnmodified": 0,
@@ -26,7 +26,7 @@
   },
   "partial": {
     "deletedGhosts": 0,
-    "durationMs": 25026,
+    "durationMs": 61503,
     "excludedFiles": [
       {
         "path": ".stuart",
@@ -40,12 +40,12 @@
         "stage": "Parsing"
       }
     ],
-    "indexGeneration": "bcc87ac5-c5b0-4fa1-a8b9-546caa95c279",
-    "jobId": "7326fe2d-c71a-4455-a0bd-d7f6f73c6ef1",
+    "indexGeneration": "15386a62-1239-4252-9618-aadf2616a6a6",
+    "jobId": "f73ac3a6-f17d-4d1b-af8e-973dcf0cade9",
     "maxDepth": 8,
     "maxFiles": 10000,
     "newlyIndexed": 201,
-    "scanRoot": "C:\\Users\\Administrator\\Desktop\\Stuart\\tauri\\src-tauri\\../..\\tests/native-artifacts/models\\generation-d022a43a-65c1-4db2-8318-5dcaa9a65495",
+    "scanRoot": "C:\\Users\\Administrator\\Desktop\\Stuart\\tauri\\src-tauri\\../..\\tests/native-artifacts/models\\generation-30046fa4-20bc-447c-8855-542af1841bc9",
     "skippedPlaceholders": 0,
     "skippedTempFiles": 0,
     "skippedUnmodified": 0,
@@ -55,11 +55,11 @@
     "updatedFiles": 0
   },
   "pdfSourceReturned": true,
-  "root": "C:\\Users\\Administrator\\Desktop\\Stuart\\tauri\\src-tauri\\../..\\tests/native-artifacts/models\\generation-d022a43a-65c1-4db2-8318-5dcaa9a65495",
+  "root": "C:\\Users\\Administrator\\Desktop\\Stuart\\tauri\\src-tauri\\../..\\tests/native-artifacts/models\\generation-30046fa4-20bc-447c-8855-542af1841bc9",
   "sourceChangedDuringIndex": true,
   "switched": {
     "deletedGhosts": 0,
-    "durationMs": 15112,
+    "durationMs": 44367,
     "excludedFiles": [
       {
         "path": ".stuart",
@@ -67,12 +67,12 @@
       }
     ],
     "failedFiles": [],
-    "indexGeneration": "0ae9f468-8ce2-4617-ad6b-73e03bcf8d0f",
-    "jobId": "764d9132-de56-45ab-890a-ec9c90c0ab04",
+    "indexGeneration": "29530fe1-89cf-42dc-accd-9e126e3f2c6c",
+    "jobId": "8a9320fc-1fcc-4b3c-bf91-09928a83c402",
     "maxDepth": 8,
     "maxFiles": 10000,
     "newlyIndexed": 201,
-    "scanRoot": "C:\\Users\\Administrator\\Desktop\\Stuart\\tauri\\src-tauri\\../..\\tests/native-artifacts/models\\generation-d022a43a-65c1-4db2-8318-5dcaa9a65495",
+    "scanRoot": "C:\\Users\\Administrator\\Desktop\\Stuart\\tauri\\src-tauri\\../..\\tests/native-artifacts/models\\generation-30046fa4-20bc-447c-8855-542af1841bc9",
     "skippedPlaceholders": 0,
     "skippedTempFiles": 0,
     "skippedUnmodified": 0,
@@ -83,7 +83,7 @@
   },
   "updated": {
     "deletedGhosts": 0,
-    "durationMs": 23334,
+    "durationMs": 32974,
     "excludedFiles": [
       {
         "path": ".stuart",
@@ -91,12 +91,12 @@
       }
     ],
     "failedFiles": [],
-    "indexGeneration": "5129b20e-89cc-4a29-8d31-4ca4be2aeed7",
-    "jobId": "5f4c26a4-90d6-4de8-8b04-c6d6c4147490",
+    "indexGeneration": "e10cd5ca-6c8c-4fa8-9b2c-b9cf2ccf0bcd",
+    "jobId": "ddc02c54-e182-4d68-9ce1-e2814f7e5b11",
     "maxDepth": 8,
     "maxFiles": 10000,
     "newlyIndexed": 201,
-    "scanRoot": "C:\\Users\\Administrator\\Desktop\\Stuart\\tauri\\src-tauri\\../..\\tests/native-artifacts/models\\generation-d022a43a-65c1-4db2-8318-5dcaa9a65495",
+    "scanRoot": "C:\\Users\\Administrator\\Desktop\\Stuart\\tauri\\src-tauri\\../..\\tests/native-artifacts/models\\generation-30046fa4-20bc-447c-8855-542af1841bc9",
     "skippedPlaceholders": 0,
     "skippedTempFiles": 0,
     "skippedUnmodified": 0,

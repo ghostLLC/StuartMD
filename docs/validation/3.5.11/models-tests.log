@@ -1,5 +1,7 @@
 {"modelId": "BAAI/bge-m3", "runtimeVersion": "1.20.1", "dimension": 1024}
 {"modelId": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2", "runtimeVersion": "1.20.1", "dimension": 384}
+    Blocking waiting for file lock on build directory
+   Compiling stuartmd v3.5.11 (C:\Users\Administrator\Desktop\Stuart\tauri\src-tauri)
 warning: unused import: `PathBuf`
  --> src\document\journal.rs:5:23
   |
@@ -67,7 +69,7 @@ warning: linker stdout: 正在创建库 C:\Users\Administrator\Desktop\Stuart\ta
   = note: `#[warn(linker_messages)]` on by default
 
 warning: `stuartmd` (bin "stuartmd" test) generated 9 warnings (run `cargo fix --bin "stuartmd" -p stuartmd --tests` to apply 3 suggestions)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.06s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 08s
      Running unittests src\main.rs (tauri\src-tauri\target\debug\deps\stuartmd-b736c5b0f8880e8d.exe)
 
 running 3 tests
@@ -75,5 +77,5 @@ test rag::real_tests::actual_generation_retains_valid_index_on_cancel_and_file_c
 test rag::real_tests::actual_models_produce_normalized_multilingual_semantic_vectors ... ok
 test rag::real_tests::actual_pdf_native_ocr_rotation_cropbox_and_sources ... ok
 
-test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 65 filtered out; finished in 208.45s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 65 filtered out; finished in 431.17s
 
