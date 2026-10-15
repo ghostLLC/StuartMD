@@ -55,7 +55,9 @@ fn actual_pdf_annotations_render_edit_and_preserve_rotation_cropbox() {
     let verified_path=directory.join("verified.pdf");std::fs::copy(&path,&verified_path).unwrap();
     let external=std::fs::read(fixture()).unwrap();std::fs::write(&path,&external).unwrap();
     let conflict=service.save_pdf_annotations("pdf-verification",&read.document_id,&annotations).unwrap();assert_eq!(conflict.result,super::super::SaveStatus::Conflict);assert_eq!(std::fs::read(&path).unwrap(),external);
-    std::fs::write(root.join("docs/validation/3.5.12/pdf-annotation-results.json"),serde_json::to_vec_pretty(&serde_json::json!({"path":verified_path,"conflictPath":path,"rendered":rendered,"nativeEdit":true,"conflictPreserved":true,"passed":true})).unwrap()).unwrap();
+    let package:serde_json::Value=serde_json::from_slice(&std::fs::read(root.join("package.json")).unwrap()).unwrap();
+    let evidence=root.join("docs/validation").join(package["version"].as_str().unwrap());std::fs::create_dir_all(&evidence).unwrap();
+    std::fs::write(evidence.join("pdf-annotation-results.json"),serde_json::to_vec_pretty(&serde_json::json!({"path":verified_path,"conflictPath":path,"rendered":rendered,"nativeEdit":true,"conflictPreserved":true,"passed":true})).unwrap()).unwrap();
 }
 
 #[test]

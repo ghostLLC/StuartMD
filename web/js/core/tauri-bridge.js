@@ -98,11 +98,12 @@
     clear_draft: (path) => invoke("stuart_clear_draft", { path }),
     // AI 3.0.0
     ai_get_config: () => invoke("stuart_ai_get_config"),
-    ai_save_config: (ai, confirm) => invoke("stuart_ai_save_config", { ai, confirm: confirm ?? null }),
-    ai_set_api_key: (providerId, apiKey) =>
-      invoke("stuart_ai_set_api_key", { providerId, apiKey }),
-    ai_clear_api_key: (providerId) => invoke("stuart_ai_clear_api_key", { providerId }),
-    ai_test_provider: (providerId) => invoke("stuart_ai_test_provider", { providerId }),
+    ai_discover_models: (providerId, expectedRevision) => invoke("stuart_ai_discover_models", { providerId, expectedRevision }),
+    ai_verify_model: (modelConfigId, expectedRevision) => invoke("stuart_ai_verify_model", { modelConfigId, expectedRevision }),
+    ai_update_config: (change, expectedRevision, confirm) => invoke("stuart_ai_update_config", { change, expectedRevision, confirm: confirm ?? null }),
+    ai_set_api_key: (providerId, apiKey, expectedRevision) =>
+      invoke("stuart_ai_set_api_key", { providerId, apiKey, expectedRevision }),
+    ai_clear_api_key: (providerId, expectedRevision) => invoke("stuart_ai_clear_api_key", { providerId, expectedRevision }),
     ai_chat_start: (requestId, providerId, model, messages, thinking, maxOutputTokens, documentId, sessionId, contextInput) =>
       invoke("stuart_ai_request_start", {
         requestId,
@@ -176,8 +177,6 @@
     organic_memory_search: (query, limit) => invoke("stuart_organic_memory_search", { query, limit: limit ?? 20 }),
     organic_memory_delete: (memoryId) => invoke("stuart_organic_memory_delete", { memoryId }),
     organic_memory_effective: (workspaceId, documentId) => invoke("stuart_organic_memory_effective", { workspaceId: workspaceId || null, documentId: documentId || null }),
-    context_model_spec: (providerId, model) => invoke("stuart_context_model_spec", { providerId, model }),
-    context_validate_model_spec: (provider) => invoke("stuart_context_validate_model_spec", { provider }),
     // Event listener helper
     listen_event: (event, handler) => {
       if (window.__TAURI__?.event?.listen) {

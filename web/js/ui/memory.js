@@ -32,9 +32,9 @@
       const options = listOptions(current), [config, page] = await Promise.all([global.StuartAI.ensureConfig(), current.mode === "proposals" ? api().companion_list_memory_proposals(options) : api().companion_list_memories(options)]);
       if (epochs.get(container) !== epoch) return;
       const use = document.createElement("input"); use.type = "checkbox"; use.checked = config.use_saved_memories;
-      use.addEventListener("change", () => Promise.resolve().then(async () => { const latest = await global.StuartAI.ensureConfig(true); await global.StuartAI.saveAi({ ...latest, use_saved_memories: use.checked }); }).catch(reason => { use.checked = config.use_saved_memories; error(settings, reason); }));
+      use.addEventListener("change", () => Promise.resolve().then(async () => { await global.StuartAI.ensureConfig(true); await global.StuartAI.updateConfig({ kind: "updatePreferences", preferences: { use_saved_memories: use.checked } }); }).catch(reason => { use.checked = config.use_saved_memories; error(settings, reason); }));
       const learning = select("整理新记忆", [["off", "关闭"], ["ask", "询问"], ["automatic", "自动"]], config.learning_policy);
-      learning.addEventListener("change", () => Promise.resolve().then(async () => { const latest = await global.StuartAI.ensureConfig(true); await global.StuartAI.saveAi({ ...latest, learning_policy: learning.value }); }).catch(reason => { learning.value = config.learning_policy; error(settings, reason); }));
+      learning.addEventListener("change", () => Promise.resolve().then(async () => { await global.StuartAI.ensureConfig(true); await global.StuartAI.updateConfig({ kind: "updatePreferences", preferences: { learning_policy: learning.value } }); }).catch(reason => { learning.value = config.learning_policy; error(settings, reason); }));
       settings.append(field("读取已保存记忆", use), field("整理新记忆", learning)); rows.replaceChildren();
       async function appendPage(result) {
         if (epochs.get(container) !== epoch) return;
@@ -154,11 +154,5 @@
     }
     await appendPage(page, false);
   }
-  async function openCountingSettings(providerId) {
-    const config = await global.StuartAI.ensureConfig(true), provider = config.providers.find(item => item.id === providerId); if (!provider) throw new Error("服务商配置不存在");
-    const dialog = document.createElement("dialog"); dialog.className = "sc-dialog"; const input = document.createElement("textarea"); input.rows = 15; input.className = "sc-detail-edit"; input.spellcheck = false;
-    const defaults = await api().context_model_spec(providerId, provider.model); input.value = JSON.stringify(provider.token_counting || defaults.configuration, null, 2);
-    dialog.append(text("h3", "模型计数配置"), text("div", `模型：${provider.model}。全部消息按配置计数，缺少分词资源时停止请求。`, "sc-card-meta"), field("计数配置 JSON", input), button("关闭", () => { dialog.close(); dialog.remove(); }), button("验证并保存", async () => { const counting = JSON.parse(input.value); await api().context_validate_model_spec({ ...provider, token_counting: counting }); const current = await global.StuartAI.ensureConfig(true); await global.StuartAI.saveAi({ ...current, providers: current.providers.map(item => item.id === provider.id ? { ...item, token_counting: counting } : item) }); dialog.close(); dialog.remove(); })); document.body.append(dialog); dialog.showModal();
-  }
-  global.StuartMemoryUI = { renderMemory, renderSessions, rememberMessage, openCountingSettings };
+  global.StuartMemoryUI = { renderMemory, renderSessions, rememberMessage };
 })(typeof window !== "undefined" ? window : globalThis);

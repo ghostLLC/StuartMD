@@ -7,7 +7,13 @@ use std::sync::{Arc,Mutex,OnceLock};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Debug,Clone,Serialize,Deserialize,PartialEq)]
-pub struct ChatMessage { pub role: String, pub content: String }
+pub struct ChatMessage {
+    pub role: String, pub content: String,
+    #[serde(flatten)] pub fields: serde_json::Map<String,Value>,
+}
+impl ChatMessage {
+    pub fn text(role:impl Into<String>,content:impl Into<String>)->Self {Self {role:role.into(),content:content.into(),fields:serde_json::Map::new()}}
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -237,7 +243,7 @@ where F: FnMut(&str) -> Result<(),String> {
                         omitted_sources.push(source.message_id.clone());
                     }
                 }
-                messages.insert(0,ChatMessage {role:"system".into(),content:format!("已核验原文来源的历史摘要：\n{}",serde_json::to_string(&summary).map_err(|e|e.to_string())?)});
+                messages.insert(0,ChatMessage::text("system",format!("已核验原文来源的历史摘要：\n{}",serde_json::to_string(&summary).map_err(|e|e.to_string())?)));
                 crate::memory::get_archive_storage()?.record_summary(session_id,&spec.identity()?,&summary,older)?;
                 summaries.push(summary);
                 stage("Counting")?;
@@ -309,26 +315,18 @@ pub async fn summarize_history(provider: &Value, api_key: &str, sources: &[crate
     let originals: HashMap<String,String> = sources.iter().map(|message|(message.message_id.clone(),message.content.clone())).collect();
     let source_json: Vec<Value> = sources.iter().map(|message|json!({"messageId":message.message_id,"role":message.role,"content":message.content})).collect();
     let instruction = "请完整提取决定、有效约束、最新修正及待解决问题。仅返回JSON对象，字段为decisions、constraints、corrections、openQuestions，每个字段为数组，每个条目含text、sources。sources每个条目包含messageId及直接来自原文的quote。保留否定和修正关系。来源未提供的内容禁止生成。";
-    let messages = vec![ChatMessage {role:"system".into(),content:instruction.into()},ChatMessage {role:"user".into(),content:serde_json::to_string(&source_json).map_err(|e| e.to_string())?}];
+    let messages = vec![ChatMessage::text("system",instruction),ChatMessage::text("user",serde_json::to_string(&source_json).map_err(|e| e.to_string())?)];
     let spec = ProviderModelSpec::from_provider(provider)?;
-    let output = 2048.min(spec.max_output_tokens);
+    let output = (provider["max_output_tokens"].as_u64().unwrap_or(2048) as usize).min(spec.max_output_tokens);
     let count = count_messages(&spec,api_key,&messages,&cancellation).await?;
     let reserve = spec.protocol_reserve + (count as f64 * spec.estimate_safety_ratio).ceil() as usize;
     check_final_budget(count,output,reserve,spec.context_window)?;
-    let base = match spec.provider_id.as_str() {
-        "deepseek" => "https://api.deepseek.com/v1", "qwen" => "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "kimi" => "https://api.moonshot.cn/v1", "glm" => "https://open.bigmodel.cn/api/paas/v4",
-        _ => provider.get("base_url").and_then(Value::as_str).ok_or("服务商地址缺失")?,
-    };
-    let url = url::Url::parse(base).map_err(|e| e.to_string())?;
-    if url.scheme() != "https" && !(url.scheme()=="http" && ["localhost","127.0.0.1","::1"].contains(&url.host_str().unwrap_or_default())) { return Err("摘要服务商地址协议无效".into()); }
+    let (base,_) = crate::ai_chat::effective_base_url(provider)?;
     ensure_enabled(&cancellation)?;
     let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(120)).redirect(reqwest::redirect::Policy::none()).build().map_err(|e| e.to_string())?;
     let work = async {
-        let mut body=json!({"model":spec.model_id,"messages":messages,"stream":false,"max_tokens":output,"response_format":{"type":"json_object"}});
-        if spec.provider_id=="deepseek" {body["thinking"]=json!({"type":"disabled"});}
-        if spec.provider_id=="qwen" {body["enable_thinking"]=json!(false);}
-        if spec.provider_id=="glm" && (spec.model_id.starts_with("glm-4.5") || spec.model_id.starts_with("glm-4.6") || spec.model_id.starts_with("glm-4.7")) {body["thinking"]=json!({"type":"disabled"});}
+        let mut body=crate::ai::request_parameters::completion_body(provider,&messages,output,true,None)?;
+        body["stream"]=json!(false);
         let response = client.post(format!("{}/chat/completions",base.trim_end_matches('/'))).bearer_auth(api_key)
             .json(&body).send().await.map_err(|e|format!("摘要连接失败：{}",e.without_url()))?;
         if !response.status().is_success() { return Err(format!("摘要请求返回 HTTP {}",response.status())); }

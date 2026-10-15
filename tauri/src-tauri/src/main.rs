@@ -124,10 +124,11 @@ fn main() {
             ai_api::stuart_workspace_files,
             // AI 请求
             ai_chat::stuart_ai_get_config,
-            ai_chat::stuart_ai_save_config,
+            ai::model_validation::stuart_ai_discover_models,
+            ai::model_validation::stuart_ai_verify_model,
+            ai_chat::stuart_ai_update_config,
             ai_chat::stuart_ai_set_api_key,
             ai_chat::stuart_ai_clear_api_key,
-            ai_chat::stuart_ai_test_provider,
             ai::stuart_ai_request_start,
             ai::stuart_ai_request_cancel,
             ai::stuart_ai_request_status,
@@ -154,8 +155,6 @@ fn main() {
             security::diff_guard::stuart_companion_save_note,
             // 上下文预算
             context::stuart_context_assemble,
-            context::stuart_context_model_spec,
-            context::stuart_context_validate_model_spec,
             // 会话与记忆
             memory::stuart_session_create,
             memory::stuart_session_list,

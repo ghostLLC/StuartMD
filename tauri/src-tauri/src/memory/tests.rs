@@ -355,7 +355,8 @@ fn companion_first_save_moves_persistent_owners_and_save_as_preserves_original_o
     let restored=storage.get_draft(&saved.target,Some(&accepted.session.session_id)).unwrap().unwrap();assert_eq!(restored.question,draft.question);assert_eq!(restored.draft_version,3);
     let saved_session=storage.get_session(&accepted.session.session_id).unwrap();
     let evidence=serde_json::json!({"before":{"session":original_session,"draft":original_draft,"turns":[accepted.turn],"messages":[message],"learningActions":[]},"savedDraft":saved,"after":{"session":saved_session,"draft":restored,"turns":[accepted.turn],"messages":[message],"learningActions":[]}});
-    let output=std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/validation/3.5.12/conversation-draft.json");
+    let directory=std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("../../docs/validation/{}",env!("CARGO_PKG_VERSION")));std::fs::create_dir_all(&directory).unwrap();
+    let output=directory.join("conversation-draft.json");
     std::fs::write(output,serde_json::to_vec_pretty(&evidence).unwrap()).unwrap();
     let other=path.with_file_name("另存文档.md");std::fs::write(&other,"# 另存文档\n").unwrap();storage.update_document_path(&document_id,other.to_str().unwrap()).unwrap();
     let session=storage.get_session(&accepted.session.session_id).unwrap();assert_eq!(session.document_key.as_deref(),Some(key));assert_eq!(session.document_path.as_deref(),key.strip_prefix("file:"));assert_eq!(storage.memory_by_record(&memory.record_id).unwrap().document_id.as_deref(),Some(key));

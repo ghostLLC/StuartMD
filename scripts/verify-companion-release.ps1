@@ -2,9 +2,10 @@ $ErrorActionPreference = 'Stop'
 $workspace = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $workspace
 $logs = Join-Path $workspace 'tests/native-artifacts'
+$releaseVersion = (Get-Content -LiteralPath (Join-Path $workspace 'package.json') -Raw | ConvertFrom-Json).version
 New-Item -ItemType Directory -Path $logs -Force | Out-Null
 foreach ($mode in @('Core', 'Models', 'Providers')) {
-    $log = Join-Path $logs ($mode.ToLowerInvariant() + '-3.5.12-final.log')
+    $log = Join-Path $logs ($mode.ToLowerInvariant() + '-' + $releaseVersion + '-final.log')
     Write-Output "正在执行 $mode 实际检查。"
     & pwsh -NoProfile -File "$PSScriptRoot/verify-repair.ps1" -Mode $mode *> $log
     if ($LASTEXITCODE -ne 0) { Get-Content -LiteralPath $log -Tail 45; throw "$mode 实际检查失败：$log" }

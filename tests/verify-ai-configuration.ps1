@@ -31,6 +31,10 @@ try {
         }
     }
     foreach ($entry in $keyHashes) { if ($entry.Hash -ne (Get-FileHash -LiteralPath $entry.Path -Algorithm SHA256).Hash) { throw '迁移改写密钥密文' } }
+    cargo test --manifest-path "$workspace/tauri/src-tauri/Cargo.toml" --locked ai::configuration::checks::actual_atomic_changes -- --ignored --test-threads=1
+    if ($LASTEXITCODE -ne 0) { throw '真实文件上的多模型修改、版本冲突或密钥轮换检查失败' }
+    node "$workspace/tests/repair-ai-model-settings.cjs" $testDirectory
+    if ($LASTEXITCODE -ne 0) { throw '真实配置的模型列表及编辑输入检查失败' }
     if ($sourceHash -ne (Get-FileHash -LiteralPath $sourceSettings -Algorithm SHA256).Hash) { throw '真实用户设置被修改' }
     Write-Output "实际配置迁移及进程重新启动检查通过，保留 $($first.ai.models.Count) 个模型。独立目录：$testDirectory"
 } finally { $env:STUART_DATA_DIR = $previousDirectory }

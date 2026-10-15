@@ -85,9 +85,11 @@ fn intent_context(window:&tauri::WebviewWindow, documents:&crate::document::Docu
             input.partial_confirmed=true;input.index_generation=ack["indexGeneration"].as_str().map(str::to_owned);input.coverage_hash=ack["coverageHash"].as_str().map(str::to_owned);
         }
     }else if intent.draft_version>0 {return Err("发送材料草稿不存在".into());}
-    let mut messages=vec![ChatMessage{role:"system".into(),content:system_prompt(&config)?}];
-    if let Some(session)=&intent.session_id {messages.extend(storage.get_completed_messages(session)?.into_iter().filter(|message|message.role!="system").map(|message|ChatMessage{role:message.role,content:message.content}));}
-    messages.push(ChatMessage{role:"user".into(),content:intent.question.clone()});
+    let provider=crate::ai_chat::active_provider(&config)?;
+    let preserve=provider["capability"]["preserve_reasoning"].as_bool().or_else(||provider["overrides"]["preserve_reasoning"].as_bool()).unwrap_or(false);
+    let mut messages=vec![ChatMessage::text("system",system_prompt(&config)?)];
+    if let Some(session)=&intent.session_id {messages.extend(storage.get_completed_messages(session)?.into_iter().filter(|message|message.role!="system").map(|message|message.provider_message(preserve)).collect::<Result<Vec<_>,_>>()?);}
+    messages.push(ChatMessage::text("user",intent.question.clone()));
     Ok(RequestContext{request_id:intent.request_id.clone(),session_id:intent.session_id.clone().unwrap_or_else(||intent.request_id.clone()),window_id:window.label().into(),document,document_key:intent.target.document_key.clone(),messages,input,pdf_source:None,workspace_sources:vec![],resolved_sources:vec![],settings:config})
 }
 
@@ -203,21 +205,23 @@ pub fn stuart_companion_send_question(window:tauri::WebviewWindow,document_servi
 }
 
 pub fn start(window:tauri::WebviewWindow,documents:&crate::document::DocumentService,intent:RequestIntent)->Result<Value,String> {
-    start_config(window,documents,intent,crate::ai_chat::load_ai_settings())
+    let snapshot=super::configuration::load_ai_configuration()?;
+    let captured=super::configuration::capture_request_model(snapshot.ai.active_model_id.as_deref().ok_or("请添加并选择模型")?,&intent.settings_revision)?;
+    let provider=captured.model.provider_value()?;
+    start_config(window,documents,intent,serde_json::to_value(snapshot.ai).map_err(|e|e.to_string())?,provider,captured.key)
 }
 
-fn start_config(window:tauri::WebviewWindow,documents:&crate::document::DocumentService,intent:RequestIntent,config:Value)->Result<Value,String> {
+fn start_config(window:tauri::WebviewWindow,documents:&crate::document::DocumentService,intent:RequestIntent,config:Value,provider:Value,key:zeroize::Zeroizing<String>)->Result<Value,String> {
     service::ensure_enabled(&CancellationToken::new())?;
     let mut context=intent_context(&window,documents,&intent,config.clone())?;
     if intent.question.trim().is_empty(){return Err("问题不能为空".into());}
-    let provider=crate::ai_chat::active_provider(&config)?;if provider["enabled"].as_bool()!=Some(true){return Err("当前 AI 服务商未启用".into());}
     let spec=ProviderModelSpec::from_provider(&provider)?;spec.validate()?;
-    let key=crate::ai_chat::read_api_key(provider["id"].as_str().ok_or("服务商编号缺失")?)?;
-    let output=config["max_output_tokens"].as_u64().and_then(|value|usize::try_from(value).ok()).ok_or("输出容量配置缺失")?;
+    let output=provider["max_output_tokens"].as_u64().and_then(|value|usize::try_from(value).ok()).ok_or("输出容量配置缺失")?;
     if output==0 || output>spec.max_output_tokens || output>=spec.context_window {return Err("输出容量超过模型限制".into());}
     let owner=window.label().to_owned();let rid=intent.request_id.clone();let cancellation=CancellationToken::new();
     let storage=crate::memory::get_archive_storage()?;
     let accepted={let mut registry=super::REQUESTS.lock().map_err(|_|"AI 请求锁损坏")?;
+        super::configuration::ensure_connection_available(provider["connection_id"].as_str().ok_or("模型连接编号缺失")?)?;
         if registry.contains_key(&rid) || registry.values().any(|request|request.window_id==owner && !super::terminal(&request.status)){return Err("当前窗口已有活动请求，或请求编号已经使用".into());}
         if registry.len()>=512 {let mut archived:Vec<_>=registry.iter().filter(|(_,request)|super::terminal(&request.status)).map(|(id,request)|(id.clone(),request.created_at)).collect();archived.sort_by_key(|(_,created)|*created);for (id,_) in archived.into_iter().take(256){registry.remove(&id);}}
         let accepted=storage.begin_turn(&intent)?;context.session_id=accepted.session.session_id.clone();
@@ -248,13 +252,12 @@ pub fn start_legacy(window:tauri::WebviewWindow,document_service:tauri::State<'_
     let question=messages.last().filter(|message|message.role=="user" && !message.content.trim().is_empty()).ok_or("旧版请求缺少实际问题")?.content.clone();
     let completed=crate::memory::get_archive_storage()?.get_completed_messages(&session.session_id)?;
     if messages.iter().take(messages.len()-1).filter(|message|message.role!="system").any(|message|!completed.iter().any(|stored|stored.role==message.role && stored.content==message.content)) {return Err("旧版请求历史缺少真实归档来源".into());}
-    let mut config=crate::ai_chat::load_ai_settings();
-    if let Some(provider)=payload["providerId"].as_str(){if !config["providers"].as_array().ok_or("服务商配置无效")?.iter().any(|item|item["id"].as_str()==Some(provider)){return Err("旧版请求引用的服务商未配置".into());}config["active_provider_id"]=json!(provider);}
-    if let Some(model)=payload["model"].as_str(){let active=config["active_provider_id"].as_str().ok_or("服务商编号缺失")?.to_owned();let provider=config["providers"].as_array_mut().ok_or("服务商配置无效")?.iter_mut().find(|item|item["id"].as_str()==Some(&active)).ok_or("当前服务商未配置")?;provider["model"]=json!(model);}
-    if let Some(thinking)=payload["thinking"].as_str(){config["thinking"]=json!(thinking);}
-    if let Some(output)=payload["maxOutputTokens"].as_u64(){config["max_output_tokens"]=json!(output);}
+    let config=crate::ai_chat::load_ai_settings();
+    let provider=crate::ai_chat::active_provider(&config)?;
+    if payload["providerId"].as_str().is_some_and(|id|provider["connection_id"].as_str()!=Some(id)) || payload["model"].as_str().is_some_and(|model|provider["model"].as_str()!=Some(model)) {return Err("请选择已经保存的模型后再发送".into());}
+    if payload["maxOutputTokens"].as_u64().is_some_and(|output|provider["max_output_tokens"].as_u64()!=Some(output)) {return Err("请在保存的模型条目中设置输出预算".into());}
     let intent=RequestIntent{request_id:payload["requestId"].as_str().ok_or("旧版请求编号缺失")?.into(),turn_id:None,session_id:Some(session.session_id),expected_session_version:session.session_version,draft_id:None,draft_version:0,target:ConversationTarget{document_key:Some(crate::document::DocumentService::document_key(&document)?),workspace_key:input.workspace_root.clone(),runtime_document_id:Some(document.document_id),window_id:window.label().into()},question,scope:sources::normalize_scope(&input.scope)?.into(),selection:input.selection.map(|selection|serde_json::to_value(selection).expect("选区序列化失败")),reading_anchor:input.reading_anchor.map(|anchor|serde_json::to_value(anchor).expect("阅读位置序列化失败")),explicit_sources:input.explicit_sources.into_iter().map(|source|serde_json::to_value(source).expect("来源序列化失败")).collect(),settings_revision:hash(&config)?,editor_revision:input.editor_revision,source_hash:input.source_hash};
-    start_config(window,&document_service,intent,config)
+    start(window,&document_service,intent)
 }
 
 fn archive_message(context:&RequestContext,turn:&str,attempt:u64,role:&str,content:String,status:&str)->ChatArchiveMessage {
@@ -285,6 +288,7 @@ async fn finish(app:&tauri::AppHandle,owner:&str,rid:&str,context:&RequestContex
     let text=super::snapshot(rid,owner)?["text"].as_str().ok_or("请求正文类型无效")?.to_owned();let storage=crate::memory::get_archive_storage()?;
     let mut message=archive_message(context,turn,attempt,"assistant",text.clone(),status);
     if let Some(reason)=&error {message.source_anchor.as_mut().ok_or("助手归档缺少来源元数据")?["error"]=json!(reason);}
+    if let Some(assistant)=super::REQUESTS.lock().map_err(|_|"AI 请求锁损坏")?.get(rid).and_then(|request|request.usage.as_ref()).and_then(|usage|usage.get("assistant_message")) {message.source_anchor.as_mut().ok_or("助手归档缺少来源元数据")?["assistantMessage"]=assistant.clone();}
     storage.add_message(message)?;
     let session=storage.finish_attempt(rid,owner,status,error.as_deref())?;
     let finished={let mut registry=super::REQUESTS.lock().map_err(|_|"AI 请求锁损坏")?;let request=registry.get_mut(rid).ok_or("AI 请求记录丢失")?;request.seq+=1;request.status=status.into();request.phase=status.into();request.error=error;request.final_hash=Some(format!("{:x}",Sha256::digest(text.as_bytes())));request.finished.clone()};
@@ -339,8 +343,8 @@ pub async fn generate_learning_candidates(provider:&Value,key:&str,source:&ChatA
     let sources=context["sources"].as_array().ok_or("整理来源缺少真实材料清单")?.iter().filter(|source|source["used"].as_bool()==Some(true)).cloned().collect::<Vec<_>>();
     let mut scopes=vec!["global"];if session.workspace_key.is_some(){scopes.push("workspace");}if session.document_key.is_some(){scopes.push("document");}
     let schema=json!({"type":"object","additionalProperties":false,"required":["candidates"],"properties":{"candidates":{"type":"array","maxItems":3,"items":{"type":"object","additionalProperties":false,"required":["content","category","scope","sourceIds"],"properties":{"content":{"type":"string","minLength":1,"maxLength":800},"category":{"enum":["concept","knowledge","glossary","preference","person","decision"]},"scope":{"enum":scopes},"sourceIds":{"type":"array","minItems":1,"items":{"type":"string"}}}}}}});
-    let messages=vec![ChatMessage{role:"system".into(),content:format!("依据实际答案和来源材料整理记忆。完整响应必须满足以下 JSON Schema，直接输出 JSON 对象。每个条目严格使用 content、category、scope、sourceIds 四个字段。scope 使用允许的范围，sourceIds 使用提供材料的实际 sourceId。仅整理来源支持的事实。\n{}",serde_json::to_string(&schema).map_err(|e|e.to_string())?)},ChatMessage{role:"user".into(),content:serde_json::to_string(&json!({"answer":source.content,"sources":sources,"allowedScopes":scopes})).map_err(|e|e.to_string())?}];
-    let spec=ProviderModelSpec::from_provider(provider)?;let output=2048.min(spec.max_output_tokens);let count=service::count_messages(&spec,key,&messages,&cancellation).await?;let reserve=spec.protocol_reserve.checked_add((count as f64*spec.estimate_safety_ratio).ceil() as usize).ok_or("整理容量整数溢出")?;service::check_final_budget(count,output,reserve,spec.context_window)?;
+    let messages=vec![ChatMessage::text("system",format!("依据实际答案和来源材料整理记忆。完整响应必须满足以下 JSON Schema，直接输出 JSON 对象。每个条目严格使用 content、category、scope、sourceIds 四个字段。scope 使用允许的范围，sourceIds 使用提供材料的实际 sourceId。仅整理来源支持的事实。\n{}",serde_json::to_string(&schema).map_err(|e|e.to_string())?)),ChatMessage::text("user",serde_json::to_string(&json!({"answer":source.content,"sources":sources,"allowedScopes":scopes})).map_err(|e|e.to_string())?)];
+    let spec=ProviderModelSpec::from_provider(provider)?;let output=provider["max_output_tokens"].as_u64().unwrap_or(2048) as usize;let count=service::count_messages(&spec,key,&messages,&cancellation).await?;let reserve=spec.protocol_reserve.checked_add((count as f64*spec.estimate_safety_ratio).ceil() as usize).ok_or("整理容量整数溢出")?;service::check_final_budget(count,output,reserve,spec.context_window)?;
     let budget=ValidatedContext{messages_hash:format!("{:x}",Sha256::digest(serde_json::to_vec(&messages).map_err(|e|e.to_string())?)),model_spec_id:spec.identity()?,messages,prompt_tokens:count,requested_output_tokens:output,protocol_reserve:reserve,context_window:spec.context_window,count_method:spec.count_method,settings_revision:hash(config)?,document_id:session.document_id.clone(),session_id:session.session_id.clone(),window_id:window_id.into(),used_memory_ids:vec![],omitted_sources:vec![],summaries:vec![],source_anchors:vec![]};
     let mut response=String::new();let usage=super::stream_json_completion(provider,key,&budget,cancellation,|piece|{response.push_str(piece);Ok(())}).await?;
     let value:LearningResponse=serde_json::from_str(&response).map_err(|e|format!("整理 JSON 无效：{e}"))?;
@@ -353,13 +357,17 @@ async fn learn(window:&tauri::WebviewWindow,rid:&str)->Result<Value,String> {
     let storage=crate::memory::get_archive_storage()?;let record=storage.request_record(rid)?;
     let session=storage.get_session(record["sessionId"].as_str().ok_or("整理来源缺少会话身份")?)?;check_session(window,&session)?;
     if record["status"].as_str()!=Some("Completed") {return Err("整理需要真实已完成答案".into());}
-    let context=record["context"].clone();let config=context["config"].clone();
+    let context=record["context"].clone();
+    let snapshot=super::configuration::load_ai_configuration()?;
+    let captured=super::configuration::capture_request_model(snapshot.ai.active_model_id.as_deref().ok_or("请添加并选择模型")?,&snapshot.settings_revision)?;
+    let provider=captured.model.provider_value()?;
+    let config=serde_json::to_value(snapshot.ai).map_err(|e|e.to_string())?;
     let target=ConversationTarget{document_key:session.document_key.clone(),workspace_key:session.workspace_key.clone(),runtime_document_id:session.document_id.clone(),window_id:window.label().into()};
     let probe={
         let mut tasks=LEARNING_TASKS.lock().map_err(|_|"记忆整理任务锁损坏")?;
         if tasks.contains_key(rid){return Err("当前答案已经正在整理记忆".into());}
         storage.set_request_learning_status(rid,window.label(),"Running",None)?;
-        let probe=match super::begin_probe(window.label()) {
+        let probe=match super::begin_provider_probe(window.label(),&captured.model.connection.id) {
             Ok(probe)=>probe,
             Err(error)=>{storage.set_request_learning_status(rid,window.label(),"Failed",Some(&error))?;window.emit("learningChanged",json!({"requestId":rid,"sessionId":session.session_id,"target":target,"status":"Failed","error":error})).map_err(|e|e.to_string())?;return Err(error);}
         };
@@ -369,9 +377,9 @@ async fn learn(window:&tauri::WebviewWindow,rid:&str)->Result<Value,String> {
     let result=async {
         window.emit("learningChanged",json!({"requestId":rid,"sessionId":session.session_id,"target":target,"status":"Running"})).map_err(|e|e.to_string())?;
         let source=storage.get_session_messages(&session.session_id)?.into_iter().find(|message|message.request_id.as_deref()==Some(rid) && message.role=="assistant" && message.completion_status=="Completed").ok_or("整理缺少真实归档答案")?;
-        let provider=crate::ai_chat::active_provider(&config)?;let key=crate::ai_chat::read_api_key(provider["id"].as_str().ok_or("整理服务商编号缺失")?)?;
+        let key=&captured.key;
         let (candidates,usage,budget)=generate_learning_candidates(&provider,&key,&source,&context,&session,&config,window.label(),probe.cancellation.clone()).await?;
-        storage.record_learning_usage(rid,window.label(),&json!({"usage":usage,"validated":budget}))?;
+        storage.record_learning_usage(rid,window.label(),&json!({"usage":usage,"validated":budget,"model":captured.model,"settingsRevision":captured.revision}))?;
         let mut edits=vec![];
         for candidate in candidates {
             let edit=MemoryEdit{content:candidate.content,category:candidate.category,scope:candidate.scope.clone(),workspace_key:if candidate.scope=="global"{None}else{session.workspace_key.clone()},document_key:if candidate.scope=="document"{session.document_key.clone()}else{None},preference_key:None,pinned:false,source_message_id:Some(source.message_id.clone()),source_request_id:Some(rid.into()),source_anchor:Some(json!({"sourceIds":candidate.source_ids,"sources":context["sources"]}))};

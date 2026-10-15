@@ -132,30 +132,6 @@
               <path d="M18.5 14.5l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9.9-2.1z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
             </svg>
           </button>
-          <div class="file-menu align-right ai-model-menu" id="ai-model-menu" hidden>
-            <div class="ai-mm-title">AI 模型</div>
-            <div class="ai-mm-row">
-              <label>服务商</label>
-              <select id="ai-mm-provider"></select>
-            </div>
-            <div class="ai-mm-row">
-              <label>模型 ID</label>
-              <input type="text" id="ai-mm-model" placeholder="模型 ID（可手动输入）" autocomplete="off" spellcheck="false" />
-            </div>
-            <div class="ai-mm-row">
-              <label>思考深度</label>
-              <div class="ai-mm-think" id="ai-mm-think">
-                <button type="button" data-think="fast">快速</button>
-                <button type="button" data-think="balanced">均衡</button>
-                <button type="button" data-think="deep">深入</button>
-              </div>
-            </div>
-            <div class="ai-mm-hint" id="ai-mm-status">问答快捷键 Alt+E</div>
-            <div class="ai-mm-actions">
-              <button type="button" class="btn sm" id="ai-mm-settings">模型设置…</button>
-              <button type="button" class="btn sm primary" id="ai-mm-save">应用</button>
-            </div>
-          </div>
         </div>
         <button class="icon-btn" id="btn-settings" title="设置">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -558,87 +534,7 @@
         </section>
         <section class="set-section" id="set-ai-section">
           <h3>AI 模型</h3>
-          <p class="hint small">选中文字后问答；密钥仅保存在本机（DPAPI），不会写入文档或备份明文。</p>
-          <div class="row">
-            <label class="ai-set-label">启用 AI</label>
-            <button type="button" class="btn" id="ai-enabled">启用：开</button>
-          </div>
-          <div class="row">
-            <label class="ai-set-label">服务商</label>
-            <select id="ai-provider-select"></select>
-          </div>
-          <div class="row">
-            <label class="ai-set-label">模型 ID</label>
-            <input type="text" id="ai-model-input" placeholder="可手动输入，如 deepseek-chat" style="min-width:220px" autocomplete="off" spellcheck="false" />
-          </div>
-          <div class="row">
-            <label class="ai-set-label">API Base</label>
-            <input type="text" id="ai-base-input" placeholder="https://…" style="min-width:260px" />
-          </div>
-          <div class="row">
-            <label class="ai-set-label">API Key</label>
-            <input type="password" id="ai-key-input" placeholder="仅保存到本机" style="min-width:220px" autocomplete="off" />
-            <button type="button" class="btn" id="ai-key-save">保存密钥</button>
-            <button type="button" class="btn" id="ai-key-clear">清除</button>
-          </div>
-          <div class="row">
-            <label class="ai-set-label">思考深度</label>
-            <div class="ai-mm-think" id="ai-thinking-pick">
-              <button type="button" data-think="fast">快速</button>
-              <button type="button" data-think="balanced">均衡</button>
-              <button type="button" data-think="deep">深入</button>
-            </div>
-          </div>
-          <div class="row">
-            <label class="ai-set-label">问答快捷键</label>
-            <input type="text" id="ai-shortcut-input" placeholder="Alt+E" style="min-width:140px" />
-            <button type="button" class="btn" id="ai-shortcut-record">录入</button>
-            <button type="button" class="btn" id="ai-shortcut-reset">默认 Alt+E</button>
-          </div>
-          <div class="row">
-            <label class="ai-set-label">上下文</label>
-            <button type="button" class="btn" id="ai-scope-btn">范围：整篇文档</button>
-          </div>
-          <div class="row">
-            <label class="ai-set-label">记忆</label>
-            <label><input type="checkbox" id="ai-use-memory" checked />使用已有记忆</label>
-            <button type="button" class="btn" id="ai-memory-btn">整理新记忆：询问</button>
-          </div>
-          <div class="ai-style-block">
-            <div class="ai-style-title">自定义风格</div>
-            <p class="hint small">控制 AI 首次回答的长度与语气；反馈后会在此自动写入轻量长度提示，可随时改。</p>
-            <div class="row">
-              <label class="ai-set-label">回答长度</label>
-              <div class="ai-mm-think" id="ai-length-pick">
-                <button type="button" data-length="brief">简短</button>
-                <button type="button" data-length="normal">适中</button>
-                <button type="button" data-length="detailed">详细</button>
-              </div>
-            </div>
-            <div class="row">
-              <label class="ai-set-label">对话语气</label>
-              <div class="ai-mm-think" id="ai-tone-pick">
-                <button type="button" data-tone="neutral">中性</button>
-                <button type="button" data-tone="friendly">亲切</button>
-                <button type="button" data-tone="professional">专业</button>
-                <button type="button" data-tone="academic">学术</button>
-              </div>
-            </div>
-            <div class="row" style="align-items:flex-start">
-              <label class="ai-set-label">风格说明</label>
-              <textarea id="ai-custom-style" rows="4" style="flex:1;min-width:240px" placeholder="例如：先一句话结论再展开；名词解释不超过五句；多用要点列表；避免空洞铺垫。"></textarea>
-            </div>
-            <div class="row" style="align-items:flex-start">
-              <label class="ai-set-label">长度提示</label>
-              <textarea id="ai-length-hint" rows="2" style="flex:1;min-width:240px" placeholder="由「太短 / 太长 / 满意」反馈自动维护，可手改；保持轻量。"></textarea>
-            </div>
-          </div>
-          <div class="row">
-            <button type="button" class="btn" id="ai-test-btn">测试连接</button>
-            <button type="button" class="btn" id="ai-counting-btn">模型计数配置</button>
-            <button type="button" class="btn primary" id="ai-apply-btn">应用 AI 设置</button>
-          </div>
-          <p class="hint small" id="ai-set-status">内置预设：DeepSeek / Qwen / Kimi / GLM</p>
+          <p class="hint small">正在读取已保存模型与官方目录…</p>
         </section>
         <section class="set-section">
           <h3>编辑</h3>
@@ -679,6 +575,8 @@
   <script src="js/core/ai-service.js"></script>
   <script src="js/core/message-renderer.js"></script>
   <script src="js/ui/conversation-view.js"></script>
+  <script src="js/ui/model-picker.js"></script>
+  <script src="js/ui/ai-settings.js"></script>
   <script src="js/ui/ai-ui.js"></script>
   <script src="js/ui/companion.js"></script>
   <script src="js/ui/recovery.js"></script>

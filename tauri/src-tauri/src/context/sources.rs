@@ -53,7 +53,7 @@ pub struct SourceRef {
 
 impl SourceRef {
     pub fn message(&self) -> ChatMessage {
-        ChatMessage { role: "system".into(), content: format!("引用材料 {}，{}。引用此材料时使用 Markdown 链接 [来源](stuart-source:{})。\n{}", self.source_id, self.title, self.source_id, self.excerpt) }
+        ChatMessage::text("system",format!("引用材料 {}，{}。引用此材料时使用 Markdown 链接 [来源](stuart-source:{})。\n{}", self.source_id, self.title, self.source_id, self.excerpt))
     }
 }
 

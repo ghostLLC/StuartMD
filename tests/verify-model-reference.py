@@ -52,5 +52,7 @@ for model in manifest["models"]:
         vectors.append(vector.tolist())
     results.append({"modelId": model["modelId"], "runtimeVersion": ort.__version__, "texts": texts, "vectors": vectors})
     print(json.dumps({"modelId": model["modelId"], "runtimeVersion": ort.__version__, "dimension": model["dimension"]}))
-destination = workspace / "docs/validation/3.5.12/model-reference.json"
+version = json.loads((workspace / "package.json").read_text(encoding="utf-8"))["version"]
+destination = workspace / "docs/validation" / version / "model-reference.json"
+destination.parent.mkdir(parents=True, exist_ok=True)
 destination.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")

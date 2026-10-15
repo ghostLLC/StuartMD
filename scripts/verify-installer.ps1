@@ -1,14 +1,15 @@
 param([string]$BaselineDirectory = $env:STUART_INSTALLER_BASELINE, [switch]$SkipStartup)
 $ErrorActionPreference = 'Stop'
 $workspace = Split-Path -Parent $PSScriptRoot
+$releaseVersion = (Get-Content -LiteralPath (Join-Path $workspace 'package.json') -Raw | ConvertFrom-Json).version
 $installDirectory = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'StuartMD'
 $dataDirectory = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'StuartMD'
 $application = Join-Path $installDirectory 'stuartmd.exe'
 $builtApplication = Join-Path $workspace 'tauri/src-tauri/target/release/stuartmd.exe'
-$installer = Join-Path $workspace 'tauri/src-tauri/target/release/bundle/nsis/StuartMD_3.5.12_x64-setup.exe'
+$installer = Join-Path $workspace "tauri/src-tauri/target/release/bundle/nsis/StuartMD_${releaseVersion}_x64-setup.exe"
 $python = Join-Path $env:USERPROFILE '.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe'
 $sevenZip = Join-Path $env:ProgramFiles '7-Zip/7z.exe'
-$evidenceDirectory = Join-Path $workspace 'docs/validation/3.5.12'
+$evidenceDirectory = Join-Path $workspace "docs/validation/$releaseVersion"
 $artifactDirectory = Join-Path $workspace ('tests/native-artifacts/installer-' + [guid]::NewGuid().ToString())
 $existing = Get-CimInstance Win32_Process -Filter "Name='stuartmd.exe'"
 if ($existing) { throw 'StuartMD正在运行，请先完成当前文档保存与关闭；安装验收没有终止用户程序' }
@@ -46,10 +47,10 @@ if ($packagedApplications.Count -ne 1) { throw '实际安装包缺少唯一的St
 $installProcess = Start-Process -FilePath $installer -ArgumentList '/S' -WindowStyle Hidden -PassThru -Wait
 if ($installProcess.ExitCode -ne 0) { throw "实际安装程序退出异常：$($installProcess.ExitCode)" }
 $version = (Get-Item -LiteralPath $application).VersionInfo.FileVersion
-if ($version -ne '3.5.12') { throw "安装后的实际文件版本异常：$version" }
+if ($version -ne $releaseVersion) { throw "安装后的实际文件版本异常：$version" }
 $applicationHash = (Get-FileHash -LiteralPath $application -Algorithm SHA256).Hash
 if ($applicationHash -ne (Get-FileHash -LiteralPath $packagedApplications[0].FullName -Algorithm SHA256).Hash) { throw '安装后的可执行程序与实际安装包内容不一致' }
-$resources = @('samples/示例文档.md', 'samples/欢迎使用 StuartMD.md', 'file-md.ico', 'file-pdf.ico', 'native-manifest.json', 'models/manifest.json', 'tokenizers-manifest.json')
+$resources = @('samples/示例文档.md', 'samples/欢迎使用 StuartMD.md', 'file-md.ico', 'file-pdf.ico', 'native-manifest.json', 'models/manifest.json', 'tokenizers-manifest.json', 'ai-model-catalog.json')
 $nativeManifest = Get-Content -LiteralPath "$workspace/resources/native-manifest.json" -Raw | ConvertFrom-Json
 foreach ($entry in $nativeManifest.files) { $resources += 'native/' + $entry.path }
 $tokenizerManifest = Get-Content -LiteralPath "$workspace/resources/tokenizers-manifest.json" -Raw | ConvertFrom-Json

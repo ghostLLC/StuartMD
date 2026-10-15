@@ -11,6 +11,7 @@
     return { ...value, document: metadata, meta: metadata, busy: starting || !!active };
   }
   store.subscribe(() => emit("change", snapshot()));
+  global.addEventListener("stuart-ai-config", event => { store.setConfig(event.detail.ai); emit("config", event.detail.ai); });
   function on(type, listener) {
     if (!events.has(type)) events.set(type, new Set());
     events.get(type).add(listener); if (type === "change") listener(snapshot());

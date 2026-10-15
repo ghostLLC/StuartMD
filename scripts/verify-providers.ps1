@@ -4,7 +4,7 @@ $sourceDirectory = Join-Path ([Environment]::GetFolderPath('ApplicationData')) '
 $testDirectory = Join-Path $workspace ('tests/native-artifacts/providers-' + [guid]::NewGuid().ToString())
 New-Item -ItemType Directory -Path (Join-Path $testDirectory 'ai/keys') -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $sourceDirectory 'settings.json') -Destination (Join-Path $testDirectory 'settings.json')
-Copy-Item -LiteralPath (Join-Path $sourceDirectory 'ai/keys/deepseek.bin') -Destination (Join-Path $testDirectory 'ai/keys/deepseek.bin')
+Get-ChildItem -LiteralPath (Join-Path $sourceDirectory 'ai/keys') -File | Copy-Item -Destination (Join-Path $testDirectory 'ai/keys')
 $previousDirectory = $env:STUART_DATA_DIR
 $previousProvider = $env:STUART_PROVIDER_TEST
 try {

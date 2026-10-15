@@ -1,8 +1,8 @@
 # StuartMD
 
-Windows Markdown / PDF 阅读与编辑器。当前代码版本为 **3.5.12**，使用 Tauri 2 和共享前端。
+Windows Markdown / PDF 阅读与编辑器。当前代码版本为 **3.5.13**，使用 Tauri 2 和共享前端。
 
-安装文件通过 [GitHub Releases](https://github.com/ghostLLC/StuartMD/releases) 提供。当前分支的构建文件名称为 `StuartMD_3.5.12_x64-setup.exe`；验证范围见 `docs/validation/3.5.12/acceptance.md`。
+安装文件通过 [GitHub Releases](https://github.com/ghostLLC/StuartMD/releases) 提供。当前分支的构建文件名称为 `StuartMD_3.5.13_x64-setup.exe`；验证范围见 `docs/validation/3.5.13/acceptance.md`。
 
 ## 文档编辑
 
@@ -22,7 +22,7 @@ Windows Markdown / PDF 阅读与编辑器。当前代码版本为 **3.5.12**，�
 
 ## AI 问答、会话和记忆
 
-在设置中启用 AI，配置服务商、模型与 API Key。选中 Markdown 或 PDF 正文后按 `Alt+E` 发起问答；按 `Alt+I` 打开伴读面板，使用问答、知识、记忆和会话页面。
+在设置的“已保存模型”中点击“添加模型”，选择服务商、必要区域，填写 API Key 并勾选一个或多个型号。同一连接的模型共用加密密钥；内置型号已经提供地址、容量、思考能力和计数配置。顶部和伴读输入区直接选择已保存模型，支持搜索、最近使用和默认模型。选中 Markdown 或 PDF 正文后按 `Alt+E` 发起问答；按 `Alt+I` 打开伴读面板。
 
 快速问答与伴读面板共享问题、答案和请求状态。提问范围包含选中内容、当前章节、整篇文档和工作区资料；新建文档会话默认使用整篇文档。各个文档与工作区分别保存输入草稿、引用和阅读位置。
 
@@ -30,7 +30,9 @@ Windows Markdown / PDF 阅读与编辑器。当前代码版本为 **3.5.12**，�
 
 会话页面支持按当前目标、文档、工作区或全部会话筛选，搜索问题与答案，分页读取消息、修改名称、恢复原文及草稿并继续提问。删除会话提供关联记忆处理选项，已经保存的记忆来源摘录可以独立保留。
 
-提供 DeepSeek、Qwen、Kimi、GLM 和 OpenAI 兼容服务配置。模型需要有效的 Token 计数配置；DeepSeek 使用随安装包提供的 tokenizer，其他模型使用已登记的计数接口或用户提供的配置。本次实际服务商验收范围为 DeepSeek。
+提供 DeepSeek、Qwen、Kimi、GLM 的十二个预置型号及自定义 OpenAI 兼容服务。模型参数分别保存，修改当前模型用于后续请求，已经发送的请求保留原配置。模型列表、默认选择、当前选择和最近使用在重新启动后恢复。旧设置会迁移并保留已有型号、输出预算、计数覆盖项和加密凭据引用。
+
+“获取模型目录”显示在线目录及获取时间。“验证回答”发送公开测试消息，分别检查计数、实际正文、完成标记与用量。更换密钥、地址、型号或参数后需要重新验证。自定义型号的容量、计数资料及请求参数通过高级设置填写。当前实际服务商接口验收范围为 DeepSeek，具体结果见验收记录。
 
 “使用已有记忆”与“整理新记忆”分别设置。整理方式包含关闭、询问、自动。询问方式允许选取完整答案中的实际段落并确认保存；自动方式独立核算容量、验证来源并整理记录，需要确认的偏好进入候选列表。
 
@@ -72,7 +74,7 @@ pwsh -File scripts/verify-release.ps1
 
 完整验收命令由 `scripts/verify-repair.ps1` 的 `Core`、`Browser`、`Native`、`Models`、`Providers`、`Installer` 模式运行。Models 模式需要按照 `tests/model-reference-requirements.txt` 配置独立 Python 环境；Providers 模式使用当前用户已经配置的 DeepSeek 加密密钥和独立测试目录。密钥内容不会进入验证日志。Installer 模式执行本机安装、SQLite 一致性备份、实际用户数据保留和进程启动检查。
 
-实际结果和各项验证范围见 [3.5.12 验收](docs/validation/3.5.12/acceptance.md)。公开发布前执行 `pwsh -File scripts/verify-release.ps1 -Publication`，全部必要检查通过并具有当前源代码指纹后允许发布。用户要求跳过的界面检查记录为 `SkippedByUser`。
+实际结果和各项验证范围见 [3.5.13 验收](docs/validation/3.5.13/acceptance.md)。公开发布前执行 `pwsh -File scripts/verify-release.ps1 -Publication`，全部必要检查通过并具有当前源代码指纹后允许发布。用户要求跳过的界面检查记录为 `SkippedByUser`。
 
 ```powershell
 Set-Location tauri

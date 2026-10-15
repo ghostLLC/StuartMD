@@ -18,10 +18,19 @@ async fn actual_deepseek_stream_budget_summary_cancel_and_disabled() {
         settings["ai"]["learning_policy"] = json!("off");
         Ok(())
     }).unwrap();
-    let config = crate::ai_chat::load_ai_settings();
-    let provider = crate::ai_chat::active_provider(&json!({"active_provider_id":"deepseek","providers":config["providers"]})).unwrap();
-    let key = crate::ai_chat::read_api_key("deepseek").unwrap();
-    let connection = crate::ai_chat::test_provider_connection("deepseek", CancellationToken::new()).await.unwrap();
+    let initial=super::configuration::load_ai_configuration().unwrap();
+    let connection_config=initial.ai.providers.iter().find(|p|p.r#type=="deepseek" && p.key_set).unwrap().clone();
+    let mut saved=super::configuration::update_config(super::configuration::AiConfigChange::SaveProviderModels{connection:super::configuration::ConnectionInput{id:Some(connection_config.id.clone()),provider_type:connection_config.r#type.clone(),region:connection_config.region.clone(),label:connection_config.label.clone(),base_url:None,enabled:Some(true)},models:["deepseek-flash","deepseek-v4-pro"].into_iter().map(|name|super::configuration::ModelInput{model_id:name.into(),display_name:None,thinking:Some("off".into()),max_output_tokens:Some(8192),token_counting:None,overrides:json!({})}).collect(),api_key:None},&initial.settings_revision,false).unwrap();
+    let ids:Vec<_>=saved.ai.models.iter().filter(|m|m.provider_id==connection_config.id && ["deepseek-flash","deepseek-v4-pro"].contains(&m.model_id.as_str())).map(|m|m.id.clone()).collect();
+    for id in &ids {let mut model=saved.ai.models.iter().find(|m|m.id==*id).unwrap().clone();model.thinking="off".into();model.max_output_tokens=8192;saved=super::configuration::update_config(super::configuration::AiConfigChange::EditModel{model},&saved.settings_revision,false).unwrap();}
+    let flash=saved.ai.models.iter().find(|m|m.provider_id==connection_config.id && m.model_id=="deepseek-flash").unwrap().id.clone();
+    let pro=saved.ai.models.iter().find(|m|m.provider_id==connection_config.id && m.model_id=="deepseek-v4-pro").unwrap().id.clone();
+    saved=super::configuration::update_config(super::configuration::AiConfigChange::SelectModel{model_id:flash.clone()},&saved.settings_revision,false).unwrap();
+    let config = serde_json::to_value(&saved.ai).unwrap();
+    let captured=super::configuration::capture_request_model(&flash,&saved.settings_revision).unwrap();
+    let provider = captured.model.provider_value().unwrap();
+    let key = captured.key;
+    let connection = crate::ai_chat::test_provider_connection(&connection_config.id, CancellationToken::new()).await.unwrap();
     assert!(connection["models"].as_array().unwrap().contains(&provider["model"]));
 
     let file = directory.join("公开验收文档.md");
@@ -40,7 +49,7 @@ async fn actual_deepseek_stream_budget_summary_cancel_and_disabled() {
         request_id, session_id: session.session_id.clone(), window_id: "provider-verification".into(),
         input: ContextInput { editor_revision: snapshot.revision, source_hash: snapshot.content_hash.clone(), scope: "document".into(), ..Default::default() },
         document: Some(snapshot), document_key: Some(document_key), settings: config.clone(), workspace_sources: Vec::new(), resolved_sources: Vec::new(),
-        messages: vec![ChatMessage { role: "user".into(), content: question.into() }], pdf_source: None,
+        messages: vec![ChatMessage::text("user",question)], pdf_source: None,
     };
     let budget = assemble_for_request(&provider, &key, request.clone(), 512, CancellationToken::new()).await.unwrap();
     assert!(budget.messages.iter().any(|message| message.content.contains("禁止删除用户文件")));
@@ -48,16 +57,19 @@ async fn actual_deepseek_stream_budget_summary_cancel_and_disabled() {
     archive.record_context(&request.request_id,&session.session_id,&context_record).unwrap();
     let mut answer = String::new();
     let mut chunks = 0;
-    let usage = stream_completion(&provider, &key, &budget, Some("fast"), CancellationToken::new(), |piece| { chunks += 1; answer.push_str(piece); Ok(()) }).await.unwrap();
+    let usage = stream_completion(&provider, &key, &budget, Some("fast"), CancellationToken::new(), |piece| { chunks += 1; answer.push_str(piece); if chunks==1 {let latest=super::configuration::load_ai_configuration()?;super::configuration::update_config(super::configuration::AiConfigChange::SelectModel{model_id:pro.clone()},&latest.settings_revision,false)?;}Ok(()) }).await.unwrap();
     assert!(chunks > 1);
     assert!(answer.contains("DeepSeek") && answer.contains("StuartMD"), "实际回答缺少文档来源：{answer}");
     let assistant=crate::memory::ChatArchiveMessage {
         message_id: uuid::Uuid::new_v4().to_string(), session_id: session.session_id.clone(), role: "assistant".into(), content: answer.clone(),
         timestamp: crate::memory::sqlite_archive::now_millis(), request_id: Some(request.request_id.clone()), document_id: Some(opened.document_id),
-        completion_status: "Completed".into(), source_hash: Some(request.document.as_ref().unwrap().content_hash.clone()),source_anchor:Some(json!({"documentKey":request.document_key,"workspaceKey":null,"sources":budget.source_anchors})),turn_id:Some(accepted.turn.turn_id.clone()),attempt_no:accepted.attempt_no,..Default::default()
+        completion_status: "Completed".into(), source_hash: Some(request.document.as_ref().unwrap().content_hash.clone()),source_anchor:Some(json!({"documentKey":request.document_key,"workspaceKey":null,"sources":budget.source_anchors,"assistantMessage":usage["assistant_message"]})),turn_id:Some(accepted.turn.turn_id.clone()),attempt_no:accepted.attempt_no,..Default::default()
     };
     archive.add_message(assistant.clone()).unwrap();context_record["usage"]=usage.clone();
     archive.record_context(&request.request_id,&session.session_id,&context_record).unwrap();
+    assert_eq!(archive.request_record(&request.request_id).unwrap()["context"]["config"]["active_model_id"],flash);
+    let next=super::configuration::load_ai_configuration().unwrap();assert_eq!(next.ai.active_model_id.as_deref(),Some(pro.as_str()));
+    let next=super::configuration::capture_request_model(&pro,&next.settings_revision).unwrap();assert_eq!(next.model.model.model_id,"deepseek-v4-pro");
     archive.set_request_actual_usage(&request.request_id,"provider-verification",&usage).unwrap();
     let session=archive.finish_attempt(&request.request_id,"provider-verification","Completed",None).unwrap();
     let stored=archive.get_completed_messages(&session.session_id).unwrap();assert_eq!(stored.len(),2);assert_eq!(stored[1].content,answer);
@@ -88,6 +100,15 @@ async fn actual_deepseek_stream_budget_summary_cancel_and_disabled() {
     let cancelled = stream_completion(&provider, &key, &budget, Some("fast"), cancel.clone(), |_| { cancel_chunks += 1; cancel.cancel(); Ok(()) }).await.unwrap_err();
     assert!(cancel_chunks > 0 && cancelled.contains("取消"));
 
+    let mut verified=vec![];
+    for id in [&flash,&pro] {
+        let current=super::configuration::load_ai_configuration().unwrap();
+        let result=super::model_validation::verify_model(id,&current.settings_revision,CancellationToken::new()).await.unwrap();
+        let status=result["status"].clone();verified.push(result);
+        let evidence_dir=std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("../../docs/validation/{}",env!("CARGO_PKG_VERSION")));
+        std::fs::create_dir_all(&evidence_dir).unwrap();std::fs::write(evidence_dir.join("actual-model-verification.json"),serde_json::to_vec_pretty(&verified).unwrap()).unwrap();
+        assert_eq!(status,"Passed","实际模型回答验证没有通过");
+    }
     let probe = super::begin_probe("provider-verification").unwrap();
     let mut disabled_chunks = 0;
     let disabled = stream_completion(&provider, &key, &budget, Some("fast"), probe.cancellation.clone(), |_| {
@@ -104,7 +125,7 @@ async fn actual_deepseek_stream_budget_summary_cancel_and_disabled() {
     let evidence = json!({"provider":"deepseek","model":provider["model"],"models":connection["models"],"streamChunks":chunks,"answer":answer,
         "answerSha256":format!("{:x}",Sha256::digest(answer.as_bytes())),"plannedPromptTokens":budget.prompt_tokens,"protocolReserve":budget.protocol_reserve,"usage":usage,
         "summary":summary,"cancelChunks":cancel_chunks,"disabledChunks":disabled_chunks,"learningCandidates":candidates,"learningUsage":learning_usage,"learningBudget":learning_budget,"learned":learned,"passed":true});
-    let evidence_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/validation/3.5.12");
+    let evidence_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("../../docs/validation/{}",env!("CARGO_PKG_VERSION")));
     std::fs::create_dir_all(&evidence_dir).unwrap();
     std::fs::write(evidence_dir.join("actual-deepseek.json"), serde_json::to_vec_pretty(&evidence).unwrap()).unwrap();
 }

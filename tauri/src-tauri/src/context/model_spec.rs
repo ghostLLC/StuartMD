@@ -22,6 +22,9 @@ pub struct ProviderModelSpec {
 }
 
 impl ProviderModelSpec {
+    pub fn from_model(model:&crate::ai::configuration::ResolvedModel)->Result<Self,String> {
+        Self::from_provider(&model.provider_value()?)
+    }
     pub fn from_provider(provider: &Value) -> Result<Self,String> {
         let provider_id = provider.get("id").and_then(Value::as_str).ok_or("服务商编号不存在")?.to_owned();
         let model_id = provider.get("model").and_then(Value::as_str).filter(|model| !model.trim().is_empty()).ok_or("模型编号不存在")?.to_owned();

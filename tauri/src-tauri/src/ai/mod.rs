@@ -12,6 +12,8 @@ use crate::context::service::{ContextInput, ValidatedContext};
 pub mod companion;
 pub mod model_catalog;
 pub mod configuration;
+pub mod request_parameters;
+pub mod model_validation;
 
 struct Request {
     window_id: String, document_id: Option<String>, document_key: Option<String>, workspace_key: Option<String>, session_id: String,
@@ -22,13 +24,20 @@ struct Request {
 }
 static REQUESTS: LazyLock<Mutex<HashMap<String, Request>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
-struct Probe {window_id:String,cancellation:CancellationToken,finished:Arc<Notify>,ended:Arc<AtomicBool>}
+struct Probe {window_id:String,provider_id:String,cancellation:CancellationToken,finished:Arc<Notify>,ended:Arc<AtomicBool>}
 static PROBES:LazyLock<Mutex<HashMap<String,Probe>>>=LazyLock::new(||Mutex::new(HashMap::new()));
 pub struct ProbeGuard {id:String,pub cancellation:CancellationToken}
 pub fn begin_probe(window_id:&str)->Result<ProbeGuard,String> {
+    let config=configuration::load_ai_configuration()?;
+    let model=config.ai.models.iter().find(|model|Some(&model.id)==config.ai.active_model_id.as_ref()).ok_or("请添加并选择模型")?;
+    begin_provider_probe(window_id,&model.provider_id)
+}
+pub fn begin_provider_probe(window_id:&str,provider_id:&str)->Result<ProbeGuard,String> {
     let cancellation=CancellationToken::new();crate::context::service::ensure_enabled(&cancellation)?;
     let id=uuid::Uuid::new_v4().to_string();
-    PROBES.lock().map_err(|_|"AI验证请求锁损坏")?.insert(id.clone(),Probe {window_id:window_id.into(),cancellation:cancellation.clone(),finished:Arc::new(Notify::new()),ended:Arc::new(AtomicBool::new(false))});
+    let mut registry=PROBES.lock().map_err(|_|"AI验证请求锁损坏")?;
+    configuration::ensure_connection_available(provider_id)?;
+    registry.insert(id.clone(),Probe {window_id:window_id.into(),provider_id:provider_id.into(),cancellation:cancellation.clone(),finished:Arc::new(Notify::new()),ended:Arc::new(AtomicBool::new(false))});
     Ok(ProbeGuard {id,cancellation})
 }
 impl Drop for ProbeGuard {
@@ -52,19 +61,26 @@ pub fn cancel_all() {
     for probe in PROBES.lock().expect("AI验证请求锁损坏").values() {probe.cancellation.cancel();}
 }
 pub async fn cancel_all_and_wait() -> Result<(), String> {
-    cancel_and_wait(None).await
+    cancel_and_wait(None,None).await
 }
 pub async fn cancel_window_and_wait(window_id:&str) -> Result<(),String> {
-    cancel_and_wait(Some(window_id)).await
+    cancel_and_wait(Some(window_id),None).await
 }
-async fn cancel_and_wait(window_id:Option<&str>) -> Result<(),String> {
+pub async fn cancel_provider_and_wait(provider_id:&str)->Result<(),String> {
+    cancel_and_wait(None,Some(provider_id)).await
+}
+fn request_provider_id(config:&Value)->Option<&str> {
+    let id=config["active_model_id"].as_str()?;
+    config["models"].as_array()?.iter().find(|model|model["id"].as_str()==Some(id))?["provider_id"].as_str()
+}
+async fn cancel_and_wait(window_id:Option<&str>,provider_id:Option<&str>) -> Result<(),String> {
     let requests: Vec<_> = {
         let registry=REQUESTS.lock().map_err(|_|"AI请求锁损坏")?;
-        registry.iter().filter(|(_,request)|!terminal(&request.status) && window_id.is_none_or(|owner|owner==request.window_id)).map(|(id,request)| {
+        registry.iter().filter(|(_,request)|!terminal(&request.status) && window_id.is_none_or(|owner|owner==request.window_id) && provider_id.is_none_or(|id|request_provider_id(&request.config)==Some(id))).map(|(id,request)| {
             request.cancellation.cancel(); (id.clone(),request.finished.clone())
         }).collect()
     };
-    let probes:Vec<_>={let registry=PROBES.lock().map_err(|_|"AI验证请求锁损坏")?;registry.values().filter(|probe|window_id.is_none_or(|owner|owner==probe.window_id)).map(|probe|{probe.cancellation.cancel();(probe.finished.clone(),probe.ended.clone())}).collect()};
+    let probes:Vec<_>={let registry=PROBES.lock().map_err(|_|"AI验证请求锁损坏")?;registry.values().filter(|probe|window_id.is_none_or(|owner|owner==probe.window_id) && provider_id.is_none_or(|id|id==probe.provider_id)).map(|probe|{probe.cancellation.cancel();(probe.finished.clone(),probe.ended.clone())}).collect()};
     let deadline=tokio::time::Instant::now()+std::time::Duration::from_secs(30);
     for (id,finished) in requests {
         let waiting=finished.notified();tokio::pin!(waiting);waiting.as_mut().enable();
@@ -117,31 +133,20 @@ pub async fn stream_completion(provider:&Value,key:&str,budget:&ValidatedContext
 }
 
 pub async fn stream_json_completion(provider:&Value,key:&str,budget:&ValidatedContext,cancellation:CancellationToken,delta:impl FnMut(&str)->Result<(),String>)->Result<Value,String> {
-    stream_completion_with_format(provider,key,budget,Some("fast"),cancellation,delta,true).await
+    stream_completion_with_format(provider,key,budget,None,cancellation,delta,true).await
 }
 
 async fn stream_completion_with_format(provider:&Value,key:&str,budget:&ValidatedContext,thinking:Option<&str>,cancellation:CancellationToken,mut delta:impl FnMut(&str)->Result<(),String>,json_response:bool)->Result<Value,String> {
     crate::context::service::ensure_enabled(&cancellation)?;
     let (base,_)=crate::ai_chat::effective_base_url(provider)?;
-    let mut body=json!({"model":provider["model"],"messages":budget.messages,"stream":true,"stream_options":{"include_usage":true},"max_tokens":budget.requested_output_tokens});
-    if json_response {body["response_format"]=json!({"type":"json_object"});}
-    let mode=thinking.unwrap_or("balanced");
-    if !["fast","balanced","deep"].contains(&mode) {return Err("AI思考模式无效".into());}
-    if provider["id"].as_str()==Some("deepseek") {
-        if mode=="fast" {body["thinking"]=json!({"type":"disabled"});}
-        if mode=="deep" {body["thinking"]=json!({"type":"enabled"});body["reasoning_effort"]=json!("high");}
-    } else if provider["id"].as_str()==Some("qwen") {
-        if mode=="fast" {body["enable_thinking"]=json!(false);}
-        if mode=="deep" {body["enable_thinking"]=json!(true);}
-    } else if provider["id"].as_str()==Some("glm") && provider["model"].as_str().is_some_and(|model|model.starts_with("glm-4.5")||model.starts_with("glm-4.6")||model.starts_with("glm-4.7")) {
-        if mode=="fast" {body["thinking"]=json!({"type":"disabled"});}
-        if mode=="deep" {body["thinking"]=json!({"type":"enabled"});}
-    }
+    let mut body=request_parameters::completion_body(provider,&budget.messages,budget.requested_output_tokens,json_response,thinking)?;
+    body["stream"]=json!(true);body["stream_options"]=json!({"include_usage":true});
     let client=reqwest::Client::builder().connect_timeout(std::time::Duration::from_secs(12)).timeout(std::time::Duration::from_secs(300)).redirect(reqwest::redirect::Policy::none()).build().map_err(|error|error.to_string())?;
     let response=tokio::select! {_=cancellation.cancelled()=>return Err("已取消生成".into()),response=client.post(format!("{base}/chat/completions")).bearer_auth(key).json(&body).send()=>response.map_err(|error|error.without_url().to_string())?};
     if !response.status().is_success() {return Err(format!("AI服务返回HTTP {}",response.status()));}
     if !response.headers().get(reqwest::header::CONTENT_TYPE).and_then(|value|value.to_str().ok()).is_some_and(|value|value.starts_with("text/event-stream")) {return Err("AI服务未返回SSE响应".into());}
     let mut stream=response.bytes_stream().eventsource();let mut completed=false;let mut finish=None;let mut usage=None;let mut produced=false;
+    let mut assistant=json!({"role":"assistant","content":""});
     loop {
         let event=tokio::select! {_=cancellation.cancelled()=>return Err("已取消生成".into()),event=stream.next()=>event};
         let Some(event)=event else {break;};let event=event.map_err(|error|error.to_string())?;
@@ -151,6 +156,16 @@ async fn stream_completion_with_format(provider:&Value,key:&str,budget:&Validate
         if let Some(error)=value.get("error") {return Err(error["message"].as_str().unwrap_or("AI服务返回错误").to_owned());}
         if let Some(reason)=value.pointer("/choices/0/finish_reason").and_then(Value::as_str) {finish=Some(reason.to_owned());}
         if let Some(actual)=value.get("usage").filter(|usage|usage.is_object()) {usage=Some(actual.clone());}
+        if let Some(fields)=value.pointer("/choices/0/delta").and_then(Value::as_object) {
+            for (name,value) in fields {
+                if value.is_null() || name=="role" {continue;}
+                if ["content","reasoning_content","refusal"].contains(&name.as_str()) {
+                    let text=value.as_str().ok_or("助手增量字段应为文本")?;
+                    let existing=assistant.get(name).and_then(Value::as_str).unwrap_or("");
+                    assistant[name]=json!(format!("{existing}{text}"));
+                }else {return Err(format!("助手响应包含当前阅读功能不支持的字段：{name}"));}
+            }
+        }
         if let Some(piece)=value.pointer("/choices/0/delta/content").and_then(Value::as_str) {
             if !piece.is_empty() {delta(piece)?;produced=true;}
         }
@@ -158,12 +173,13 @@ async fn stream_completion_with_format(provider:&Value,key:&str,budget:&Validate
     if !completed {return Err("AI响应中断，缺少完成标记".into());}
     if finish.as_deref()!=Some("stop") {return Err(format!("AI回答未完整生成：{}",finish.as_deref().unwrap_or("缺少结束原因")));}
     if !produced {return Err("AI回答正文为空".into());}
-    let usage=usage.ok_or("AI响应缺少实际usage，无法核验Token预算")?;
+    let mut usage=usage.ok_or("AI响应缺少实际usage，无法核验Token预算")?;
     let input=usage["prompt_tokens"].as_u64().ok_or("AI实际usage缺少prompt_tokens")? as usize;
     let output=usage["completion_tokens"].as_u64().ok_or("AI实际usage缺少completion_tokens")? as usize;
     crate::context::service::validate_usage(budget,input)?;
     if output>budget.requested_output_tokens {return Err("AI实际输出超过已经预留的Token预算".into());}
     crate::context::service::check_final_budget(input,output,0,budget.context_window)?;
+    usage["assistant_message"]=assistant;
     Ok(usage)
 }
 

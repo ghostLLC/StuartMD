@@ -7,7 +7,7 @@ const { execFileSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const version = toml.parse(fs.readFileSync(path.join(root, 'tauri/src-tauri/Cargo.toml'), 'utf8')).package.version;
 const configuration = JSON.parse(fs.readFileSync(path.join(root, 'tauri/src-tauri/tauri.conf.json'), 'utf8'));
-assert.equal(version, '3.5.12');
+assert.equal(version, '3.5.13');
 assert.equal(configuration.version, version);
 assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version, version);
 for (const file of ['README.md', 'samples/示例文档.md', 'samples/欢迎使用 StuartMD.md']) {
@@ -29,6 +29,9 @@ for (const directory of ['cmaps', 'standard_fonts']) {
 }
 for (const file of ['pdf.min.js', 'pdf.worker.min.js']) assert.equal(sha256(path.join(root, 'web/libs', file)), sha256(path.join(root, 'node_modules/pdfjs-dist/build', file)), file);
 const tokenizers = JSON.parse(fs.readFileSync(path.join(root, 'resources/tokenizers-manifest.json'), 'utf8'));
+const catalog = JSON.parse(fs.readFileSync(path.join(root, 'resources/ai-model-catalog.json'), 'utf8'));
+assert.equal(catalog.schema_version, 1); assert.equal(catalog.models.length, 12);
+evidence.aiModelCatalog = { version: catalog.catalog_version, verifiedAt: catalog.verified_at, sha256: sha256(path.join(root, 'resources/ai-model-catalog.json')), models: catalog.models.map(model => model.model_id) };
 for (const resource of tokenizers.archives) for (const [file, hash] of Object.entries(resource.files)) assert.equal(sha256(path.join(root, 'resources/tokenizers', resource.id, file)), hash, resource.id + '/' + file);
 fs.mkdirSync(path.join(root, 'docs/validation', version), { recursive: true });
 fs.writeFileSync(path.join(root, 'docs/validation', version, 'version-resources.json'), JSON.stringify(evidence, null, 2));

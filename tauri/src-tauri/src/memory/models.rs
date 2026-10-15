@@ -56,6 +56,17 @@ pub struct ChatArchiveMessage {
     pub attempt_no: u64,
 }
 
+impl ChatArchiveMessage {
+    pub fn provider_message(&self,preserve_reasoning:bool)->Result<crate::context::service::ChatMessage,String> {
+        let mut message=if let Some(value)=self.source_anchor.as_ref().and_then(|anchor|anchor.get("assistantMessage")) {
+            let message:crate::context::service::ChatMessage=serde_json::from_value(value.clone()).map_err(|e|e.to_string())?;
+            if message.role!=self.role || message.content!=self.content {return Err("归档助手消息与正文不一致".into());}message
+        }else {crate::context::service::ChatMessage::text(&self.role,&self.content)};
+        if !preserve_reasoning {message.fields.clear();}
+        Ok(message)
+    }
+}
+
 /// Organic memory item supporting 3-tier lifecycle and Ebbinghaus evolution
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]

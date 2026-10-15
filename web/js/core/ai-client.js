@@ -1,6 +1,6 @@
 (function (global) {
   "use strict";
-  const state = { ai: null, settingsRevision: null };
+  const state = { ai: null, catalog: null, settingsRevision: null };
   function api() {
     const bridge = global.pywebview?.api;
     if (!bridge) throw new Error("原生接口尚未加载");
@@ -14,27 +14,29 @@
     if (state.ai && !force) return state.ai;
     const result = checked(await api().ai_get_config());
     if (!result.ai) throw new Error("AI设置响应缺少配置");
-    state.ai = result.ai;
+    acceptSnapshot(result);
     if (!result.settingsRevision) throw new Error("AI设置响应缺少配置版本");
     state.settingsRevision = result.settingsRevision;
     return state.ai;
   }
-  async function saveAi(next) {
-    let result = checked(await api().ai_save_config(next));
-    if (result.needs_confirm) {
-      const accepted = await global.StuartUIConfirm(`保存后会把已保存的 API Key 发送到 ${result.detail.key_sent_to}。确认使用这个服务地址吗？`);
-      if (!accepted) throw new Error("服务地址修改已经取消");
-      result = checked(await api().ai_save_config(next, true));
-    }
-    if (!result.ok || !result.ai) throw new Error("AI设置没有完成保存");
-    state.ai = result.ai;
-    state.settingsRevision = result.settingsRevision;
-    if (!result.ai.enabled) await global.StuartAIService.cancel();
+  function acceptSnapshot(result) {
+    if (!result?.ai || !result.catalog || !result.settingsRevision) throw new Error("AI 配置快照不完整");
+    state.ai = result.ai; state.catalog = result.catalog; state.settingsRevision = result.settingsRevision;
+    global.dispatchEvent?.(new CustomEvent("stuart-ai-config", { detail: result }));
     return result;
   }
-  const setApiKey = async (providerId, key) => checked(await api().ai_set_api_key(providerId, key));
-  const clearApiKey = async providerId => checked(await api().ai_clear_api_key(providerId));
-  const testProvider = async providerId => checked(await api().ai_test_provider(providerId));
+  async function updateConfig(change, expectedRevision = state.settingsRevision, confirm = false) {
+    let result;
+    try { result = checked(await api().ai_update_config(change, expectedRevision, confirm)); }
+    catch (reason) {
+      if (!String(reason.message || reason).startsWith("HostConfirmationRequired：")) throw reason;
+      if (!await global.StuartUIConfirm(`${reason.message || reason}。确认使用这个服务地址吗？`)) throw new Error("服务地址修改已经取消");
+      result = checked(await api().ai_update_config(change, expectedRevision, true));
+    }
+    return acceptSnapshot(result);
+  }
+  const setApiKey = async (providerId, key, revision = state.settingsRevision) => acceptSnapshot(checked(await api().ai_set_api_key(providerId, key, revision)));
+  const clearApiKey = async (providerId, revision = state.settingsRevision) => acceptSnapshot(checked(await api().ai_clear_api_key(providerId, revision)));
   function getStyle(ai = state.ai || {}) {
     const style = ai.style || {};
     return { length: style.length || "normal", tone: style.tone || "neutral", custom: style.custom || "",
@@ -43,10 +45,11 @@
   async function saveStyle(patch) {
     const cfg = await ensureConfig(true);
     const previous = getStyle(cfg);
-    const result = await saveAi({ ...cfg, style: { ...previous, ...patch, feedback: { ...previous.feedback, ...patch.feedback } } });
+    const result = await updateConfig({ kind: "updatePreferences", preferences: { style: { ...previous, ...patch, feedback: { ...previous.feedback, ...patch.feedback } } } });
     return { ...result, style: getStyle(state.ai) };
   }
-  function activeProvider(ai) { return ai?.providers?.find(provider => provider.id === ai.active_provider_id) || null; }
+  function activeModel(ai = state.ai) { return ai?.models?.find(model => model.id === ai.active_model_id) || null; }
+  function activeProvider(ai = state.ai) { const model = activeModel(ai); return ai?.providers?.find(provider => provider.id === model?.provider_id) || null; }
   async function rememberSnippet(content, metadata = {}) {
     const text = String(content ?? "");
     if (!text.trim()) throw new Error("记忆正文为空");
@@ -89,8 +92,8 @@
     const learned = await api().companion_learn_request(metadata.requestId);
     return { ok: true, mode: "automatic", ...learned };
   }
-  global.StuartAI = { state, get config() { return state.ai; }, ensureConfig, saveAi, getStyle, saveStyle,
-    recordStyleFeedback, setApiKey, clearApiKey, testProvider, activeProvider, rememberSnippet, handleMemoryAfterExplain,
+  global.StuartAI = { state, get config() { return state.ai; }, get snapshot() { return { ai: state.ai, catalog: state.catalog, settingsRevision: state.settingsRevision }; }, ensureConfig, updateConfig, acceptSnapshot, getStyle, saveStyle, activeModel,
+    recordStyleFeedback, setApiKey, clearApiKey, activeProvider, rememberSnippet, handleMemoryAfterExplain,
     explain: (options, handlers) => global.StuartAIService.explainSelection(options, handlers),
     cancel: () => global.StuartAIService.cancel(), get streaming() { return global.StuartAIService.streaming; } };
 })(typeof window !== "undefined" ? window : globalThis);

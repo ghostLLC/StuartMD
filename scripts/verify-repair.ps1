@@ -9,6 +9,8 @@ function Test-DocumentModules {
     if ($LASTEXITCODE -ne 0) { throw '前端文档模块测试失败' }
     npm run test:companion
     if ($LASTEXITCODE -ne 0) { throw '伴读语法、实际文档渲染及来源协议检查失败' }
+    & "$workspace/tests/verify-ai-configuration.ps1"
+    if ($LASTEXITCODE -ne 0) { throw '模型配置、真实迁移及页面输入检查失败' }
     cargo test --manifest-path "$workspace/tauri/src-tauri/Cargo.toml" --locked -- --test-threads=1
     if ($LASTEXITCODE -ne 0) { throw 'Rust真实文件与数据库测试失败' }
     cargo test --manifest-path "$workspace/tests/native-documents/Cargo.toml" --locked -- --test-threads=1 --nocapture

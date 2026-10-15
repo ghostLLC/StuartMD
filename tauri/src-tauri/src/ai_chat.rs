@@ -1,5 +1,4 @@
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use std::{fs, path::PathBuf};
 use tauri::Emitter;
 use zeroize::{Zeroize, Zeroizing};
@@ -27,7 +26,7 @@ pub(crate) fn validate_base_url(raw:&str)->Result<String,String> {
 }
 pub(crate) fn effective_base_url(provider:&Value)->Result<(String,String),String> {
     let id=provider["id"].as_str().ok_or("服务商编号缺失")?;
-    let base=if let Some(base)=pinned_base_url(id) {base.to_owned()} else {validate_base_url(provider["base_url"].as_str().ok_or("API地址缺失")?)?};
+    let base=if provider.get("connection_id").is_some() {validate_base_url(provider["base_url"].as_str().ok_or("API地址缺失")?)?}else if let Some(base)=pinned_base_url(id) {base.to_owned()} else {validate_base_url(provider["base_url"].as_str().ok_or("API地址缺失")?)?};
     let host=url::Url::parse(&base).map_err(|error|error.to_string())?.host_str().ok_or("API地址缺少主机")?.to_owned();
     Ok((base,host))
 }
@@ -76,6 +75,18 @@ pub(crate) fn read_api_key(id:&str)->Result<Zeroizing<String>,String> {
     match String::from_utf8(plain) {Ok(key) if !key.is_empty()=>Ok(Zeroizing::new(key)),Ok(_)=>Err("密钥为空".into()),Err(error)=>{let mut bytes=error.into_bytes();bytes.zeroize();Err("密钥编码无效".into())}}
 }
 pub(crate) fn provider_has_key(id:&str)->Result<bool,String> {Ok(key_path(id)?.is_file())}
+pub(crate) fn stage_api_key(api_key:String)->Result<String,String> {
+    let input=Zeroizing::new(api_key);let key=Zeroizing::new(input.trim().to_owned());
+    if key.is_empty() || key.len()>512 || key.chars().any(char::is_control) {return Err("API Key 为空或格式无效".into());}
+    let reference=format!("credential-{}",uuid::Uuid::new_v4());
+    crate::fs_api::atomic_write_file(&key_path(&reference)?,&dpapi_protect(key.as_bytes())?)?;
+    Ok(reference)
+}
+pub(crate) fn remove_api_key(reference:&str)->Result<(),String> {
+    let path=key_path(reference)?;
+    if path.is_file() {fs::remove_file(path).map_err(|e|format!("删除加密凭据失败：{e}"))?;}
+    Ok(())
+}
 
 pub fn builtin_ai_defaults()->Value {
     crate::ai::configuration::stored_value(&crate::ai::configuration::defaults()).expect("默认 AI 配置序列化失败")
@@ -93,41 +104,32 @@ pub(crate) fn active_provider(ai:&Value)->Result<Value,String> {
 #[tauri::command]
 pub fn stuart_ai_get_config()->Result<crate::ai::configuration::AiConfigSnapshot,String> {crate::ai::configuration::load_ai_configuration()}
 #[tauri::command]
-pub async fn stuart_ai_save_config(_app:tauri::AppHandle,_ai:Value,_confirm:Option<bool>)->Result<Value,String> {
-    Err("请使用类型化 AI 配置操作".into())
+pub async fn stuart_ai_update_config(app:tauri::AppHandle,change:crate::ai::configuration::AiConfigChange,expected_revision:String,confirm:Option<bool>)->Result<crate::ai::configuration::AiConfigSnapshot,String> {
+    use crate::ai::configuration::{load_ai_configuration,CredentialMutation,update_config};
+    let before=load_ai_configuration()?;
+    if before.settings_revision!=expected_revision {return Err("SettingsVersionConflict：配置已经变化，请重新加载".into());}
+    let kind=change.kind();let affected=change.affected_credentials(&before.ai);
+    let _guard=CredentialMutation::begin(affected.clone())?;
+    for id in &affected {crate::ai::cancel_provider_and_wait(id).await?;}
+    let disable=matches!(&change,crate::ai::configuration::AiConfigChange::UpdatePreferences{preferences} if preferences.get("enabled")==Some(&json!(false)));
+    if disable {crate::ai::cancel_all_and_wait().await?;}
+    let result=update_config(change,&expected_revision,confirm==Some(true))?;
+    app.emit("ai-config-changed",json!({"revision":result.settings_revision,"providerIds":result.ai.providers.iter().map(|p|&p.id).chain(before.ai.providers.iter().map(|p|&p.id)).collect::<std::collections::HashSet<_>>(),"modelIds":result.ai.models.iter().map(|m|&m.id).chain(before.ai.models.iter().map(|m|&m.id)).collect::<std::collections::HashSet<_>>(),"kind":kind})).map_err(|e|e.to_string())?;
+    Ok(result)
 }
 #[tauri::command]
-pub async fn stuart_ai_set_api_key(provider_id:String,api_key:String)->Result<Value,String> {
-    let input=Zeroizing::new(api_key);let key=Zeroizing::new(input.trim().to_owned());
-    if key.is_empty() || key.len()>512 {return Err("API密钥为空或超过长度限制".into());}
-    let id=sanitize_provider_id(&provider_id)?;let blob=dpapi_protect(key.as_bytes())?;
-    crate::ai::cancel_all_and_wait().await?;
-    crate::fs_api::atomic_write_file(&key_path(&id)?,&blob)?;
-    Ok(json!({"ok":true,"provider_id":id,"key_set":true}))
+pub async fn stuart_ai_set_api_key(app:tauri::AppHandle,provider_id:String,api_key:String,expected_revision:String)->Result<crate::ai::configuration::AiConfigSnapshot,String> {
+    stuart_ai_update_config(app,crate::ai::configuration::AiConfigChange::SetCredential{provider_id,api_key},expected_revision,None).await
 }
 #[tauri::command]
-pub async fn stuart_ai_clear_api_key(provider_id:String)->Result<Value,String> {
-    let id=sanitize_provider_id(&provider_id)?;let path=key_path(&id)?;
-    crate::ai::cancel_all_and_wait().await?;
-    if path.exists() {fs::remove_file(path).map_err(|error|error.to_string())?;}
-    Ok(json!({"ok":true,"provider_id":id,"key_set":false}))
-}
-#[tauri::command]
-pub async fn stuart_ai_test_provider(window:tauri::WebviewWindow,provider_id:String)->Result<Value,String> {
-    let probe=crate::ai::begin_probe(window.label())?;let cancellation=probe.cancellation.clone();
-    test_provider_connection(&provider_id,cancellation).await
+pub async fn stuart_ai_clear_api_key(app:tauri::AppHandle,provider_id:String,expected_revision:String)->Result<crate::ai::configuration::AiConfigSnapshot,String> {
+    stuart_ai_update_config(app,crate::ai::configuration::AiConfigChange::ClearCredential{provider_id},expected_revision,None).await
 }
 pub(crate) async fn test_provider_connection(provider_id:&str,cancellation:tokio_util::sync::CancellationToken)->Result<Value,String> {
     crate::context::service::ensure_enabled(&cancellation)?;
-    let config=load_ai_settings();let provider=active_provider(&json!({"active_provider_id":provider_id,"providers":config["providers"]}))?;
-    let (base,host)=effective_base_url(&provider)?;let key=read_api_key(provider_id)?;
-    let client=reqwest::Client::builder().timeout(std::time::Duration::from_secs(30)).redirect(reqwest::redirect::Policy::none()).build().map_err(|error|error.to_string())?;
-    let response=tokio::select! {_=cancellation.cancelled()=>return Err("AI验证请求已经取消".into()),response=client.get(format!("{base}/models")).bearer_auth(key.as_str()).send()=>response.map_err(|error|error.without_url().to_string())?};
-    if !response.status().is_success() {return Err(format!("AI服务返回HTTP {}",response.status()));}
-    let response:Value=tokio::select! {_=cancellation.cancelled()=>return Err("AI验证请求已经取消".into()),response=response.json()=>response.map_err(|error|error.to_string())?};
-    let models=response["data"].as_array().ok_or("服务商响应缺少实际模型列表")?.iter().map(|model|model["id"].as_str().map(str::to_owned).ok_or("模型编号缺失")).collect::<Result<Vec<_>,_>>()?;
-    crate::context::service::ensure_enabled(&cancellation)?;
-    Ok(json!({"ok":true,"provider_id":provider_id,"models":models,"model":provider["model"],"key_sent_to":host}))
+    let snapshot=crate::ai::configuration::load_ai_configuration()?;
+    let result=crate::ai::model_validation::discover_models(provider_id,&snapshot.settings_revision,cancellation).await?;
+    Ok(json!({"ok":true,"provider_id":provider_id,"models":result["models"].as_array().ok_or("目录响应无效")?.iter().map(|m|m["modelId"].clone()).collect::<Vec<_>>()}))
 }
 
 #[cfg(test)]

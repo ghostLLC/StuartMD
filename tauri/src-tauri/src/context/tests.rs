@@ -18,10 +18,10 @@ fn provider(resource: &str) -> ProviderModelSpec {
 #[test]
 fn official_tokenizer_templates_count_chinese_emoji_and_completed_reasoning() {
     let messages = vec![
-        ChatMessage { role:"system".into(),content:"完整解释公开样本。".into() },
-        ChatMessage { role:"user".into(),content:"中文与 English 😀，保留全部选区。".into() },
-        ChatMessage { role:"assistant".into(),content:"<think>处理公开资料</think>已经完成。".into() },
-        ChatMessage { role:"user".into(),content:"最新更正：保留否定关系。".into() },
+        ChatMessage::text("system","完整解释公开样本。"),
+        ChatMessage::text("user","中文与 English 😀，保留全部选区。"),
+        ChatMessage::text("assistant","<think>处理公开资料</think>已经完成。"),
+        ChatMessage::text("user","最新更正：保留否定关系。"),
     ];
     for resource in ["deepseek-v3", "deepseek-v4"] {
         let count = count_local(&provider(resource), &messages).unwrap();
@@ -59,7 +59,7 @@ fn actual_document_request(text: &str) -> super::service::RequestContext {
         request_id:uuid::Uuid::new_v4().to_string(),session_id:uuid::Uuid::new_v4().to_string(),window_id:"source-verification".into(),
         document_key:Some(crate::document::DocumentService::document_key(&snapshot).unwrap()),
         input:super::service::ContextInput {editor_revision:snapshot.revision,source_hash:snapshot.content_hash.clone(),..Default::default()},
-        document:Some(snapshot),messages:vec![ChatMessage {role:"user".into(),content:"请解释实际正文。".into()}],pdf_source:None,workspace_sources:vec![],resolved_sources:vec![],settings:json!({"use_saved_memories":false}),
+        document:Some(snapshot),messages:vec![ChatMessage::text("user","请解释实际正文。")],pdf_source:None,workspace_sources:vec![],resolved_sources:vec![],settings:json!({"use_saved_memories":false}),
     }
 }
 
@@ -150,7 +150,7 @@ fn actual_pdf_cross_page_selection_preserves_and_checks_every_page() {
         request_id:uuid::Uuid::new_v4().to_string(),session_id:uuid::Uuid::new_v4().to_string(),window_id:"pdf-selection-verification".into(),
         document_key:Some(crate::document::DocumentService::document_key(&document).unwrap()),
         input:super::service::ContextInput {editor_revision:document.revision,source_hash:document.content_hash.clone(),scope:"selection".into(),selection:Some(selection.clone()),..Default::default()},
-        document:Some(document),messages:vec![ChatMessage {role:"user".into(),content:"解释全部选中页面。".into()}],
+        document:Some(document),messages:vec![ChatMessage::text("user","解释全部选中页面。")],
         pdf_source:Some(pdf.clone()),workspace_sources:vec![],resolved_sources:vec![],settings:json!({"use_saved_memories":false}),
     };
     let material=super::sources::prepare_materials(&request,false).unwrap();
@@ -218,7 +218,7 @@ fn actual_pdf_cross_page_selection_checks_cropbox_chinese_and_scanned_text() {
             request_id:uuid::Uuid::new_v4().to_string(),session_id:uuid::Uuid::new_v4().to_string(),window_id:"pdf-selection-verification".into(),
             document_key:Some(crate::document::DocumentService::document_key(&document).unwrap()),
             input:super::service::ContextInput {editor_revision:document.revision,source_hash:document.content_hash.clone(),scope:"selection".into(),selection:Some(selection.clone()),..Default::default()},
-            document:Some(document.clone()),messages:vec![ChatMessage {role:"user".into(),content:"解释全部选中页面。".into()}],pdf_source:Some(pdf),workspace_sources:vec![],resolved_sources:vec![],settings:json!({"use_saved_memories":false}),
+            document:Some(document.clone()),messages:vec![ChatMessage::text("user","解释全部选中页面。")],pdf_source:Some(pdf),workspace_sources:vec![],resolved_sources:vec![],settings:json!({"use_saved_memories":false}),
         };
         let source=super::sources::selection_source(&request,&selection).unwrap();
         assert_eq!(source.excerpt,selection.quote);assert!(source.mandatory);

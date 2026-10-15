@@ -96,3 +96,4 @@
 .sc-dialog::backdrop { background: rgb(0 0 0 / 35%); }
 .sc-detail-body { white-space: pre-wrap; font: 12px/1.6 var(--font-mono); overflow-wrap: anywhere; }
 .sc-detail h3, .sc-dialog h3 { margin: 0 0 12px; }
+.sc-input-meta .ai-model-trigger { max-width: 100%; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
