@@ -1,0 +1,267 @@
+{
+  "answer": "按当前文档，验收安排如下：\n\n- 验收服务商：仅验收 DeepSeek。\n- 禁止操作：禁止删除用户文件。\n- 最新更正：欢迎文档使用软件名称 StuartMD。\n- 待解决问题：确认 PDF 标注能够重新打开。\n\n[来源](stuart-source:s-8d7491b893efc4b01159935a479064621116d71c81bba15651e0615cb7662def)",
+  "answerSha256": "1f8da56eb27404e03c7d01732e072fad74b8581cfa992901b9b4f15f9024b9eb",
+  "cancelChunks": 1,
+  "disabledChunks": 1,
+  "learned": {
+    "memories": [
+      {
+        "accessCount": 0,
+        "approvalKind": "automatic",
+        "category": "knowledge",
+        "confidence": 1.0,
+        "confirmed": true,
+        "content": "最新更正：欢迎文档使用 StuartMD 名称。",
+        "createdAt": 1792052379316,
+        "documentId": "file:C:/Users/Administrator/Desktop/Stuart/tests/native-artifacts/providers-a622c665-97b4-4d9f-822d-8a829d223823/公开验收文档.md",
+        "lastAccessedAt": 1792052379316,
+        "memoryId": "b87e94e2-865b-4302-9b84-fdb1ecb34a3e",
+        "pinned": false,
+        "preferenceKey": null,
+        "recordId": "24f51e14-cd92-4eb5-afea-270f7fd511af",
+        "requestId": "03425650-c757-4ecd-b366-cb7a924984af",
+        "scope": "document",
+        "sourceAnchor": {
+          "sourceIds": [
+            "s-8d7491b893efc4b01159935a479064621116d71c81bba15651e0615cb7662def"
+          ],
+          "sources": [
+            {
+              "anchor": {
+                "documentId": "1623d875-4939-477f-ad5f-9b9e6fe9351b",
+                "fileFingerprint": "41b9b4d369d1b80e3d96c855a2ddcfa1303e5d066d1837cd2ee1e6d96da49fb4",
+                "path": "C:/Users/Administrator/Desktop/Stuart/tests/native-artifacts/providers-a622c665-97b4-4d9f-822d-8a829d223823/公开验收文档.md",
+                "revision": 0,
+                "sourceHash": "41b9b4d369d1b80e3d96c855a2ddcfa1303e5d066d1837cd2ee1e6d96da49fb4"
+              },
+              "excerpt": "# StuartMD 验收\r\n\r\n文档决定：仅验收 DeepSeek。约束：禁止删除用户文件。😀\n最新更正：欢迎文档使用 StuartMD 名称。\n待解决问题：确认 PDF 标注能够重新打开。\n",
+              "inputIds": [],
+              "kind": "document",
+              "mandatory": true,
+              "memoryId": null,
+              "sourceId": "s-8d7491b893efc4b01159935a479064621116d71c81bba15651e0615cb7662def",
+              "title": "文档完整正文",
+              "used": true
+            }
+          ]
+        },
+        "sourceMessageId": "73509efd-aa40-4c96-818d-75f474254eb5",
+        "supersededBy": null,
+        "tier": 2,
+        "version": 1,
+        "workspaceId": null
+      }
+    ],
+    "proposals": [
+      {
+        "category": "decision",
+        "content": "文档决定：仅验收 DeepSeek 服务商。",
+        "documentKey": "file:C:/Users/Administrator/Desktop/Stuart/tests/native-artifacts/providers-a622c665-97b4-4d9f-822d-8a829d223823/公开验收文档.md",
+        "proposalId": "dcbca9cd-fbd4-4753-96d6-ec2898a25dfc",
+        "proposalVersion": 1,
+        "scope": "document",
+        "sourceAnchor": {
+          "sourceIds": [
+            "s-8d7491b893efc4b01159935a479064621116d71c81bba15651e0615cb7662def"
+          ],
+          "sources": [
+            {
+              "anchor": {
+                "documentId": "1623d875-4939-477f-ad5f-9b9e6fe9351b",
+                "fileFingerprint": "41b9b4d369d1b80e3d96c855a2ddcfa1303e5d066d1837cd2ee1e6d96da49fb4",
+                "path": "C:/Users/Administrator/Desktop/Stuart/tests/native-artifacts/providers-a622c665-97b4-4d9f-822d-8a829d223823/公开验收文档.md",
+                "revision": 0,
+                "sourceHash": "41b9b4d369d1b80e3d96c855a2ddcfa1303e5d066d1837cd2ee1e6d96da49fb4"
+              },
+              "excerpt": "# StuartMD 验收\r\n\r\n文档决定：仅验收 DeepSeek。约束：禁止删除用户文件。😀\n最新更正：欢迎文档使用 StuartMD 名称。\n待解决问题：确认 PDF 标注能够重新打开。\n",
+              "inputIds": [],
+              "kind": "document",
+              "mandatory": true,
+              "memoryId": null,
+              "sourceId": "s-8d7491b893efc4b01159935a479064621116d71c81bba15651e0615cb7662def",
+              "title": "文档完整正文",
+              "used": true
+            }
+          ]
+        },
+        "sourceMessageId": "73509efd-aa40-4c96-818d-75f474254eb5",
+        "sourceRequestId": "03425650-c757-4ecd-b366-cb7a924984af",
+        "status": "Pending",
+        "workspaceKey": null
+      },
+      {
+        "category": "preference",
+        "content": "约束：禁止删除用户文件。",
+        "documentKey": "file:C:/Users/Administrator/Desktop/Stuart/tests/native-artifacts/providers-a622c665-97b4-4d9f-822d-8a829d223823/公开验收文档.md",
+        "proposalId": "5916e965-07ca-4dcc-819c-71e12da1a9be",
+        "proposalVersion": 1,
+        "scope": "document",
+        "sourceAnchor": {
+          "sourceIds": [
+            "s-8d7491b893efc4b01159935a479064621116d71c81bba15651e0615cb7662def"
+          ],
+          "sources": [
+            {
+              "anchor": {
+                "documentId": "1623d875-4939-477f-ad5f-9b9e6fe9351b",
+                "fileFingerprint": "41b9b4d369d1b80e3d96c855a2ddcfa1303e5d066d1837cd2ee1e6d96da49fb4",
+                "path": "C:/Users/Administrator/Desktop/Stuart/tests/native-artifacts/providers-a622c665-97b4-4d9f-822d-8a829d223823/公开验收文档.md",
+                "revision": 0,
+                "sourceHash": "41b9b4d369d1b80e3d96c855a2ddcfa1303e5d066d1837cd2ee1e6d96da49fb4"
+              },
+              "excerpt": "# StuartMD 验收\r\n\r\n文档决定：仅验收 DeepSeek。约束：禁止删除用户文件。😀\n最新更正：欢迎文档使用 StuartMD 名称。\n待解决问题：确认 PDF 标注能够重新打开。\n",
+              "inputIds": [],
+              "kind": "document",
+              "mandatory": true,
+              "memoryId": null,
+              "sourceId": "s-8d7491b893efc4b01159935a479064621116d71c81bba15651e0615cb7662def",
+              "title": "文档完整正文",
+              "used": true
+            }
+          ]
+        },
+        "sourceMessageId": "73509efd-aa40-4c96-818d-75f474254eb5",
+        "sourceRequestId": "03425650-c757-4ecd-b366-cb7a924984af",
+        "status": "Pending",
+        "workspaceKey": null
+      }
+    ]
+  },
+  "learningBudget": {
+    "contextWindow": 1048576,
+    "countMethod": "local-tokenizer",
+    "documentId": "1623d875-4939-477f-ad5f-9b9e6fe9351b",
+    "messages": [
+      {
+        "content": "依据实际答案和来源材料整理记忆。完整响应必须满足以下 JSON Schema，直接输出 JSON 对象。每个条目严格使用 content、category、scope、sourceIds 四个字段。scope 使用允许的范围，sourceIds 使用提供材料的实际 sourceId。仅整理来源支持的事实。\n{\"additionalProperties\":false,\"properties\":{\"candidates\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"category\":{\"enum\":[\"concept\",\"knowledge\",\"glossary\",\"preference\",\"person\",\"decision\"]},\"content\":{\"maxLength\":800,\"minLength\":1,\"type\":\"string\"},\"scope\":{\"enum\":[\"global\",\"document\"]},\"sourceIds\":{\"items\":{\"type\":\"string\"},\"minItems\":1,\"type\":\"array\"}},\"required\":[\"content\",\"category\",\"scope\",\"sourceIds\"],\"type\":\"object\"},\"maxItems\":3,\"type\":\"array\"}},\"required\":[\"candidates\"],\"type\":\"object\"}",
+        "role": "system"
+      },
+      {
+        "content": "{\"allowedScopes\":[\"global\",\"document\"],\"answer\":\"按当前文档，验收安排如下：\\n\\n- 验收服务商：仅验收 DeepSeek。\\n- 禁止操作：禁止删除用户文件。\\n- 最新更正：欢迎文档使用软件名称 StuartMD。\\n- 待解决问题：确认 PDF 标注能够重新打开。\\n\\n[来源](stuart-source:s-8d7491b893efc4b01159935a479064621116d71c81bba15651e0615cb7662def)\",\"sources\":[{\"anchor\":{\"documentId\":\"1623d875-4939-477f-ad5f-9b9e6fe9351b\",\"fileFingerprint\":\"41b9b4d369d1b80e3d96c855a2ddcfa1303e5d066d1837cd2ee1e6d96da49fb4\",\"path\":\"C:/Users/Administrator/Desktop/Stuart/tests/native-artifacts/providers-a622c665-97b4-4d9f-822d-8a829d223823/公开验收文档.md\",\"revision\":0,\"sourceHash\":\"41b9b4d369d1b80e3d96c855a2ddcfa1303e5d066d1837cd2ee1e6d96da49fb4\"},\"excerpt\":\"# StuartMD 验收\\r\\n\\r\\n文档决定：仅验收 DeepSeek。约束：禁止删除用户文件。😀\\n最新更正：欢迎文档使用 StuartMD 名称。\\n待解决问题：确认 PDF 标注能够重新打开。\\n\",\"inputIds\":[],\"kind\":\"document\",\"mandatory\":true,\"memoryId\":null,\"sourceId\":\"s-8d7491b893efc4b01159935a479064621116d71c81bba15651e0615cb7662def\",\"title\":\"文档完整正文\",\"used\":true}]}",
+        "role": "user"
+      }
+    ],
+    "messagesHash": "47debca79753fad8d612c71e3be40088527f4088eb76653e44a30370d48f718a",
+    "modelSpecId": "9adfa55c475e0187b5d5681e7c0d185acdfa07d5dc940bb2b1de09c0c79fb9a6",
+    "omittedSources": [],
+    "promptTokens": 632,
+    "protocolReserve": 269,
+    "requestedOutputTokens": 8192,
+    "sessionId": "4c154ab0-5dd6-4d37-a1db-2ffda8eb3f3f",
+    "settingsRevision": "f13f986f5424aab7c3ce2b0c22f5feca4a0e328cca3185ff249b601430d3adff",
+    "sourceAnchors": [],
+    "summaries": [],
+    "usedMemoryIds": [],
+    "windowId": "provider-verification"
+  },
+  "learningCandidates": [
+    {
+      "category": "decision",
+      "content": "文档决定：仅验收 DeepSeek 服务商。",
+      "scope": "document",
+      "sourceIds": [
+        "s-8d7491b893efc4b01159935a479064621116d71c81bba15651e0615cb7662def"
+      ]
+    },
+    {
+      "category": "preference",
+      "content": "约束：禁止删除用户文件。",
+      "scope": "document",
+      "sourceIds": [
+        "s-8d7491b893efc4b01159935a479064621116d71c81bba15651e0615cb7662def"
+      ]
+    },
+    {
+      "category": "knowledge",
+      "content": "最新更正：欢迎文档使用 StuartMD 名称。",
+      "scope": "document",
+      "sourceIds": [
+        "s-8d7491b893efc4b01159935a479064621116d71c81bba15651e0615cb7662def"
+      ]
+    }
+  ],
+  "learningUsage": {
+    "assistant_message": {
+      "content": "{\"candidates\":[{\"content\":\"文档决定：仅验收 DeepSeek 服务商。\",\"category\":\"decision\",\"scope\":\"document\",\"sourceIds\":[\"s-8d7491b893efc4b01159935a479064621116d71c81bba15651e0615cb7662def\"]},{\"content\":\"约束：禁止删除用户文件。\",\"category\":\"preference\",\"scope\":\"document\",\"sourceIds\":[\"s-8d7491b893efc4b01159935a479064621116d71c81bba15651e0615cb7662def\"]},{\"content\":\"最新更正：欢迎文档使用 StuartMD 名称。\",\"category\":\"knowledge\",\"scope\":\"document\",\"sourceIds\":[\"s-8d7491b893efc4b01159935a479064621116d71c81bba15651e0615cb7662def\"]}]}",
+      "role": "assistant"
+    },
+    "completion_tokens": 190,
+    "prompt_cache_hit_tokens": 0,
+    "prompt_cache_miss_tokens": 657,
+    "prompt_tokens": 657,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 847
+  },
+  "model": "deepseek-flash",
+  "models": [
+    "deepseek-flash",
+    "deepseek-v4-pro"
+  ],
+  "passed": true,
+  "plannedPromptTokens": 170,
+  "protocolReserve": 260,
+  "provider": "deepseek",
+  "streamChunks": 97,
+  "summary": {
+    "constraints": [
+      {
+        "sources": [
+          {
+            "messageId": "73509efd-aa40-4c96-818d-75f474254eb5",
+            "quote": "禁止操作：禁止删除用户文件。"
+          }
+        ],
+        "text": "禁止删除用户文件"
+      }
+    ],
+    "corrections": [
+      {
+        "sources": [
+          {
+            "messageId": "73509efd-aa40-4c96-818d-75f474254eb5",
+            "quote": "最新更正：欢迎文档使用软件名称 StuartMD。"
+          }
+        ],
+        "text": "欢迎文档使用软件名称 StuartMD"
+      }
+    ],
+    "decisions": [
+      {
+        "sources": [
+          {
+            "messageId": "73509efd-aa40-4c96-818d-75f474254eb5",
+            "quote": "验收服务商：仅验收 DeepSeek。"
+          }
+        ],
+        "text": "仅验收 DeepSeek"
+      }
+    ],
+    "openQuestions": [
+      {
+        "sources": [
+          {
+            "messageId": "73509efd-aa40-4c96-818d-75f474254eb5",
+            "quote": "待解决问题：确认 PDF 标注能够重新打开。"
+          }
+        ],
+        "text": "确认 PDF 标注能够重新打开"
+      }
+    ]
+  },
+  "usage": {
+    "assistant_message": {
+      "content": "按当前文档，验收安排如下：\n\n- 验收服务商：仅验收 DeepSeek。\n- 禁止操作：禁止删除用户文件。\n- 最新更正：欢迎文档使用软件名称 StuartMD。\n- 待解决问题：确认 PDF 标注能够重新打开。\n\n[来源](stuart-source:s-8d7491b893efc4b01159935a479064621116d71c81bba15651e0615cb7662def)",
+      "role": "assistant"
+    },
+    "completion_tokens": 97,
+    "prompt_cache_hit_tokens": 0,
+    "prompt_cache_miss_tokens": 172,
+    "prompt_tokens": 172,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 269
+  }
+}

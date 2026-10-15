@@ -1,0 +1,76 @@
+[
+  {
+    "checkedAt": 1792052381973,
+    "configIdentity": "1095c047b1182f23a923deb359ec65163f3583673c5b23e457ce9a9185b50f25",
+    "credentialRevision": "legacy",
+    "modelConfigId": "d2c32903-80d8-4c87-b089-d06f9777a45f",
+    "stages": [
+      {
+        "stage": "configuration",
+        "status": "Passed"
+      },
+      {
+        "promptTokens": 23,
+        "stage": "counting",
+        "status": "Passed"
+      },
+      {
+        "stage": "completion",
+        "status": "Passed",
+        "text": "收到，StuartMD 模型验证完成。"
+      }
+    ],
+    "status": "Passed",
+    "usage": {
+      "assistant_message": {
+        "content": "收到，StuartMD 模型验证完成。",
+        "role": "assistant"
+      },
+      "completion_tokens": 10,
+      "prompt_cache_hit_tokens": 0,
+      "prompt_cache_miss_tokens": 24,
+      "prompt_tokens": 24,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      },
+      "total_tokens": 34
+    }
+  },
+  {
+    "checkedAt": 1792052383226,
+    "configIdentity": "b6e160fe376667ddfc0f15b5c4677174bc779d30ecaa2760a39fd8fafbc89896",
+    "credentialRevision": "legacy",
+    "modelConfigId": "d5dddaa7-9900-402b-8d37-9ba5fc6390ce",
+    "stages": [
+      {
+        "stage": "configuration",
+        "status": "Passed"
+      },
+      {
+        "promptTokens": 23,
+        "stage": "counting",
+        "status": "Passed"
+      },
+      {
+        "stage": "completion",
+        "status": "Passed",
+        "text": "StuartMD 模型验证完成。"
+      }
+    ],
+    "status": "Passed",
+    "usage": {
+      "assistant_message": {
+        "content": "StuartMD 模型验证完成。",
+        "role": "assistant"
+      },
+      "completion_tokens": 8,
+      "prompt_cache_hit_tokens": 0,
+      "prompt_cache_miss_tokens": 24,
+      "prompt_tokens": 24,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      },
+      "total_tokens": 32
+    }
+  }
+]

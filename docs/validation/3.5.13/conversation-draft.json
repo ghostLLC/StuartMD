@@ -1,0 +1,168 @@
+{
+  "after": {
+    "draft": {
+      "draftId": "8d65b9e1-ef48-448b-919d-5f7e7830c5dd",
+      "draftVersion": 3,
+      "explicitSources": [],
+      "partialAcknowledgement": null,
+      "partialConfirmed": false,
+      "question": "正在编辑的未发送正文。还有刚刚输入的内容。",
+      "readingAnchor": null,
+      "scope": "document",
+      "selection": null,
+      "sessionId": "9f9b5771-cc44-4907-9f57-bb27939ae2f1",
+      "target": {
+        "documentKey": "file:C:/Users/Administrator/Desktop/Stuart/tests/native-artifacts/memory-context-completion/memory-edcd68e8-df70-4364-a424-8a4c2656e5c1/archive.md",
+        "runtimeDocumentId": "b6ff8cf1-5637-4451-90cd-9e7599830893",
+        "windowId": "reading-window",
+        "workspaceKey": null
+      },
+      "updatedAt": 1792052086823,
+      "viewState": {
+        "page": "chat"
+      }
+    },
+    "learningActions": [],
+    "messages": [
+      {
+        "anchorFile": null,
+        "anchorLine": null,
+        "attemptNo": 0,
+        "completionStatus": "Completed",
+        "content": "编辑记忆时保留原始文档与真实引用。",
+        "documentId": "draft:b6ff8cf1-5637-4451-90cd-9e7599830893",
+        "messageId": "a605758c-05ec-475d-8604-28a1e134ed28",
+        "requestId": "ff36f41b-6c10-4140-b578-127c74009d4d",
+        "role": "assistant",
+        "sequence": 0,
+        "sessionId": "9f9b5771-cc44-4907-9f57-bb27939ae2f1",
+        "sourceAnchor": {
+          "documentKey": "draft:b6ff8cf1-5637-4451-90cd-9e7599830893",
+          "excerpt": "保留文档归属与引用。"
+        },
+        "sourceHash": null,
+        "timestamp": 0,
+        "turnId": null
+      }
+    ],
+    "session": {
+      "createdAt": 1792052086812,
+      "deletionState": "active",
+      "documentId": "b6ff8cf1-5637-4451-90cd-9e7599830893",
+      "documentKey": "file:C:/Users/Administrator/Desktop/Stuart/tests/native-artifacts/memory-context-completion/memory-edcd68e8-df70-4364-a424-8a4c2656e5c1/archive.md",
+      "documentPath": "C:/Users/Administrator/Desktop/Stuart/tests/native-artifacts/memory-context-completion/memory-edcd68e8-df70-4364-a424-8a4c2656e5c1/archive.md",
+      "messageCount": 1,
+      "sessionId": "9f9b5771-cc44-4907-9f57-bb27939ae2f1",
+      "sessionVersion": 3,
+      "title": "说明文档归属与引用。",
+      "updatedAt": 1792052086816,
+      "workspaceKey": null,
+      "workspaceRoot": null
+    },
+    "turns": [
+      {
+        "createdAt": 1792052086812,
+        "currentRequestId": "ff36f41b-6c10-4140-b578-127c74009d4d",
+        "kind": "Question",
+        "ordinal": 1,
+        "question": "说明文档归属与引用。",
+        "sessionId": "9f9b5771-cc44-4907-9f57-bb27939ae2f1",
+        "turnId": "9e252f22-e36d-4cf8-a7f4-155b913c9bad"
+      }
+    ]
+  },
+  "before": {
+    "draft": {
+      "draftId": "8d65b9e1-ef48-448b-919d-5f7e7830c5dd",
+      "draftVersion": 1,
+      "explicitSources": [],
+      "partialAcknowledgement": null,
+      "partialConfirmed": false,
+      "question": "正在编辑的未发送正文。",
+      "readingAnchor": null,
+      "scope": "document",
+      "selection": null,
+      "sessionId": "9f9b5771-cc44-4907-9f57-bb27939ae2f1",
+      "target": {
+        "documentKey": "draft:b6ff8cf1-5637-4451-90cd-9e7599830893",
+        "runtimeDocumentId": "b6ff8cf1-5637-4451-90cd-9e7599830893",
+        "windowId": "reading-window",
+        "workspaceKey": null
+      },
+      "updatedAt": 1792052086819,
+      "viewState": {
+        "page": "chat"
+      }
+    },
+    "learningActions": [],
+    "messages": [
+      {
+        "anchorFile": null,
+        "anchorLine": null,
+        "attemptNo": 0,
+        "completionStatus": "Completed",
+        "content": "编辑记忆时保留原始文档与真实引用。",
+        "documentId": "draft:b6ff8cf1-5637-4451-90cd-9e7599830893",
+        "messageId": "a605758c-05ec-475d-8604-28a1e134ed28",
+        "requestId": "ff36f41b-6c10-4140-b578-127c74009d4d",
+        "role": "assistant",
+        "sequence": 0,
+        "sessionId": "9f9b5771-cc44-4907-9f57-bb27939ae2f1",
+        "sourceAnchor": {
+          "documentKey": "draft:b6ff8cf1-5637-4451-90cd-9e7599830893",
+          "excerpt": "保留文档归属与引用。"
+        },
+        "sourceHash": null,
+        "timestamp": 0,
+        "turnId": null
+      }
+    ],
+    "session": {
+      "createdAt": 1792052086812,
+      "deletionState": "active",
+      "documentId": "b6ff8cf1-5637-4451-90cd-9e7599830893",
+      "documentKey": "draft:b6ff8cf1-5637-4451-90cd-9e7599830893",
+      "documentPath": null,
+      "messageCount": 1,
+      "sessionId": "9f9b5771-cc44-4907-9f57-bb27939ae2f1",
+      "sessionVersion": 2,
+      "title": "说明文档归属与引用。",
+      "updatedAt": 1792052086816,
+      "workspaceKey": null,
+      "workspaceRoot": null
+    },
+    "turns": [
+      {
+        "createdAt": 1792052086812,
+        "currentRequestId": "ff36f41b-6c10-4140-b578-127c74009d4d",
+        "kind": "Question",
+        "ordinal": 1,
+        "question": "说明文档归属与引用。",
+        "sessionId": "9f9b5771-cc44-4907-9f57-bb27939ae2f1",
+        "turnId": "9e252f22-e36d-4cf8-a7f4-155b913c9bad"
+      }
+    ]
+  },
+  "savedDraft": {
+    "draftId": "8d65b9e1-ef48-448b-919d-5f7e7830c5dd",
+    "draftVersion": 3,
+    "explicitSources": [],
+    "partialAcknowledgement": null,
+    "partialConfirmed": false,
+    "question": "正在编辑的未发送正文。还有刚刚输入的内容。",
+    "readingAnchor": null,
+    "scope": "document",
+    "selection": null,
+    "sessionId": "9f9b5771-cc44-4907-9f57-bb27939ae2f1",
+    "target": {
+      "documentKey": "file:C:/Users/Administrator/Desktop/Stuart/tests/native-artifacts/memory-context-completion/memory-edcd68e8-df70-4364-a424-8a4c2656e5c1/archive.md",
+      "runtimeDocumentId": "b6ff8cf1-5637-4451-90cd-9e7599830893",
+      "windowId": "reading-window",
+      "workspaceKey": null
+    },
+    "updatedAt": 1792052086823,
+    "viewState": {
+      "page": "chat"
+    }
+  }
+}

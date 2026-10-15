@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "status": "Passed",
+  "version": "3.5.13",
+  "sourceCommit": "8feb833b65ab713a2933b38db63bb8f2b1678f88",
+  "sourceFingerprint": "d6c41ed16273aa2acfb0b2d1a8573ec237090a7a55b7b6b5007b65bce9a37035",
+  "builtAt": "2026-10-15T08:27:23.6613784Z",
+  "installerPath": "C:\\Users\\Administrator\\Desktop\\Stuart\\tauri\\src-tauri\\target\\release\\bundle\\nsis\\StuartMD_3.5.13_x64-setup.exe",
+  "installerBytes": 86880468,
+  "installerSha256": "1e42eb4df4f5933d9c3b94334a60b6cad3c0506c6c0427d96680ec15f9d78c63",
+  "releaseApplicationSha256": "e8fe5daf88cecd8fcb2ae4984f0c710c3bb46caacfc4b44209ac5a6c661b21f0"
+}
