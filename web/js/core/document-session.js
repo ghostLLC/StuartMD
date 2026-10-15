@@ -4,6 +4,7 @@
   class DocumentSession {
     constructor(record = {}) {
       this.documentId = record.documentId || global.crypto.randomUUID();
+      this.documentKey = record.documentKey || null;
       this.kind = record.kind || "markdown";
       this.path = record.path || null;
       this.title = record.title || record.name || "未命名.md";

@@ -597,11 +597,12 @@
           </div>
           <div class="row">
             <label class="ai-set-label">上下文</label>
-            <button type="button" class="btn" id="ai-scope-btn">范围：邻近</button>
+            <button type="button" class="btn" id="ai-scope-btn">范围：整篇文档</button>
           </div>
           <div class="row">
             <label class="ai-set-label">记忆</label>
-            <button type="button" class="btn" id="ai-memory-btn">默认学习</button>
+            <label><input type="checkbox" id="ai-use-memory" checked />使用已有记忆</label>
+            <button type="button" class="btn" id="ai-memory-btn">整理新记忆：询问</button>
           </div>
           <div class="ai-style-block">
             <div class="ai-style-title">自定义风格</div>
@@ -652,9 +653,12 @@
   </div>
 
   <link rel="stylesheet" href="css/recovery.css" />
+  <link rel="stylesheet" href="css/companion.css" />
+  <link rel="stylesheet" href="libs/texmath.css" />
   <script src="libs/markdown-it.min.js"></script>
   <script src="libs/markdown-it-task-lists.min.js"></script>
   <script src="libs/katex.min.js"></script>
+  <script src="libs/texmath.js"></script>
   <script src="libs/auto-render.min.js"></script>
   <script src="libs/dompurify.min.js"></script>
   <script src="js/core/tauri-bridge.js"></script>
@@ -670,7 +674,10 @@
   <script src="js/core/agent-api.js"></script>
   <script src="js/core/ai-context.js"></script>
   <script src="js/core/ai-client.js"></script>
+  <script src="js/core/conversation-store.js"></script>
   <script src="js/core/ai-service.js"></script>
+  <script src="js/core/message-renderer.js"></script>
+  <script src="js/ui/conversation-view.js"></script>
   <script src="js/ui/ai-ui.js"></script>
   <script src="js/ui/companion.js"></script>
   <script src="js/ui/recovery.js"></script>

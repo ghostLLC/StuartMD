@@ -1,8 +1,8 @@
 # StuartMD
 
-Windows Markdown / PDF 阅读与编辑器。当前代码版本为 **3.5.11**，使用 Tauri 2 和共享前端。
+Windows Markdown / PDF 阅读与编辑器。当前代码版本为 **3.5.12**，使用 Tauri 2 和共享前端。
 
-安装文件通过 [GitHub Releases](https://github.com/ghostLLC/StuartMD/releases) 提供。当前分支的构建文件名称为 `StuartMD_3.5.11_x64-setup.exe`；发布状态与验证结果见 `docs/validation/3.5.11/acceptance.md`。
+安装文件通过 [GitHub Releases](https://github.com/ghostLLC/StuartMD/releases) 提供。当前分支的构建文件名称为 `StuartMD_3.5.12_x64-setup.exe`；验证范围见 `docs/validation/3.5.12/acceptance.md`。
 
 ## 文档编辑
 
@@ -24,11 +24,17 @@ Windows Markdown / PDF 阅读与编辑器。当前代码版本为 **3.5.11**，�
 
 在设置中启用 AI，配置服务商、模型与 API Key。选中 Markdown 或 PDF 正文后按 `Alt+E` 发起问答；按 `Alt+I` 打开伴读面板，使用问答、知识、记忆和会话页面。
 
-流式回答、追问、取消和关闭 AI 通过共同服务处理。完整回答保存到本机会话数据库；会话页面可以恢复历史。上下文使用文档版本、来源指纹、实际检索结果和模型预算，必要内容超过预算时显示错误。
+快速问答与伴读面板共享问题、答案和请求状态。提问范围包含选中内容、当前章节、整篇文档和工作区资料；新建文档会话默认使用整篇文档。各个文档与工作区分别保存输入草稿、引用和阅读位置。
+
+发送前可以查看本次材料；明确加入的引用会核对真实来源并参与容量计算。回答显示准备材料、核算容量、整理对话和生成回答的实际状态，支持停止、追问、重试、复制及保存 Markdown 笔记。失败和停止的回答保留实际内容及状态。
+
+会话页面支持按当前目标、文档、工作区或全部会话筛选，搜索问题与答案，分页读取消息、修改名称、恢复原文及草稿并继续提问。删除会话提供关联记忆处理选项，已经保存的记忆来源摘录可以独立保留。
 
 提供 DeepSeek、Qwen、Kimi、GLM 和 OpenAI 兼容服务配置。模型需要有效的 Token 计数配置；DeepSeek 使用随安装包提供的 tokenizer，其他模型使用已登记的计数接口或用户提供的配置。本次实际服务商验收范围为 DeepSeek。
 
-记忆支持查看来源、编辑、固定和删除，以及关闭学习、询问后保存、自动保存学习记录。已确认偏好按文档、工作目录或全局范围参与适用的请求。API Key 使用当前 Windows 用户的 DPAPI 加密。
+“使用已有记忆”与“整理新记忆”分别设置。整理方式包含关闭、询问、自动。询问方式允许选取完整答案中的实际段落并确认保存；自动方式独立核算容量、验证来源并整理记录，需要确认的偏好进入候选列表。
+
+记忆页面支持手工新建、搜索、筛选、编辑、固定、查看来源及历史版本和删除。记录保留稳定身份与不可覆盖的版本，保存检查已确认版本；已确认内容按照文档、工作区或全局归属参与适用请求。API Key 使用当前 Windows 用户的 DPAPI 加密。
 
 ## 知识资料
 
@@ -66,7 +72,7 @@ pwsh -File scripts/verify-release.ps1
 
 完整验收命令由 `scripts/verify-repair.ps1` 的 `Core`、`Browser`、`Native`、`Models`、`Providers`、`Installer` 模式运行。Models 模式需要按照 `tests/model-reference-requirements.txt` 配置独立 Python 环境；Providers 模式使用当前用户已经配置的 DeepSeek 加密密钥和独立测试目录。密钥内容不会进入验证日志。Installer 模式执行本机安装、SQLite 一致性备份、实际用户数据保留和进程启动检查。
 
-实际结果和各项验证范围见 [3.5.11 验收](docs/validation/3.5.11/acceptance.md)。公开发布前执行 `pwsh -File scripts/verify-release.ps1 -Publication`，全部必要检查通过并具有当前源代码指纹后允许发布。
+实际结果和各项验证范围见 [3.5.12 验收](docs/validation/3.5.12/acceptance.md)。公开发布前执行 `pwsh -File scripts/verify-release.ps1 -Publication`，全部必要检查通过并具有当前源代码指纹后允许发布。用户要求跳过的界面检查记录为 `SkippedByUser`。
 
 ```powershell
 Set-Location tauri

@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "mode": "Providers",
+  "status": "Failed",
+  "sourceFingerprint": "bc3461579f60a6d14427ee1038a3edf715ab110ed36ad812736703c96c570d10",
+  "startedAt": "2026-10-15T02:29:04.518Z",
+  "endedAt": "2026-10-15T02:31:11.654Z",
+  "reason": "首次在线检查等待304.97秒后传输中断；确认DeepSeek官方Flash API故障后停止复核。",
+  "incidentUrl": "https://status.deepseek.com/incidents/7116348214287"
+}

@@ -12,9 +12,9 @@ sha2 = "0.10"
 uuid = { version = "1", features = ["v4", "serde"] }
 rusqlite = { version = "0.32", features = ["bundled", "backup"] }
 lopdf = { version = "0.34", features = ["chrono"] }
+pdfium-render = { version = "=0.9.4", default-features = false, features = ["pdfium_7881", "image_025", "thread_safe"] }
 
 [dev-dependencies]
-pdfium-render = { version = "=0.9.4", default-features = false, features = ["pdfium_7881", "image_025", "thread_safe"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 
 [target.'cfg(windows)'.dependencies]

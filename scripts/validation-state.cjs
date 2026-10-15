@@ -18,11 +18,15 @@ function sourceFingerprint() {
 }
 
 function record(action, mode) {
-  if (!modes.includes(mode) || !['begin', 'pass', 'fail'].includes(action)) throw new Error('验证状态参数无效');
-  const file = path.join(root, 'docs/validation/3.5.11', mode.toLowerCase() + '-status.json');
+  if (!modes.includes(mode) || !['begin', 'pass', 'fail', 'skip'].includes(action)) throw new Error('验证状态参数无效');
+  const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
+  const file = path.join(root, 'docs/validation', version, mode.toLowerCase() + '-status.json');
   const fingerprint = sourceFingerprint(), now = new Date().toISOString();
-  const result = action === 'begin' ? { schemaVersion: 1, mode, status: 'Running', sourceFingerprint: fingerprint, startedAt: now } : JSON.parse(fs.readFileSync(file, 'utf8'));
-  if (action !== 'begin') {
+  const result = ['begin', 'skip'].includes(action) ? { schemaVersion: 1, mode, status: 'Running', sourceFingerprint: fingerprint, startedAt: now } : JSON.parse(fs.readFileSync(file, 'utf8'));
+  if (action === 'skip') {
+    result.status = 'SkippedByUser'; result.endedAt = now;
+    result.reason = '用户禁止 computer use，并允许跳过依赖界面操作的检查。';
+  } else if (action !== 'begin') {
     if (result.status !== 'Running') throw new Error('验证没有对应的实际运行记录');
     result.status = action === 'pass' && result.sourceFingerprint === fingerprint ? 'Passed' : 'Failed';
     result.endedAt = now;

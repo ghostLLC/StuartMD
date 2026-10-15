@@ -1,0 +1,108 @@
+{
+  "cancelDuringIndex": true,
+  "first": {
+    "deletedGhosts": 0,
+    "durationMs": 11762,
+    "excludedFiles": [
+      {
+        "path": ".stuart",
+        "reason": "配置排除的目录"
+      }
+    ],
+    "failedFiles": [],
+    "indexGeneration": "dd75d7f1-bfdf-4159-9bb7-312941a8d83f",
+    "jobId": "29612962-a8d5-45af-98cc-2283f6f98ef1",
+    "maxDepth": 8,
+    "maxFiles": 10000,
+    "newlyIndexed": 202,
+    "scanRoot": "C:\\Users\\Administrator\\Desktop\\Stuart\\tauri\\src-tauri\\../..\\tests/native-artifacts/models\\generation-a2e8ca04-39a2-4ec5-b08c-2fcbff7e8b5b",
+    "skippedPlaceholders": 0,
+    "skippedTempFiles": 0,
+    "skippedUnmodified": 0,
+    "status": "Ready",
+    "successFiles": 202,
+    "totalFilesScanned": 202,
+    "updatedFiles": 0
+  },
+  "partial": {
+    "deletedGhosts": 0,
+    "durationMs": 27693,
+    "excludedFiles": [
+      {
+        "path": ".stuart",
+        "reason": "配置排除的目录"
+      }
+    ],
+    "failedFiles": [
+      {
+        "message": "PDF打开失败：PdfiumLibraryInternalError(\n    FormatError,\n)",
+        "path": "invalid.pdf",
+        "stage": "Parsing"
+      }
+    ],
+    "indexGeneration": "df76d973-ff8d-4acd-aaef-3c7537d541d8",
+    "jobId": "089d3776-1a25-4699-a0d9-9c6388eaa3b6",
+    "maxDepth": 8,
+    "maxFiles": 10000,
+    "newlyIndexed": 201,
+    "scanRoot": "C:\\Users\\Administrator\\Desktop\\Stuart\\tauri\\src-tauri\\../..\\tests/native-artifacts/models\\generation-a2e8ca04-39a2-4ec5-b08c-2fcbff7e8b5b",
+    "skippedPlaceholders": 0,
+    "skippedTempFiles": 0,
+    "skippedUnmodified": 0,
+    "status": "Partial",
+    "successFiles": 201,
+    "totalFilesScanned": 202,
+    "updatedFiles": 0
+  },
+  "pdfSourceReturned": true,
+  "root": "C:\\Users\\Administrator\\Desktop\\Stuart\\tauri\\src-tauri\\../..\\tests/native-artifacts/models\\generation-a2e8ca04-39a2-4ec5-b08c-2fcbff7e8b5b",
+  "sourceChangedDuringIndex": true,
+  "switched": {
+    "deletedGhosts": 0,
+    "durationMs": 12129,
+    "excludedFiles": [
+      {
+        "path": ".stuart",
+        "reason": "配置排除的目录"
+      }
+    ],
+    "failedFiles": [],
+    "indexGeneration": "34e7c868-0312-4153-bacb-1ba7ae27c493",
+    "jobId": "cf9627ba-6ec0-453a-ba9b-74a94496cd04",
+    "maxDepth": 8,
+    "maxFiles": 10000,
+    "newlyIndexed": 201,
+    "scanRoot": "C:\\Users\\Administrator\\Desktop\\Stuart\\tauri\\src-tauri\\../..\\tests/native-artifacts/models\\generation-a2e8ca04-39a2-4ec5-b08c-2fcbff7e8b5b",
+    "skippedPlaceholders": 0,
+    "skippedTempFiles": 0,
+    "skippedUnmodified": 0,
+    "status": "Ready",
+    "successFiles": 201,
+    "totalFilesScanned": 201,
+    "updatedFiles": 0
+  },
+  "updated": {
+    "deletedGhosts": 0,
+    "durationMs": 12842,
+    "excludedFiles": [
+      {
+        "path": ".stuart",
+        "reason": "配置排除的目录"
+      }
+    ],
+    "failedFiles": [],
+    "indexGeneration": "cf0fb030-c0b8-48b1-82a6-9e8fc69342e4",
+    "jobId": "93799e22-b599-45d7-913b-c89d8481a9e2",
+    "maxDepth": 8,
+    "maxFiles": 10000,
+    "newlyIndexed": 201,
+    "scanRoot": "C:\\Users\\Administrator\\Desktop\\Stuart\\tauri\\src-tauri\\../..\\tests/native-artifacts/models\\generation-a2e8ca04-39a2-4ec5-b08c-2fcbff7e8b5b",
+    "skippedPlaceholders": 0,
+    "skippedTempFiles": 0,
+    "skippedUnmodified": 0,
+    "status": "Ready",
+    "successFiles": 201,
+    "totalFilesScanned": 201,
+    "updatedFiles": 0
+  }
+}

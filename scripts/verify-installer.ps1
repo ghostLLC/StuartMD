@@ -1,14 +1,14 @@
-param([string]$BaselineDirectory = $env:STUART_INSTALLER_BASELINE)
+param([string]$BaselineDirectory = $env:STUART_INSTALLER_BASELINE, [switch]$SkipStartup)
 $ErrorActionPreference = 'Stop'
 $workspace = Split-Path -Parent $PSScriptRoot
 $installDirectory = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'StuartMD'
 $dataDirectory = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'StuartMD'
 $application = Join-Path $installDirectory 'stuartmd.exe'
 $builtApplication = Join-Path $workspace 'tauri/src-tauri/target/release/stuartmd.exe'
-$installer = Join-Path $workspace 'tauri/src-tauri/target/release/bundle/nsis/StuartMD_3.5.11_x64-setup.exe'
+$installer = Join-Path $workspace 'tauri/src-tauri/target/release/bundle/nsis/StuartMD_3.5.12_x64-setup.exe'
 $python = Join-Path $env:USERPROFILE '.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe'
 $sevenZip = Join-Path $env:ProgramFiles '7-Zip/7z.exe'
-$evidenceDirectory = Join-Path $workspace 'docs/validation/3.5.11'
+$evidenceDirectory = Join-Path $workspace 'docs/validation/3.5.12'
 $artifactDirectory = Join-Path $workspace ('tests/native-artifacts/installer-' + [guid]::NewGuid().ToString())
 $existing = Get-CimInstance Win32_Process -Filter "Name='stuartmd.exe'"
 if ($existing) { throw 'StuartMD正在运行，请先完成当前文档保存与关闭；安装验收没有终止用户程序' }
@@ -46,7 +46,7 @@ if ($packagedApplications.Count -ne 1) { throw '实际安装包缺少唯一的St
 $installProcess = Start-Process -FilePath $installer -ArgumentList '/S' -WindowStyle Hidden -PassThru -Wait
 if ($installProcess.ExitCode -ne 0) { throw "实际安装程序退出异常：$($installProcess.ExitCode)" }
 $version = (Get-Item -LiteralPath $application).VersionInfo.FileVersion
-if ($version -ne '3.5.11') { throw "安装后的实际文件版本异常：$version" }
+if ($version -ne '3.5.12') { throw "安装后的实际文件版本异常：$version" }
 $applicationHash = (Get-FileHash -LiteralPath $application -Algorithm SHA256).Hash
 if ($applicationHash -ne (Get-FileHash -LiteralPath $packagedApplications[0].FullName -Algorithm SHA256).Hash) { throw '安装后的可执行程序与实际安装包内容不一致' }
 $resources = @('samples/示例文档.md', 'samples/欢迎使用 StuartMD.md', 'file-md.ico', 'file-pdf.ico', 'native-manifest.json', 'models/manifest.json', 'tokenizers-manifest.json')
@@ -65,6 +65,9 @@ foreach ($relative in $resources) {
 if ($LASTEXITCODE -ne 0) { throw '升级后用户数据检查失败' }
 $preservation = & $python "$workspace/tests/installer-data.py" compare --before $before --after $after
 if ($LASTEXITCODE -ne 0) { throw '安装程序更改了原有用户数据' }
+$runtimeVersion = $null
+$startupStatus = 'SkippedByUser'
+if (-not $SkipStartup) {
 $startupData = Join-Path $artifactDirectory 'startup-data'
 Copy-Item -LiteralPath $backup -Destination $startupData -Recurse -Force
 $previousDataDirectory = $env:STUART_DATA_DIR
@@ -89,6 +92,8 @@ try {
 }
 & $python "$workspace/tests/installer-data.py" snapshot --source $startupData --output (Join-Path $artifactDirectory 'startup.json')
 if ($LASTEXITCODE -ne 0) { throw '原生启动后的数据库完整性检查失败' }
+$startupStatus = 'Passed'
+}
 $result = [ordered]@{
     schemaVersion = 1
     previousVersion = $previousVersion
@@ -98,14 +103,14 @@ $result = [ordered]@{
     installerSha256 = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
     verifiedResources = $resources.Count
     userDataPreservation = $preservation | ConvertFrom-Json
-    installedProcessStartup = 'Passed'
+    installedProcessStartup = $startupStatus
     webviewVersion = $runtimeVersion
     backupDirectory = $artifactDirectory
     upgradeBaselineDirectory = $BaselineDirectory
     isolatedWindowsUpgrade = 'NotVerified'
-    nativeUiAcceptance = 'NotVerified'
+    nativeUiAcceptance = $(if ($SkipStartup) { 'SkippedByUser' } else { 'NotVerified' })
     completedAt = [DateTime]::UtcNow.ToString('o')
 }
 $result | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $evidenceDirectory 'installer-results.json') -Encoding utf8
-Write-Output "实际安装完成：$previousVersion → $version；原有用户数据、$($resources.Count)项资源及原生程序启动检查通过。"
-throw '隔离Windows环境的升级和原生界面完整操作尚未验收，发布检查继续阻止公开发布'
+Write-Output "实际安装完成：$previousVersion → $version；原有用户数据和$($resources.Count)项资源检查通过；启动检查：$startupStatus。"
+if (-not $SkipStartup) { throw '隔离Windows环境的升级和原生界面完整操作尚未验收，发布检查继续阻止公开发布' }

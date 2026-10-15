@@ -14,7 +14,7 @@ const APP_ID: &str = "StuartMD";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const PROG_ID: &str = "StuartMD.Markdown";
 pub const PROG_ID_PDF: &str = "StuartMD.PDF";
-pub const SETTINGS_SCHEMA: i64 = 4;
+pub const SETTINGS_SCHEMA: i64 = 5;
 const PDF_MAX: u64 = 40 * 1024 * 1024;
 pub const PDF_MAX_BYTES: u64 = 100 * 1024 * 1024; // 100 MB 上限
 pub const MD_EXTS: [&str; 5] = [".md", ".markdown", ".mdown", ".mkd", ".txt"];
@@ -267,6 +267,17 @@ pub fn migrate_settings(raw: Option<Value>) -> Value {
         if let Some(obj) = s.as_object_mut() {
             obj.entry("ai".to_string())
                 .or_insert_with(crate::ai_chat::builtin_ai_defaults);
+        }
+    }
+
+    if from_v < 5 {
+        if let Some(ai)=s.get_mut("ai").and_then(Value::as_object_mut) {
+            let legacy=ai.get("memory_mode").and_then(Value::as_str).unwrap_or("ask").to_owned();
+            ai.entry("use_saved_memories").or_insert_with(||json!(legacy!="off"));
+            ai.entry("learning_policy").or_insert_with(||json!(if legacy=="always" {"automatic"} else {legacy.as_str()}));
+            if ai.get("context_scope").and_then(Value::as_str).is_some_and(|scope|["full","neighborhood"].contains(&scope)) {
+                ai.insert("context_scope".into(),json!("document"));
+            }
         }
     }
 

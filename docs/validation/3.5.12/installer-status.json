@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "mode": "Installer",
+  "status": "SkippedByUser",
+  "sourceFingerprint": "bc3461579f60a6d14427ee1038a3edf715ab110ed36ad812736703c96c570d10",
+  "startedAt": "2026-10-15T02:31:12.791Z",
+  "endedAt": "2026-10-15T02:31:12.791Z",
+  "reason": "用户禁止 computer use，并允许跳过依赖界面操作的检查。"
+}

@@ -17,6 +17,14 @@ pub struct ChatSession {
     pub document_id: Option<String>,
     #[serde(default)]
     pub document_path: Option<String>,
+    #[serde(default)]
+    pub document_key: Option<String>,
+    #[serde(default)]
+    pub workspace_key: Option<String>,
+    #[serde(default = "initial_version")]
+    pub session_version: u64,
+    #[serde(default)]
+    pub deletion_state: String,
 }
 
 /// Message turn within a chat session
@@ -42,6 +50,10 @@ pub struct ChatArchiveMessage {
     pub source_anchor: Option<serde_json::Value>,
     #[serde(default)]
     pub sequence: u64,
+    #[serde(default)]
+    pub turn_id: Option<String>,
+    #[serde(default)]
+    pub attempt_no: u64,
 }
 
 /// Organic memory item supporting 3-tier lifecycle and Ebbinghaus evolution
@@ -49,6 +61,10 @@ pub struct ChatArchiveMessage {
 #[serde(rename_all = "camelCase")]
 pub struct OrganicMemoryItem {
     pub memory_id: String,
+    #[serde(default)]
+    pub record_id: String,
+    #[serde(default)]
+    pub approval_kind: String,
     /// Tier 1: Workspace / Topic, Tier 2: Document Companion, Tier 3: Global User Cognitive
     pub tier: u8,
     /// Category: "decision" | "concept" | "preference" | "glossary"
@@ -86,6 +102,141 @@ pub struct OrganicMemoryItem {
 fn completed_status() -> String { "Completed".to_owned() }
 fn global_scope() -> String { "global".to_owned() }
 fn initial_version() -> u64 { 1 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ConversationTarget {
+    pub document_key: Option<String>,
+    pub workspace_key: Option<String>,
+    pub runtime_document_id: Option<String>,
+    pub window_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ConversationDraft {
+    pub draft_id: String,
+    pub target: ConversationTarget,
+    pub session_id: Option<String>,
+    pub question: String,
+    pub scope: String,
+    pub selection: Option<serde_json::Value>,
+    pub reading_anchor: Option<serde_json::Value>,
+    pub explicit_sources: Vec<serde_json::Value>,
+    pub view_state: serde_json::Value,
+    #[serde(default)]
+    pub partial_confirmed: bool,
+    #[serde(default)]
+    pub partial_acknowledgement: Option<serde_json::Value>,
+    pub draft_version: u64,
+    pub updated_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RequestIntent {
+    pub request_id: String,
+    pub turn_id: Option<String>,
+    pub session_id: Option<String>,
+    pub expected_session_version: u64,
+    #[serde(default)]
+    pub draft_id: Option<String>,
+    pub draft_version: u64,
+    pub target: ConversationTarget,
+    pub question: String,
+    pub scope: String,
+    pub selection: Option<serde_json::Value>,
+    pub reading_anchor: Option<serde_json::Value>,
+    pub explicit_sources: Vec<serde_json::Value>,
+    pub settings_revision: String,
+    #[serde(default)]
+    pub editor_revision: u64,
+    #[serde(default)]
+    pub source_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationTurn {
+    pub turn_id: String,
+    pub session_id: String,
+    pub ordinal: u64,
+    pub kind: String,
+    pub question: String,
+    pub current_request_id: Option<String>,
+    pub created_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AcceptedTurn {
+    pub session: ChatSession,
+    pub turn: ConversationTurn,
+    pub attempt_no: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionFilter {
+    pub scope: String,
+    pub document_key: Option<String>,
+    pub workspace_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSummary {
+    #[serde(flatten)]
+    pub session: ChatSession,
+    pub recent_question: Option<String>,
+    pub completion_status: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Page<T> { pub items: Vec<T>, pub next_cursor: Option<String> }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationPage {
+    pub session: Option<ChatSession>,
+    pub turns: Vec<ConversationTurn>,
+    pub messages: Vec<ChatArchiveMessage>,
+    pub draft: Option<ConversationDraft>,
+    pub learning_actions: Vec<serde_json::Value>,
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MemoryEdit {
+    pub content: String,
+    pub category: String,
+    pub scope: String,
+    pub workspace_key: Option<String>,
+    pub document_key: Option<String>,
+    pub preference_key: Option<String>,
+    pub pinned: bool,
+    pub source_message_id: Option<String>,
+    pub source_request_id: Option<String>,
+    pub source_anchor: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryProposal {
+    pub proposal_id: String,
+    pub source_request_id: String,
+    pub source_message_id: Option<String>,
+    pub source_anchor: Option<serde_json::Value>,
+    pub content: String,
+    pub category: String,
+    pub scope: String,
+    pub workspace_key: Option<String>,
+    pub document_key: Option<String>,
+    pub proposal_version: u64,
+    pub status: String,
+}
 
 /// Search hit across messages or memories
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

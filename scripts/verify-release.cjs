@@ -7,7 +7,7 @@ const { execFileSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const version = toml.parse(fs.readFileSync(path.join(root, 'tauri/src-tauri/Cargo.toml'), 'utf8')).package.version;
 const configuration = JSON.parse(fs.readFileSync(path.join(root, 'tauri/src-tauri/tauri.conf.json'), 'utf8'));
-assert.equal(version, '3.5.11');
+assert.equal(version, '3.5.12');
 assert.equal(configuration.version, version);
 assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version, version);
 for (const file of ['README.md', 'samples/示例文档.md', 'samples/欢迎使用 StuartMD.md']) {
@@ -30,14 +30,14 @@ for (const directory of ['cmaps', 'standard_fonts']) {
 for (const file of ['pdf.min.js', 'pdf.worker.min.js']) assert.equal(sha256(path.join(root, 'web/libs', file)), sha256(path.join(root, 'node_modules/pdfjs-dist/build', file)), file);
 const tokenizers = JSON.parse(fs.readFileSync(path.join(root, 'resources/tokenizers-manifest.json'), 'utf8'));
 for (const resource of tokenizers.archives) for (const [file, hash] of Object.entries(resource.files)) assert.equal(sha256(path.join(root, 'resources/tokenizers', resource.id, file)), hash, resource.id + '/' + file);
-fs.mkdirSync(path.join(root, 'docs/validation/3.5.11'), { recursive: true });
-fs.writeFileSync(path.join(root, 'docs/validation/3.5.11/version-resources.json'), JSON.stringify(evidence, null, 2));
+fs.mkdirSync(path.join(root, 'docs/validation', version), { recursive: true });
+fs.writeFileSync(path.join(root, 'docs/validation', version, 'version-resources.json'), JSON.stringify(evidence, null, 2));
 console.log(JSON.stringify({ version, pdfjs: evidence.pdfjs, resourceManifestHash: evidence.resourceManifestHash }));
 if (process.argv.includes('--publication')) {
   const { sourceFingerprint, modes } = require('./validation-state.cjs');
   const fingerprint = sourceFingerprint();
   for (const mode of modes) {
-    const result = JSON.parse(fs.readFileSync(path.join(root, 'docs/validation/3.5.11', mode.toLowerCase() + '-status.json'), 'utf8'));
+    const result = JSON.parse(fs.readFileSync(path.join(root, 'docs/validation', version, mode.toLowerCase() + '-status.json'), 'utf8'));
     assert.equal(result.status, 'Passed', mode + ' 必要验收尚未通过');
     assert.equal(result.sourceFingerprint, fingerprint, mode + ' 验证记录与当前软件源码不同');
   }

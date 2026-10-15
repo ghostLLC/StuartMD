@@ -37,6 +37,7 @@
   const state = {
     path: null,
     documentId: null,
+    fileFingerprint: null,
     loadEpoch: 0,
     loadingTask: null,
     name: "",
@@ -195,6 +196,16 @@
   function showAnnotBar(x, y) {
     const b = el().annotBar;
     if (!b) return;
+    const multiplePages = state._pendingSel?.segments.length > 1;
+    for (const button of b.querySelectorAll("[data-pa]")) {
+      button.hidden = multiplePages && button.dataset.pa !== "ai-explain";
+      button.style.display = button.hidden ? "none" : "";
+    }
+    const separator = b.querySelector(".pdf-annot-sep");
+    if (separator) {
+      separator.hidden = multiplePages;
+      separator.style.display = multiplePages ? "none" : "";
+    }
     b.hidden = false;
     const w = b.offsetWidth || 140;
     const h = b.offsetHeight || 36;
@@ -363,6 +374,7 @@
     hideHoverTip();
     state.path = payload.path;
     state.documentId = payload.documentId;
+    state.fileFingerprint = null;
     state._pendingSel = null; state._pageText = {}; state._pageTextBusy = {};
     state.name = payload.name;
     const record = annotationRecords.get(payload.documentId) || { items: cloneAnnots(payload.annotations || []), pdfVersion: null, history: { stack: [], i: -1, max: 21 }, restoring: false };
@@ -390,6 +402,9 @@
         docInit = { data: bytes };
       }
       if (!docInit) throw new Error("缺少 PDF 数据源");
+      const fingerprint = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", docInit.data)), byte => byte.toString(16).padStart(2, "0")).join("");
+      if (epoch !== state.loadEpoch) return;
+      state.fileFingerprint = fingerprint;
 
       const loading = window.pdfjsLib.getDocument({
         ...docInit,
@@ -1135,15 +1150,48 @@
   function captureSelectionCtx(ev) {
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed || !sel.rangeCount) return false;
-    const text = sel.toString().trim();
-    if (!text) return false;
     const range = sel.getRangeAt(0);
-    const wrap =
-      (ev && ev.target && ev.target.closest && ev.target.closest(".pdf-page")) ||
-      range.startContainer?.parentElement?.closest?.(".pdf-page");
-    if (!wrap || !el().scroll?.contains(wrap)) return false;
-    const layer = wrap.querySelector(".pdf-text-layer");
-    if (!layer?.contains(range.startContainer) || !layer.contains(range.endContainer)) return false;
+    const startLayer = range.startContainer?.parentElement?.closest?.(".pdf-text-layer");
+    const endLayer = range.endContainer?.parentElement?.closest?.(".pdf-text-layer");
+    const scroll = el().scroll;
+    if (!startLayer || !endLayer || !scroll?.contains(startLayer) || !scroll.contains(endLayer)) return false;
+    if (!state.fileFingerprint) throw new Error("PDF选区缺少文件指纹");
+    const segments = [];
+    for (const layer of scroll.querySelectorAll(".pdf-text-layer")) {
+      if (!range.intersectsNode(layer)) continue;
+      const pageRange = document.createRange();
+      pageRange.selectNodeContents(layer);
+      if (layer === startLayer) pageRange.setStart(range.startContainer, range.startOffset);
+      if (layer === endLayer) pageRange.setEnd(range.endContainer, range.endOffset);
+      const quote = pageRange.toString().trim();
+      if (!quote) continue;
+      const coordinates = selectionPageCoordinates(pageRange, layer);
+      if (!coordinates.rects.length) throw new Error("PDF选区页面缺少实际文字坐标");
+      segments.push({ page: Number(layer.closest(".pdf-page").dataset.page), quote, ...coordinates, fileFingerprint: state.fileFingerprint });
+    }
+    if (!segments.length) return false;
+    if (segments.some((segment, index) => index > 0 && segment.page !== segments[index - 1].page + 1)) throw new Error("PDF跨页选区缺少连续页面，请重新选择完整正文");
+    const first = segments[0];
+    state._pendingSel = {
+      documentId: state.documentId,
+      loadEpoch: state.loadEpoch,
+      text: segments.map(segment => segment.quote).join("\n"),
+      rects: first.rects,
+      pdfRects: first.pdfRects,
+      pdfQuads: first.pdfQuads,
+      page: first.page,
+      segments: segments.map(segment => ({ page: segment.page, quote: segment.quote, rects: segment.pdfRects, fileFingerprint: segment.fileFingerprint })),
+      fileFingerprint: state.fileFingerprint,
+      clientX: ev ? ev.clientX : null,
+      clientY: ev ? ev.clientY : null,
+      at: Date.now(),
+    };
+    window.StuartMD?.captureSelectionCache?.();
+    return true;
+  }
+
+  function selectionPageCoordinates(range, layer) {
+    const wrap = layer.closest(".pdf-page");
     const wrapBox = wrap.getBoundingClientRect();
     const viewport = wrap._pdfViewport;
     if (!viewport) throw new Error("PDF页面尚未完成坐标初始化");
@@ -1163,24 +1211,11 @@
       quads.push(order.map(index => viewport.convertToPdfPoint(...corners[index])));
       rects.push(rect);
     }
-    if (!rects.length) return false;
-    state._pendingSel = {
-      documentId: state.documentId,
-      loadEpoch: state.loadEpoch,
-      text,
+    return {
       rects,
       pdfRects: quads.map(points => [Math.min(...points.map(point => point[0])), Math.min(...points.map(point => point[1])), Math.max(...points.map(point => point[0])), Math.max(...points.map(point => point[1]))]),
       pdfQuads: quads.map(points => points.flat()),
-      page: Number(wrap.dataset.page || 1),
-      clientX: ev ? ev.clientX : null,
-      clientY: ev ? ev.clientY : null,
-      at: Date.now(),
     };
-    // Mirror into host selection cache so AI can read after chrome steals focus
-    try {
-      window.StuartMD?.captureSelectionCache?.();
-    } catch (_) {}
-    return true;
   }
 
   async function loadPageText(pageNum) {
@@ -1208,25 +1243,15 @@
         rects: ctx.rects || [],
         pdfRects: ctx.pdfRects || [],
         pdfQuads: ctx.pdfQuads || [],
+        segments: ctx.segments,
+        fileFingerprint: ctx.fileFingerprint,
         fromPdf: true,
       };
     }
     const sel = window.getSelection();
     if (sel && !sel.isCollapsed && sel.toString().trim()) {
-      if (!captureSelectionCtx()) return null;
-      const wrap =
-        sel.anchorNode &&
-        (sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement)?.closest?.(
-          ".pdf-page"
-        );
-      return {
-        text: sel.toString().trim(),
-        page: wrap ? Number(wrap.dataset.page || state.page) : state.page,
-        rects: state._pendingSel.rects,
-        pdfRects: state._pendingSel.pdfRects,
-        pdfQuads: state._pendingSel.pdfQuads,
-        fromPdf: true,
-      };
+      captureSelectionCtx();
+      if (state._pendingSel) return getSelection();
     }
     return null;
   }
@@ -1260,6 +1285,7 @@
       return;
     }
     if (ctx.documentId !== state.documentId || ctx.loadEpoch !== state.loadEpoch || Date.now() - ctx.at > 15000) throw new Error("PDF选区已经失效，请重新选择文字");
+    if (ctx.segments.length !== 1) throw new Error("PDF批注需要选择同一个页面的文字");
     const defCol = TYPE_DEFAULT_COLOR[type] || state.hlColor || "yellow";
     const ann = {
       id: crypto.randomUUID(),

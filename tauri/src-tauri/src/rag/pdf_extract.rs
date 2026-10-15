@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool,Ordering};
 use pdfium_render::prelude::*;
 use serde::{Deserialize,Serialize};
@@ -26,10 +25,7 @@ pub struct PdfContent { pub source_hash:String,pub total_pages:usize,pub pages:V
 fn rect_array(rect:PdfRect)->[f32;4] { [rect.left().value,rect.bottom().value,rect.right().value,rect.top().value] }
 
 fn pdfium(native:&Path)->Result<&'static Pdfium,String> {
-    static PDFIUM:OnceLock<Result<Pdfium,String>>=OnceLock::new();
-    let path=native.join("bin/pdfium.dll");
-    if file_sha256(&path)? != "79d4676b656cfb1abcea88f9ade3b4b0826c5200382db5f4ec72a636c598c118" { return Err("PDFium资源指纹不匹配".into()); }
-    PDFIUM.get_or_init(|| Pdfium::bind_to_library(&path).map(Pdfium::new).map_err(|error|format!("PDFium7881加载失败：{error}"))).as_ref().map_err(Clone::clone)
+    crate::document::pdf_runtime::pdfium(native)
 }
 
 fn device_rect(page:&PdfPage<'_>,rect:[f32;4],config:&PdfRenderConfig)->Result<[f32;4],String> {
@@ -56,16 +52,23 @@ fn reading_rect(bounds:[f32;4],angle:f32)->[f32;4] {
 
 pub fn extract_pdf(path:&Path,native:&Path,cancel:&AtomicBool)->Result<PdfContent,String> {
     let output_root=dirs::data_local_dir().ok_or("应用数据目录不可用")?.join("StuartMD/ocr");
-    extract_pdf_pages(path,native,cancel,&output_root,None)
+    extract_pdf_pages(path,native,cancel,&output_root,None,None)
 }
 
 pub fn extract_pdf_context(path:&Path,native:&Path,cancel:&AtomicBool,page_number:usize)->Result<PdfContent,String> {
     let output_root=dirs::data_local_dir().ok_or("应用数据目录不可用")?.join("StuartMD/ocr");
-    extract_pdf_pages(path,native,cancel,&output_root,Some(page_number))
+    extract_pdf_pages(path,native,cancel,&output_root,Some(page_number),None)
+}
+
+pub fn extract_pdf_selection(path:&Path,native:&Path,cancel:&AtomicBool,pages:&[usize])->Result<PdfContent,String> {
+    if pages.is_empty() {return Err("PDF 选区缺少实际页码".into());}
+    if pages.windows(2).any(|pair|pair[0].checked_add(1)!=Some(pair[1])) {return Err("PDF 跨页选区页面必须连续且按正文顺序排列".into());}
+    let output_root=dirs::data_local_dir().ok_or("应用数据目录不可用")?.join("StuartMD/ocr");
+    extract_pdf_pages(path,native,cancel,&output_root,None,Some(pages))
 }
 
 pub fn extract_pdf_with_output(path:&Path,native:&Path,cancel:&AtomicBool,output_root:&Path)->Result<PdfContent,String> {
-    extract_pdf_pages(path,native,cancel,output_root,None)
+    extract_pdf_pages(path,native,cancel,output_root,None,None)
 }
 
 pub fn verify_resources(native:&Path)->Result<(),String> {
@@ -78,17 +81,19 @@ pub fn verify_resources(native:&Path)->Result<(),String> {
     Ok(())
 }
 
-fn extract_pdf_pages(path:&Path,native:&Path,cancel:&AtomicBool,output_root:&Path,focus_page:Option<usize>)->Result<PdfContent,String> {
+fn extract_pdf_pages(path:&Path,native:&Path,cancel:&AtomicBool,output_root:&Path,focus_page:Option<usize>,selected_pages:Option<&[usize]>)->Result<PdfContent,String> {
     verify_resources(native)?;
     let source_hash=file_sha256(path)?;
     let pdfium=pdfium(native)?;
     let document=pdfium.load_pdf_from_file(path,None).map_err(|error|format!("PDF打开失败：{error}"))?;
     let total_pages=document.pages().len() as usize;
     if focus_page.is_some_and(|number|number==0 || number>total_pages) {return Err("PDF页码超出文档范围".into());}
+    if selected_pages.is_some_and(|pages|pages.iter().any(|number|*number==0 || *number>total_pages)) {return Err("PDF选区页码超出文档范围".into());}
     let mut result=PdfContent { source_hash:source_hash.clone(),total_pages,pages:Vec::new() };
     let output_root=output_root.join(&source_hash).join(uuid::Uuid::new_v4().to_string());
     for (index,page) in document.pages().iter().enumerate() {
         if focus_page.is_some_and(|number|number.abs_diff(index+1)>1) {continue;}
+        if selected_pages.is_some_and(|pages|!pages.contains(&(index+1))) {continue;}
         if cancel.load(Ordering::Acquire) { return Err("Cancelled".into()); }
         let config=PdfRenderConfig::new().scale_page_by_factor(300.0/72.0);
         let page_box=rect_array(page.boundaries().bounding().map_err(|error|error.to_string())?.bounds);

@@ -132,6 +132,27 @@
       invoke("stuart_companion_apply_diff", { originalPath, finalContent, expectedRev, expectedHash, documentId, approvalId }),
     companion_save_note: (originalPath, noteContent, customSuffix) =>
       invoke("stuart_companion_save_note", { originalPath, noteContent, customSuffix: customSuffix || null }),
+    companion_get_target: (documentId, workspaceRoot) => invoke("stuart_companion_get_target", { documentId: documentId ?? null, workspaceRoot: workspaceRoot ?? null }),
+    companion_prepare_context: intent => invoke("stuart_companion_prepare_context", { intent }),
+    companion_send_question: intent => invoke("stuart_companion_send_question", { intent }),
+    companion_preview_source: (target, source) => invoke("stuart_companion_preview_source", { target, source }),
+    companion_get_source: (sourceId, requestId) => invoke("stuart_companion_get_source", { sourceId, requestId }),
+    companion_workspace_status: workspaceRoot => invoke("stuart_companion_workspace_status", { workspaceRoot }),
+    companion_learn_request: requestId => invoke("stuart_companion_learn_request", { requestId }),
+    companion_get_conversation: (sessionId = null, cursor = null, target = null) => invoke("stuart_companion_get_conversation", { sessionId, cursor, target }),
+    companion_save_draft: (draft, expectedDraftVersion) => invoke("stuart_companion_save_draft", { draft, expectedDraftVersion }),
+    companion_list_sessions: options => invoke("stuart_companion_list_sessions", { options }),
+    companion_rename_session: (sessionId, expectedSessionVersion, title) => invoke("stuart_companion_rename_session", { sessionId, expectedSessionVersion, title }),
+    companion_delete_session: (sessionId, expectedSessionVersion, deleteLinkedMemories = false) => invoke("stuart_companion_delete_session", { sessionId, expectedSessionVersion, deleteLinkedMemories }),
+    companion_list_memories: options => invoke("stuart_companion_list_memories", { options }),
+    companion_save_memory: (recordId, expectedVersion, edit) => invoke("stuart_companion_save_memory", { recordId, expectedVersion, edit }),
+    companion_delete_memory: (recordId, expectedVersion) => invoke("stuart_companion_delete_memory", { recordId, expectedVersion }),
+    companion_create_memory_proposal: edit => invoke("stuart_companion_create_memory_proposal", { edit }),
+    companion_list_memory_proposals: options => invoke("stuart_companion_list_memory_proposals", { options }),
+    companion_update_memory_proposal: (proposalId, expectedProposalVersion, edit) => invoke("stuart_companion_update_memory_proposal", { proposalId, expectedProposalVersion, edit }),
+    companion_confirm_memory: (proposalId, expectedProposalVersion, edit) => invoke("stuart_companion_confirm_memory", { proposalId, expectedProposalVersion, edit }),
+    companion_get_memory_source: recordId => invoke("stuart_companion_get_memory_source", { recordId }),
+    companion_get_memory_versions: recordId => invoke("stuart_companion_get_memory_versions", { recordId }),
     // StuartMD Context Pyramid & Budgeting Engine (M3)
     context_assemble: (pyramid, contextLimit, reserveOutput) =>
       invoke("stuart_context_assemble", {

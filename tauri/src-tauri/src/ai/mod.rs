@@ -1,17 +1,19 @@
 use eventsource_stream::Eventsource;
 use futures_util::StreamExt;
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
+use sha2::{Digest,Sha256};
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{Emitter, Manager};
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
-use crate::context::service::{ChatMessage, ContextInput, RequestContext, ValidatedContext};
+use crate::context::service::{ContextInput, ValidatedContext};
+pub mod companion;
 
 struct Request {
-    window_id: String, document_id: String, session_id: String,
+    window_id: String, document_id: Option<String>, document_key: Option<String>, workspace_key: Option<String>, session_id: String,
+    turn_id: String, attempt_no: u64, phase: String, config: Value,
     cancellation: CancellationToken, finished: Arc<Notify>,
     seq: u64, text: String, status: String, error: Option<String>, final_hash: Option<String>,
     context: Option<ValidatedContext>, usage: Option<Value>, created_at: u64,
@@ -79,7 +81,9 @@ fn snapshot(request_id: &str, owner: &str) -> Result<Value, String> {
     let registry=REQUESTS.lock().map_err(|_|"AI请求锁损坏")?;
     let request=registry.get(request_id).ok_or("请求不存在")?;
     if request.window_id != owner { return Err("当前窗口无权访问该请求".into()); }
-    Ok(json!({"requestId":request_id,"documentId":request.document_id,"sessionId":request.session_id,
+    let settings_revision=format!("{:x}",Sha256::digest(serde_json::to_vec(&request.config).map_err(|e|e.to_string())?));
+    Ok(json!({"requestId":request_id,"windowId":request.window_id,"documentId":request.document_id,"documentKey":request.document_key,"workspaceKey":request.workspace_key,"sessionId":request.session_id,"settingsRevision":settings_revision,
+        "turnId":request.turn_id,"attemptNo":request.attempt_no,"phase":request.phase,
         "seq":request.seq,"text":request.text,"status":request.status,"type":if terminal(&request.status){"done"}else{"snapshot"},
         "error":request.error,"finalHash":request.final_hash,"context":request.context,"usage":request.usage}))
 }
@@ -98,90 +102,27 @@ pub fn stuart_ai_request_cancel(window:tauri::WebviewWindow,request_id:String)->
 
 #[tauri::command]
 pub fn stuart_ai_request_start(window:tauri::WebviewWindow,document_service:tauri::State<crate::document::DocumentService>,
+    rag:tauri::State<crate::rag::RagState>,
     request_id:String,provider_id:Option<String>,model:Option<String>,messages:Value,thinking:Option<String>,
     max_output_tokens:Option<usize>,document_id:String,session_id:String,context_input:ContextInput)->Result<Value,String> {
-    crate::context::service::ensure_enabled(&CancellationToken::new())?;
-    uuid::Uuid::parse_str(&request_id).map_err(|_|"AI请求编号必须是UUID")?;
-    document_service.validate_context_snapshot(window.label(),&document_id,context_input.editor_revision,&context_input.source_hash)?;
-    let document=document_service.snapshot_for_window(window.label(),&document_id)?;
-    if let Some(root)=&context_input.workspace_root {crate::fs_api::ensure_window_read_allowed(&window,root)?;}
-    let session=crate::memory::get_archive_storage()?.get_session(&session_id)?;
-    if session.document_id.as_deref()!=Some(&document_id) || session.workspace_root!=context_input.workspace_root {return Err("请求文档或工作区与会话所属范围不一致".into());}
-    let cfg=crate::ai_chat::load_ai_settings();
-    let pid=provider_id.or_else(||cfg["active_provider_id"].as_str().map(str::to_owned)).ok_or("未配置AI服务商")?;
-    let mut provider=crate::ai_chat::active_provider(&json!({"active_provider_id":pid,"providers":cfg["providers"]}))?;
-    if provider["enabled"].as_bool()!=Some(true) {return Err("当前AI服务商未启用".into());}
-    if let Some(model)=model {provider["model"]=json!(model);}
-    let key=crate::ai_chat::read_api_key(&pid)?;
-    let messages:Vec<ChatMessage>=serde_json::from_value(messages).map_err(|error|error.to_string())?;
-    if messages.last().is_none_or(|message|message.role!="user" || message.content.trim().is_empty()) {return Err("AI请求缺少当前完整问题".into());}
-    let completed=crate::memory::get_archive_storage()?.get_completed_messages(&session_id)?;
-    for message in messages.iter().take(messages.len()-1).filter(|message|message.role!="system") {
-        if !completed.iter().any(|stored|stored.role==message.role && stored.content==message.content) {return Err("会话历史缺少实际完成消息来源".into());}
-    }
-    let max_output=max_output_tokens.or_else(||cfg["max_output_tokens"].as_u64().map(|number|number as usize)).ok_or("未配置输出Token预算")?;
-    let cancellation=CancellationToken::new();
-    let owner=window.label().to_owned();
-    let request=Request {window_id:owner.clone(),document_id:document_id.clone(),session_id:session_id.clone(),cancellation:cancellation.clone(),finished:Arc::new(Notify::new()),seq:0,text:String::new(),status:"Preparing".into(),error:None,final_hash:None,context:None,usage:None,created_at:crate::memory::sqlite_archive::now_millis()};
-    {
-        let mut registry=REQUESTS.lock().map_err(|_|"AI请求锁损坏")?;
-        if registry.contains_key(&request_id) {return Err("AI请求编号已存在".into());}
-        if registry.values().any(|request|request.window_id==owner && !terminal(&request.status)) {return Err("当前窗口的AI请求尚未结束".into());}
-        if registry.len()>=512 {
-            let mut old:Vec<_>=registry.iter().filter(|(_,request)|terminal(&request.status)).map(|(id,request)|(id.clone(),request.created_at)).collect();old.sort_by_key(|item|item.1);
-            for (id,_) in old.into_iter().take(256) {registry.remove(&id);}
-        }
-        registry.insert(request_id.clone(),request);
-    }
-    let app=window.app_handle().clone();let rid=request_id.clone();
-    let source_anchor=json!({"documentId":document_id,"path":document.path,"revision":document.revision,"sourceHash":document.content_hash,"selection":context_input.selection});
-    let request_context=RequestContext {request_id:rid.clone(),session_id:session_id.clone(),window_id:owner.clone(),document,messages,input:context_input,pdf_source:None};
-    tauri::async_runtime::spawn(async move {
-        let result=run(&app,&owner,&rid,&provider,&key,request_context,max_output,thinking,cancellation.clone()).await;
-        let (mut status,mut error)=match result {Ok(())=>("Completed".to_owned(),None),Err(error) if cancellation.is_cancelled()=>("Cancelled".to_owned(),Some(error)),Err(error)=>("Failed".to_owned(),Some(error))};
-        let current=snapshot(&rid,&owner).expect("AI请求记录丢失");let text=current["text"].as_str().expect("AI正文类型错误").to_owned();
-        let saved=crate::memory::get_archive_storage().and_then(|storage|storage.add_message(crate::memory::ChatArchiveMessage {
-            message_id:uuid::Uuid::new_v4().to_string(),session_id:session_id.clone(),role:"assistant".into(),content:text.clone(),timestamp:crate::memory::sqlite_archive::now_millis(),anchor_file:source_anchor["path"].as_str().map(str::to_owned),anchor_line:None,
-            request_id:Some(rid.clone()),document_id:Some(document_id.clone()),completion_status:status.clone(),source_hash:source_anchor["sourceHash"].as_str().map(str::to_owned),source_anchor:Some(source_anchor),sequence:0,
-        }));
-        if let Err(failure)=saved {status="Failed".into();error=Some(format!("保存回答失败：{failure}"));}
-        let finished={let mut registry=REQUESTS.lock().expect("AI请求锁损坏");let request=registry.get_mut(&rid).expect("AI请求记录丢失");request.seq+=1;request.status=status;request.error=error;request.final_hash=Some(format!("{:x}",Sha256::digest(text.as_bytes())));request.finished.clone()};
-        finished.notify_waiters();
-        notify_window(&app,&owner,snapshot(&rid,&owner).expect("AI请求记录丢失")).expect("发送AI完成事件失败");
-    });
-    Ok(json!({"ok":true,"requestId":request_id}))
+    companion::start_legacy(window,document_service,rag,json!({"requestId":request_id,"providerId":provider_id,
+        "model":model,"messages":messages,"thinking":thinking,"maxOutputTokens":max_output_tokens,
+        "documentId":document_id,"sessionId":session_id,"contextInput":context_input}))
 }
 
-async fn run(app:&tauri::AppHandle,owner:&str,rid:&str,provider:&Value,key:&str,mut request:RequestContext,max_output:usize,thinking:Option<String>,cancellation:CancellationToken)->Result<(),String> {
-    if request.document.kind=="pdf" {
-        let path=std::path::PathBuf::from(request.document.path.as_ref().ok_or("PDF上下文来源路径缺失")?);
-        let native=if cfg!(debug_assertions) {std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../resources/native")}else {app.path().resource_dir().map_err(|error|error.to_string())?.join("native")};
-        let page=request.input.selection.as_ref().and_then(|selection|selection.page).or(request.input.page);let full=request.input.scope=="full";
-        let cancelled=Arc::new(AtomicBool::new(false));let worker_cancelled=cancelled.clone();
-        let mut extraction=tokio::task::spawn_blocking(move ||if full {crate::rag::pdf_extract::extract_pdf(&path,&native,&worker_cancelled)}else {crate::rag::pdf_extract::extract_pdf_context(&path,&native,&worker_cancelled,page.ok_or("PDF上下文缺少当前页码")?)});
-        request.pdf_source=Some(tokio::select! {_=cancellation.cancelled()=> {cancelled.store(true,Ordering::Release);match extraction.await.map_err(|error|error.to_string())? {Ok(_)=>{},Err(error) if error=="Cancelled"=>{},Err(error)=>return Err(error)};return Err("已取消生成".into());},result=&mut extraction=>result.map_err(|error|error.to_string())??});
-    }
-    let budget=crate::context::service::assemble_for_request(provider,key,request.clone(),max_output,cancellation.clone()).await?;
-    crate::context::service::ensure_enabled(&cancellation)?;
-    app.state::<crate::document::DocumentService>().validate_context_snapshot(owner,&request.document.document_id,request.input.editor_revision,&request.input.source_hash)?;
-    let storage=crate::memory::get_archive_storage()?;
-    storage.record_context(rid,&request.session_id,&serde_json::to_value(&budget).map_err(|error|error.to_string())?)?;
-    REQUESTS.lock().map_err(|_|"AI请求锁损坏")?.get_mut(rid).ok_or("AI请求记录丢失")?.context=Some(budget.clone());
-    let question=request.messages.last().ok_or("当前问题缺失")?;
-    storage.add_message(crate::memory::ChatArchiveMessage {message_id:uuid::Uuid::new_v4().to_string(),session_id:request.session_id.clone(),role:"user".into(),content:question.content.clone(),timestamp:crate::memory::sqlite_archive::now_millis(),anchor_file:request.document.path.clone(),anchor_line:None,request_id:Some(rid.into()),document_id:Some(request.document.document_id.clone()),completion_status:"Completed".into(),source_hash:Some(request.document.content_hash.clone()),source_anchor:Some(json!({"selection":request.input.selection,"documentRevision":request.document.revision})),sequence:0})?;
-    let usage=stream_completion(provider,key,&budget,thinking.as_deref(),cancellation,|piece| {
-        let payload={let mut registry=REQUESTS.lock().map_err(|_|"AI请求锁损坏")?;let request=registry.get_mut(rid).ok_or("AI请求记录丢失")?;request.status="Streaming".into();request.seq+=1;request.text.push_str(piece);json!({"requestId":rid,"documentId":request.document_id,"sessionId":request.session_id,"seq":request.seq,"type":"delta","text":piece,"status":request.status})};
-        notify_window(app,owner,payload)
-    }).await?;
-    storage.record_context(rid,&request.session_id,&json!({"validated":budget,"usage":usage}))?;
-    REQUESTS.lock().map_err(|_|"AI请求锁损坏")?.get_mut(rid).ok_or("AI请求记录丢失")?.usage=Some(usage);
-    Ok(())
+pub async fn stream_completion(provider:&Value,key:&str,budget:&ValidatedContext,thinking:Option<&str>,cancellation:CancellationToken,delta:impl FnMut(&str)->Result<(),String>)->Result<Value,String> {
+    stream_completion_with_format(provider,key,budget,thinking,cancellation,delta,false).await
 }
 
-pub async fn stream_completion(provider:&Value,key:&str,budget:&ValidatedContext,thinking:Option<&str>,cancellation:CancellationToken,mut delta:impl FnMut(&str)->Result<(),String>)->Result<Value,String> {
+pub async fn stream_json_completion(provider:&Value,key:&str,budget:&ValidatedContext,cancellation:CancellationToken,delta:impl FnMut(&str)->Result<(),String>)->Result<Value,String> {
+    stream_completion_with_format(provider,key,budget,Some("fast"),cancellation,delta,true).await
+}
+
+async fn stream_completion_with_format(provider:&Value,key:&str,budget:&ValidatedContext,thinking:Option<&str>,cancellation:CancellationToken,mut delta:impl FnMut(&str)->Result<(),String>,json_response:bool)->Result<Value,String> {
     crate::context::service::ensure_enabled(&cancellation)?;
     let (base,_)=crate::ai_chat::effective_base_url(provider)?;
     let mut body=json!({"model":provider["model"],"messages":budget.messages,"stream":true,"stream_options":{"include_usage":true},"max_tokens":budget.requested_output_tokens});
+    if json_response {body["response_format"]=json!({"type":"json_object"});}
     let mode=thinking.unwrap_or("balanced");
     if !["fast","balanced","deep"].contains(&mode) {return Err("AI思考模式无效".into());}
     if provider["id"].as_str()==Some("deepseek") {

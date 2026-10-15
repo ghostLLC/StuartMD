@@ -1,0 +1,11 @@
+{
+  "version": "3.5.12",
+  "sourceFingerprint": "bc3461579f60a6d14427ee1038a3edf715ab110ed36ad812736703c96c570d10",
+  "executableSha256": "66315c834c30c98fbf1a49e29d32497a361b1366da9bd7d418eb1d79837cfcce",
+  "installerSha256": "ef0c8ce5d696c0367f5c419a8288451bbc4fbd9e61234849993891aed8db5592",
+  "executableBytes": 62019072,
+  "installerBytes": 86760072,
+  "command": "cargo tauri build --bundles nsis",
+  "exitCode": 0,
+  "completedAt": "2026-10-15T02:28:15.4240378Z"
+}

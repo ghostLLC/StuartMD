@@ -30,6 +30,14 @@
       if (!["\n", "\r\n", "\r"].includes(this.defaultSeparator)) throw new Error("文档默认换行分隔符无效");
     }
     get editorText() { return this.source.replace(/\r\n|\r/g, "\n"); }
+    sourceOffset(editorOffset) {
+      boundary(this.editorText, editorOffset);
+      let raw = 0;
+      for (let index = 0; index < editorOffset; index++) {
+        raw += this.source[raw] === "\r" && this.source[raw + 1] === "\n" ? 2 : 1;
+      }
+      return raw;
+    }
     apply(edit) {
       boundary(this.source, edit.from);
       boundary(this.source, edit.to);

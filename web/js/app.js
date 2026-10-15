@@ -654,7 +654,17 @@
       }
     }
     if (needPP.length) postProcessBlocks(needPP);
-    for (const node of childNodes()) stampBlockVersion(node);
+    let sourceCursor = 0;
+    const editorSource = activeDocument ? activeDocument.buffer.editorText : src.replace(/\r\n|\r/g, "\n");
+    for (const [index, node] of childNodes().entries()) {
+      stampBlockVersion(node);
+      const blockSource = blocks[index].replace(/\r\n|\r/g, "\n");
+      const start = editorSource.indexOf(blockSource, sourceCursor);
+      if (start < 0) throw new Error("正文位置与当前编辑内容不一致");
+      node.dataset.sourceOffset = String(start);
+      node.dataset.sourceEnd = String(start + blockSource.length);
+      sourceCursor = start + blockSource.length;
+    }
 
     const midStart = prefix;
     const midEnd = blocks.length - suffix;
@@ -685,6 +695,11 @@
               inPreview: false,
               inPdf: true,
               page: ps.page,
+              pdfRects: ps.pdfRects || [],
+              segments: ps.segments || [],
+              fileFingerprint: ps.fileFingerprint,
+              documentId: activeDocument.documentId,
+              revision: activeDocument.revision,
               blockIndex: null,
               at: Date.now(),
             };
@@ -705,6 +720,7 @@
             el.preview.contains(sel.anchorNode.parentElement)))
       );
       const inSource = el.source === document.activeElement || (el.source && el.source.contains(sel.anchorNode));
+      if (!inPreview && !inSource) return getSelectionCache();
       let blockIndex = typeof state._activeBlockIndex === "number" ? state._activeBlockIndex : null;
       try {
         const b =
@@ -712,10 +728,19 @@
           (sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement)?.closest?.(".md-block");
         if (b && b.dataset.index != null) blockIndex = Number(b.dataset.index);
       } catch (_) {}
+      const range = sel.getRangeAt(0);
+      const blockFor = node => (node.nodeType === 1 ? node : node.parentElement)?.closest(".md-block");
+      const first = blockFor(range.startContainer), last = blockFor(range.endContainer);
       state._selCache = {
         text,
-        inPreview: inPreview || inSource,
+        inPreview,
         blockIndex,
+        from: inPreview && first ? Number(first.dataset.sourceOffset) : null,
+        to: inPreview && last ? Number(last.dataset.sourceEnd) : null,
+        start: inSource ? el.source.selectionStart : null,
+        end: inSource ? el.source.selectionEnd : null,
+        documentId: activeDocument.documentId,
+        revision: activeDocument.revision,
         at: Date.now(),
       };
       return state._selCache;
@@ -727,6 +752,7 @@
   function getSelectionCache(maxAgeMs) {
     const c = state._selCache;
     if (!c || !c.text || !String(c.text).trim()) return null;
+    if (c.documentId !== activeDocument?.documentId || c.revision !== activeDocument?.revision) return null;
     const max = maxAgeMs == null ? 15000 : maxAgeMs;
     if (Date.now() - (c.at || 0) > max) return null;
     return c;
@@ -3525,7 +3551,6 @@
     state._selCache = null;
     aiUI.lastQuote = "";
     aiUI.lastMessages = [];
-    window.StuartAIService?.setDocument(activeDocument);
     window.dispatchEvent(new CustomEvent("stuart-document-changed", { detail: { documentId: activeDocument.documentId } }));
     lastPreviewSource = null;
     lastPreviewBlocks = [];
@@ -3545,6 +3570,7 @@
       state.path = path || null;
       state.name = name || "文档.pdf";
       state.content = "";
+      window.StuartAIService?.setDocument(activeDocument);
       state.dirty = false;
       el.fileTitle.textContent = state.name;
       el.dirtyDot.hidden = true;
@@ -3568,6 +3594,7 @@
     state.path = path || null;
     state.name = name || activeDocument.title;
     state.content = activeDocument.source;
+    window.StuartAIService?.setDocument(activeDocument);
     state.dirty = activeDocument.dirty;
     el.source.value = state.content;
     el.source.readOnly = activeDocument.accessState !== "Editable";
@@ -3987,6 +4014,7 @@
   function transitionDocument(operation) {
     const transition = async () => {
       await flushCurrentDocument();
+      await window.StuartAIService.flushDraft();
       return operation();
     };
     const next = pendingDocumentTransition.then(transition, transition);
@@ -4711,6 +4739,8 @@
     state.folder = res.path;
     state.workspaceRoot = res.path;
     await window.pywebview.api.rag_set_workspace(res.path);
+    await window.StuartAIService.setWorkspace(res.path);
+    window.dispatchEvent(new CustomEvent("stuart-workspace-changed", { detail: { workspaceRoot: res.path } }));
     el.folderName.textContent = res.name || res.path;
     el.folderName.title = res.path;
     renderTree(res.items || [], el.fileTree, 0);
@@ -6840,6 +6870,7 @@ ${previewHtml}
             if (!confirmed) return;
           }
           await window.StuartAIService.cancel();
+          await window.StuartAIService.flushDraft();
           await tauri.core.invoke("stuart_close_window");
         } catch (error) { toast("关闭窗口失败：" + (error.message || String(error))); }
         finally { closingWindow = false; }
@@ -7341,6 +7372,7 @@ ${previewHtml}
     return {
       kind: state.path && String(state.path).toLowerCase().endsWith(".pdf") ? "pdf" : "markdown",
       documentId: activeDocument?.documentId,
+      documentKey: activeDocument?.documentKey,
       revision: activeDocument?.revision,
       diskRevision: activeDocument?.diskRevision,
       path: state.path,
@@ -7363,6 +7395,32 @@ ${previewHtml}
       chars: core ? core.countChars(text) : text.replace(/\s/g, "").length,
       lines: core ? core.countLines(text) : text ? text.split("\n").length : 0,
     };
+  }
+
+  function getReadingAnchorHost() {
+    if (!activeDocument) throw new Error("当前没有可阅读的文档");
+    if (activeDocument.kind === "pdf") return { documentId: activeDocument.documentId, revision: activeDocument.revision,
+      page: window.StuartMDPdf.getCurrentPage() };
+    let utf16Offset;
+    if (state.mode === "source" || document.activeElement === el.source) {
+      utf16Offset = el.source.selectionStart;
+    } else {
+      const area = el.preview.getBoundingClientRect();
+      const visible = Array.from(el.preview.querySelectorAll(":scope > .md-block"))
+        .find(node => node.getBoundingClientRect().bottom > area.top);
+      if (visible && (visible.dataset.documentId !== activeDocument.documentId || Number(visible.dataset.revision) !== activeDocument.revision)) {
+        throw new Error("阅读位置的正文版本已经变化");
+      }
+      utf16Offset = visible ? Number(visible.dataset.sourceOffset) : 0;
+      if (!Number.isInteger(utf16Offset)) throw new Error("当前正文没有有效的阅读位置");
+    }
+    return { documentId: activeDocument.documentId, revision: activeDocument.revision, utf16Offset };
+  }
+
+  function sourceSelectionRange(start, end) {
+    if (!activeDocument) throw new Error("选区所属文档不存在");
+    activeDocument.buffer.sourceOffset(start); activeDocument.buffer.sourceOffset(end);
+    return { from: start, to: end };
   }
 
   function setDocumentHost(text, opts) {
@@ -7420,6 +7478,7 @@ ${previewHtml}
   }
 
   function getSelectionInfoHost() {
+    captureSelectionCache();
     // PDF viewer path first
     try {
       if (window.StuartMDPdf && window.StuartMDPdf.isActive && window.StuartMDPdf.isActive()) {
@@ -7427,10 +7486,14 @@ ${previewHtml}
         if (ps && ps.text) {
           return {
             text: ps.text,
+            documentId: activeDocument.documentId,
+            revision: activeDocument.revision,
             inPreview: false,
             inPdf: true,
             page: ps.page,
             pdfRects: ps.pdfRects || [],
+            segments: ps.segments || [],
+            fileFingerprint: ps.fileFingerprint,
             start: null,
             end: null,
             blockIndex: null,
@@ -7440,10 +7503,14 @@ ${previewHtml}
         if (cachePdf && cachePdf.text) {
           return {
             text: cachePdf.text,
+            documentId: activeDocument.documentId,
+            revision: activeDocument.revision,
             inPreview: false,
             inPdf: true,
             page: cachePdf.page || null,
             pdfRects: cachePdf.pdfRects || [],
+            segments: cachePdf.segments || [],
+            fileFingerprint: cachePdf.fileFingerprint,
             start: null,
             end: null,
             blockIndex: null,
@@ -7492,6 +7559,10 @@ ${previewHtml}
     return {
       text,
       inPreview,
+      documentId: activeDocument?.documentId,
+      revision: activeDocument?.revision,
+      from: inPreview ? cache?.from ?? null : null,
+      to: inPreview ? cache?.to ?? null : null,
       start: inPreview ? null : cache?.text === text ? cache.start ?? ta?.selectionStart ?? null : ta?.selectionStart ?? null,
       end: inPreview ? null : cache?.text === text ? cache.end ?? ta?.selectionEnd ?? null : ta?.selectionEnd ?? null,
       blockIndex,
@@ -7570,23 +7641,97 @@ ${previewHtml}
   };
 
   async function openKnowledgeSource(hit) {
-    if (!hit?.workspaceRoot || !hit.relPath || !hit.sourceHash) throw new Error("检索来源缺少文件路径或指纹");
-    const path = hit.workspaceRoot.replace(/[\\/]+$/, "") + "/" + hit.relPath;
+    const anchor = hit?.anchor || hit;
+    const path = anchor?.path || (hit?.workspaceRoot && hit.relPath ? hit.workspaceRoot.replace(/[\\/]+$/, "") + "/" + hit.relPath : null);
+    const fingerprint = anchor?.fileFingerprint || anchor?.sourceHash;
+    if (!path || !fingerprint) throw new Error("来源缺少实际文件路径或指纹");
+    await window.StuartAIService.flushDraft();
     await window.openFileByPath(path);
     const current = getDocumentHost();
-    if (current.diskRevision.rawByteSha256 !== hit.sourceHash) throw new Error("来源文件已经变化，请重新检索");
-    if (current.dirty) throw new Error("当前文档包含未保存修改，请保存后重新检索来源");
-    if (hit.pageNumber) { await window.StuartMDPdf.openAnchor(hit); return; }
-    if (!Number.isInteger(hit.startLine) || !Number.isInteger(hit.endLine) || hit.startLine < 1 || hit.endLine < hit.startLine) throw new Error("Markdown 来源行号无效");
+    if (current.diskRevision.rawByteSha256 !== fingerprint) throw new Error("来源文件已经变化，请重新读取来源");
+    const pageNumber = anchor.page || hit.pageNumber;
+    if (pageNumber) {
+      const bounds = anchor.bounds || { rects: anchor.rects || anchor.blocks?.flatMap(block => block.rects) || [], sourceHash: fingerprint };
+      await window.StuartMDPdf.openAnchor({ ...hit, ...anchor, pageNumber, sourceHash: fingerprint, bounds }); return;
+    }
+    if (anchor.sourceHash && anchor.fileFingerprint) {
+      const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(current.content));
+      const actual = Array.from(new Uint8Array(bytes), byte => byte.toString(16).padStart(2, "0")).join("");
+      if (actual !== anchor.sourceHash) throw new Error("来源编辑快照与当前正文不同，请在来源预览中查看归档摘录");
+    }
+    if (!anchor.utf16Range && !anchor.byteRange && !hit.startLine && !anchor.startLine) return;
     setMode("source");
-    const lines = el.source.value.split("\n");
-    if (hit.endLine > lines.length) throw new Error("检索来源行号超出当前文件");
-    const from = lines.slice(0, hit.startLine - 1).reduce((offset,line) => offset + line.length + 1, 0);
-    const to = lines.slice(0, hit.endLine).reduce((offset,line) => offset + line.length + 1, 0) - 1;
+    let from, to;
+    if (anchor.utf16Range) [from, to] = anchor.utf16Range;
+    else if (anchor.byteRange) {
+      const bytes = new TextEncoder().encode(current.content), decoder = new TextDecoder("utf-8", { fatal: true });
+      [from, to] = anchor.byteRange.map(offset => decoder.decode(bytes.slice(0, offset)).replace(/\r\n|\r/g, "\n").length);
+    } else {
+      const startLine = anchor.startLine || hit.startLine, endLine = anchor.endLine || hit.endLine, lines = el.source.value.split("\n");
+      if (!Number.isInteger(startLine) || !Number.isInteger(endLine) || startLine < 1 || endLine < startLine || endLine > lines.length) throw new Error("来源行号超出当前正文");
+      from = lines.slice(0, startLine - 1).reduce((offset,line) => offset + line.length + 1, 0);
+      to = lines.slice(0, endLine).reduce((offset,line) => offset + line.length + 1, 0) - 1;
+    }
+    if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < from || to > el.source.value.length) throw new Error("来源位置超出当前正文");
     el.source.focus(); el.source.setSelectionRange(from, to);
     const lineHeight = parseFloat(getComputedStyle(el.source).lineHeight);
-    el.source.scrollTop = Math.max(0, (hit.startLine - 2) * lineHeight);
+    el.source.scrollTop = Math.max(0, (el.source.value.slice(0, from).split("\n").length - 2) * lineHeight);
     captureSelectionCache();
+  }
+
+  async function restoreCompanionDocument(restored) {
+    await window.StuartMD.setWorkspaceRoot(restored.session.workspaceRoot || null);
+    if (restored.kind === "workspace") return;
+    if (restored.kind === "document") return addOrFocusTab(restored.document);
+    if (restored.kind === "draft") return window.StuartMD.restoreDocument(restored.document);
+    throw new Error("会话恢复响应的文档类型无效");
+  }
+
+  async function saveCompanionNote({ question, answer, status, sources, messageId, requestId }) {
+    if (!messageId || !requestId || !answer) throw new Error("保存笔记需要实际归档答案");
+    const current = getDocumentHost(), title = (current.name || "伴读").replace(/\.[^.]+$/, "") + ".伴读笔记.md";
+    const target = await window.pywebview.api.choose_save_path(title);
+    if (!target) return;
+    const revision = await window.pywebview.api.document_target_revision(target);
+    if (revision.exists && !await window.StuartUIConfirm("目标文件已经存在。确定用这份伴读笔记替换该文件吗？")) return;
+    const sourceLines = sources.map(source => {
+      const anchor = source.anchor || {};
+      return `- ${source.title || source.kind}；${anchor.path || anchor.documentId || anchor.recordId || "归档来源"}${anchor.page ? `；第 ${anchor.page} 页` : ""}；指纹 ${anchor.sourceHash || anchor.fileFingerprint || ""}`;
+    });
+    const body = `# 伴读笔记\n\n保存时间：${new Date().toLocaleString()}\n\n回答状态：${status}\n\n## 问题\n\n${question}\n\n## 回答\n\n${answer}\n\n## 来源\n\n${sourceLines.join("\n")}\n\n归档消息：${messageId}\n请求编号：${requestId}\n`;
+    const record = await window.pywebview.api.document_new(), note = new window.StuartCore.DocumentSession(record);
+    note.updateSource(body);
+    const result = await saveCapturedDocument(note, note.snapshot(), target, revision);
+    if (result.result !== "Saved") throw new Error("笔记保存期间目标文件已经变化，请重新选择保存位置");
+    await window.pywebview.api.document_release(note.documentId);
+    toast("伴读笔记已经保存：" + target);
+    return result;
+  }
+
+  function resolveCompanionDraftConflict() {
+    const value = window.StuartAIService.snapshot;
+    if (!value.draftConflict) return;
+    const dialog = document.createElement("dialog"), title = document.createElement("h2"), error = document.createElement("div");
+    title.textContent = "检查草稿冲突"; error.className = "sc-error"; error.setAttribute("role", "alert");
+    dialog.className = "stuart-recovery-dialog"; dialog.append(title, error);
+    for (const [label, draft] of [["当前窗口的草稿", value.draft], ["其他窗口保存的草稿", value.draftConflict.draft]]) {
+      const heading = document.createElement("h3"), content = document.createElement("pre"); heading.textContent = label;
+      content.textContent = draft ? JSON.stringify({ question: draft.question, scope: draft.scope, selection: draft.selection, explicitSources: draft.explicitSources }, null, 2) : "当前会话没有输入草稿";
+      dialog.append(heading, content);
+    }
+    const actions = document.createElement("div"); actions.className = "sc-actions";
+    for (const [label, choice] of [["使用其他窗口的草稿", "remote"], ["将当前草稿保存到新会话", "independent"], ["继续查看", null]]) {
+      const button = document.createElement("button"); button.type = "button"; button.className = "btn"; button.textContent = label;
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        try { if (choice) await window.StuartAIService.resolveDraftConflict(choice); dialog.close(); }
+        catch (failure) { error.textContent = failure.message || String(failure); }
+        finally { button.disabled = false; }
+      }); actions.append(button);
+    }
+    const focused = document.activeElement;
+    dialog.append(actions); dialog.addEventListener("close", () => { dialog.remove(); focused?.focus(); });
+    document.body.append(dialog); dialog.showModal();
   }
 
   // expose for debugging + AI/plugins
@@ -7600,6 +7745,8 @@ ${previewHtml}
       else {
         state.folder = ""; state.workspaceRoot = "";
         await window.pywebview.api.rag_set_workspace(null);
+        await window.StuartAIService.setWorkspace(null);
+        window.dispatchEvent(new CustomEvent("stuart-workspace-changed", { detail: { workspaceRoot: null } }));
         el.folderName.textContent = "最近 / 欢迎";
         el.fileTree.replaceChildren();
         await refreshRecents();
@@ -7607,6 +7754,20 @@ ${previewHtml}
       }
     },
     openKnowledgeSource,
+    restoreCompanionDocument,
+    saveCompanionNote,
+    resolveCompanionDraftConflict,
+    getShortcutRegistrations: () => [
+      { shortcut: "Alt+I", label: "伴读面板" }, { shortcut: "Ctrl+O", label: "打开文件" },
+      { shortcut: "Ctrl+N", label: "新建文档" }, { shortcut: "Ctrl+S", label: "保存文件" },
+      { shortcut: "Ctrl+Shift+S", label: "另存为" }, { shortcut: "Ctrl+Z", label: "撤销" },
+      { shortcut: "Ctrl+Shift+Z", label: "重做" }, { shortcut: "Ctrl+Y", label: "重做" },
+      { shortcut: "Ctrl+B", label: "加粗或侧栏" }, { shortcut: "Ctrl+I", label: "斜体" },
+      { shortcut: "Ctrl+F", label: "查找" }, { shortcut: "Ctrl+E", label: "导出" },
+      { shortcut: "Ctrl+1", label: "阅读模式" }, { shortcut: "Ctrl+2", label: "分栏模式" },
+      { shortcut: "Ctrl+3", label: "源码模式" }, { shortcut: "Ctrl+T", label: "切换主题" },
+      { shortcut: "Ctrl+P", label: "打印" },
+    ],
     saveDocumentSnapshot: (document, snapshot, targetPath, expectedDiskRevision) => saveCapturedDocument(document, snapshot, targetPath, expectedDiskRevision),
     saveDocumentCopy: async document => {
       const target = await window.pywebview.api.choose_save_path(document.title);
@@ -7647,6 +7808,8 @@ ${previewHtml}
     openFile,
     toast,
     getDocument: getDocumentHost,
+    getReadingAnchor: getReadingAnchorHost,
+    sourceSelectionRange,
     confirmPdfSave: (documentId, result) => {
       const session = state.tabs.find(tab => tab.document?.documentId === documentId)?.document || (activeDocument?.documentId === documentId ? activeDocument : null);
       if (!session || result.documentId !== documentId || result.result !== "Saved") throw new Error("PDF保存结果与文档身份不一致");

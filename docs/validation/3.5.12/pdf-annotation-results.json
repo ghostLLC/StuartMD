@@ -1,0 +1,21 @@
+{
+  "conflictPath": "C:\\Users\\Administrator\\Desktop\\Stuart\\tests\\native-documents\\../..\\tests/native-artifacts/pdf-annotations\\df6361ba-df9b-4214-bbb7-5c0d8456aaeb\\actual.pdf",
+  "conflictPreserved": true,
+  "nativeEdit": true,
+  "passed": true,
+  "path": "C:\\Users\\Administrator\\Desktop\\Stuart\\tests\\native-documents\\../..\\tests/native-artifacts/pdf-annotations\\df6361ba-df9b-4214-bbb7-5c0d8456aaeb\\verified.pdf",
+  "rendered": [
+    {
+      "changedPixels": 4544,
+      "page": 1
+    },
+    {
+      "changedPixels": 381,
+      "page": 4
+    },
+    {
+      "changedPixels": 553,
+      "page": 5
+    }
+  ]
+}

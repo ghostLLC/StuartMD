@@ -52,5 +52,5 @@ for model in manifest["models"]:
         vectors.append(vector.tolist())
     results.append({"modelId": model["modelId"], "runtimeVersion": ort.__version__, "texts": texts, "vectors": vectors})
     print(json.dumps({"modelId": model["modelId"], "runtimeVersion": ort.__version__, "dimension": model["dimension"]}))
-destination = workspace / "docs/validation/3.5.11/model-reference.json"
+destination = workspace / "docs/validation/3.5.12/model-reference.json"
 destination.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")

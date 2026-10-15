@@ -5,7 +5,7 @@
 (function (global) {
   "use strict";
 
-  const SCHEMA_VERSION = 4;
+  const SCHEMA_VERSION = 5;
 
   function defaultAi() {
     return {
@@ -13,10 +13,12 @@
       active_provider_id: "deepseek",
       explain_shortcut: "Alt+E",
       thinking: "balanced",
-      context_scope: "neighborhood",
+      context_scope: "document",
       context_max_chars: 8000,
       max_output_tokens: 2048,
-      memory_mode: "always",
+      memory_mode: "ask",
+      use_saved_memories: true,
+      learning_policy: "ask",
       style: {
         length: "normal",
         tone: "neutral",
@@ -30,7 +32,7 @@
           label: "DeepSeek",
           kind: "openai_compat",
           base_url: "https://api.deepseek.com/v1",
-          model: "deepseek-chat",
+          model: "deepseek-flash",
           enabled: true,
           builtin: true,
         },
@@ -122,6 +124,12 @@
       if (!Array.isArray(s.ai.providers) || !s.ai.providers.length) {
         s.ai.providers = base.providers;
       }
+    }
+    if (from < 5) {
+      const legacy = s.ai.memory_mode || "ask";
+      if (typeof s.ai.use_saved_memories === "undefined") s.ai.use_saved_memories = legacy !== "off";
+      if (typeof s.ai.learning_policy === "undefined") s.ai.learning_policy = legacy === "always" ? "automatic" : legacy;
+      if (["full", "neighborhood"].includes(s.ai.context_scope)) s.ai.context_scope = "document";
     }
     if (!s.session || typeof s.session !== "object") {
       s.session = { tabs: [], active_path: "" };

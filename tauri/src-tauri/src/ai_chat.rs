@@ -1,4 +1,5 @@
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::{fs, path::PathBuf};
 use tauri::Emitter;
 use zeroize::{Zeroize, Zeroizing};
@@ -77,7 +78,7 @@ pub(crate) fn read_api_key(id:&str)->Result<Zeroizing<String>,String> {
 fn provider_has_key(id:&str)->bool {key_path(id).expect("密钥路径无效").is_file()}
 
 pub fn builtin_ai_defaults()->Value {
-    json!({"enabled":true,"active_provider_id":"deepseek","explain_shortcut":"Alt+E","thinking":"balanced","context_scope":"neighborhood","max_output_tokens":2048,"memory_mode":"always",
+    json!({"enabled":true,"active_provider_id":"deepseek","explain_shortcut":"Alt+E","thinking":"balanced","context_scope":"document","max_output_tokens":2048,"memory_mode":"ask","use_saved_memories":true,"learning_policy":"ask",
         "style":{"length":"normal","tone":"neutral","custom":"","length_hint":"","feedback":{"short":0,"ok":0,"long":0}},
         "providers":[
             {"id":"deepseek","label":"DeepSeek","kind":"openai_compat","base_url":"https://api.deepseek.com/v1","model":"deepseek-flash","enabled":true,"builtin":true},
@@ -88,6 +89,12 @@ pub fn builtin_ai_defaults()->Value {
 }
 fn merge_ai_settings(mut ai:Value)->Value {
     let defaults=builtin_ai_defaults();let object=ai.as_object_mut().expect("AI设置必须是JSON对象");
+    let legacy=object.get("memory_mode").and_then(Value::as_str).unwrap_or("ask").to_owned();
+    object.entry("use_saved_memories").or_insert_with(||json!(legacy!="off"));
+    object.entry("learning_policy").or_insert_with(||json!(if legacy=="always" {"automatic"} else {legacy.as_str()}));
+    if object.get("context_scope").and_then(Value::as_str).is_some_and(|scope|["full","neighborhood"].contains(&scope)) {
+        object.insert("context_scope".into(),json!("document"));
+    }
     for (name,value) in defaults.as_object().expect("AI默认设置无效") {object.entry(name.clone()).or_insert_with(||value.clone());}
     let style=object.get_mut("style").and_then(Value::as_object_mut).expect("AI回答样式设置必须是对象");
     for (name,value) in defaults["style"].as_object().expect("AI默认回答样式无效") {style.entry(name.clone()).or_insert_with(||value.clone());}
@@ -101,18 +108,27 @@ fn merge_ai_settings(mut ai:Value)->Value {
 pub fn load_ai_settings()->Value {
     let settings=crate::fs_api::load_settings_migrated();merge_ai_settings(settings.get("ai").cloned().unwrap_or_else(||json!({})))
 }
+pub fn settings_revision()->Result<String,String> {
+    Ok(format!("{:x}",Sha256::digest(serde_json::to_vec(&load_ai_settings()).map_err(|error|error.to_string())?)))
+}
 pub(crate) fn active_provider(ai:&Value)->Result<Value,String> {
     let id=ai["active_provider_id"].as_str().ok_or("当前服务商编号缺失")?;
     ai["providers"].as_array().ok_or("服务商配置缺失")?.iter().find(|provider|provider["id"].as_str()==Some(id)).cloned().ok_or("当前服务商配置不存在".into())
 }
 #[tauri::command]
-pub fn stuart_ai_get_config()->Value {json!({"ok":true,"ai":load_ai_settings()})}
+pub fn stuart_ai_get_config()->Result<Value,String> {Ok(json!({"ok":true,"ai":load_ai_settings(),"settingsRevision":settings_revision()?}))}
 #[tauri::command]
 pub async fn stuart_ai_save_config(app:tauri::AppHandle,ai:Value,confirm:Option<bool>)->Result<Value,String> {
     let previous=load_ai_settings();
     if !ai.is_object() {return Err("AI设置必须是JSON对象".into());}
     let mut next=merge_ai_settings(ai);
     if !["always","ask","off"].contains(&next["memory_mode"].as_str().ok_or("记忆学习方式缺失")?) {return Err("记忆学习方式无效".into());}
+    let learning=next["learning_policy"].as_str().ok_or("整理新记忆方式缺失")?.to_owned();
+    if !["off","ask","automatic"].contains(&learning.as_str()) {return Err("整理新记忆方式无效".into());}
+    if next["use_saved_memories"].as_bool().is_none() {return Err("使用已有记忆设置必须是布尔值".into());}
+    if !["selection","section","document","workspace"].contains(&next["context_scope"].as_str().ok_or("提问范围缺失")?) {return Err("提问范围无效".into());}
+    if next["explain_shortcut"].as_str().is_some_and(|key|key.eq_ignore_ascii_case("Alt+I")) {return Err("选区问答快捷键与伴读 Alt+I 冲突".into());}
+    next["memory_mode"]=json!(if learning=="automatic" {"always"} else {learning.as_str()});
     if !["fast","balanced","deep"].contains(&next["thinking"].as_str().ok_or("思考方式缺失")?) {return Err("思考方式无效".into());}
     if next["max_output_tokens"].as_u64().is_none_or(|tokens|tokens==0) {return Err("输出Token预算必须大于零".into());}
     let mut ids=std::collections::HashSet::new();
@@ -137,7 +153,7 @@ pub async fn stuart_ai_save_config(app:tauri::AppHandle,ai:Value,confirm:Option<
     crate::fs_api::modify_settings(|settings|{settings.as_object_mut().ok_or("设置必须是对象")?.insert("ai".into(),next.clone());Ok(())})?;
     if next["enabled"].as_bool()!=Some(true) {crate::ai::cancel_all_and_wait().await?;}
     app.emit("ai-config-changed",json!({"enabled":next["enabled"]})).map_err(|error|error.to_string())?;
-    Ok(json!({"ok":true,"ai":load_ai_settings()}))
+    Ok(json!({"ok":true,"ai":load_ai_settings(),"settingsRevision":settings_revision()?}))
 }
 #[tauri::command]
 pub async fn stuart_ai_set_api_key(provider_id:String,api_key:String)->Result<Value,String> {

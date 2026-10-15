@@ -131,6 +131,14 @@ fn main() {
             ai::stuart_ai_request_start,
             ai::stuart_ai_request_cancel,
             ai::stuart_ai_request_status,
+            ai::companion::stuart_companion_get_target,
+            ai::companion::stuart_companion_prepare_context,
+            ai::companion::stuart_companion_send_question,
+            ai::companion::stuart_companion_preview_source,
+            ai::companion::stuart_companion_get_source,
+            ai::companion::stuart_companion_workspace_status,
+            ai::companion::stuart_companion_learn_request,
+            ai::companion::stuart_companion_delete_session,
             app_runtime::stuart_close_window,
             // 知识索引与查询
             rag_ipc::stuart_rag_set_workspace,
@@ -164,6 +172,19 @@ fn main() {
             memory::stuart_organic_memory_search,
             memory::stuart_organic_memory_delete,
             memory::stuart_organic_memory_effective,
+            memory::stuart_companion_get_conversation,
+            memory::stuart_companion_save_draft,
+            memory::stuart_companion_list_sessions,
+            memory::stuart_companion_rename_session,
+            memory::stuart_companion_list_memories,
+            memory::stuart_companion_save_memory,
+            memory::stuart_companion_delete_memory,
+            memory::stuart_companion_create_memory_proposal,
+            memory::stuart_companion_list_memory_proposals,
+            memory::stuart_companion_update_memory_proposal,
+            memory::stuart_companion_confirm_memory,
+            memory::stuart_companion_get_memory_source,
+            memory::stuart_companion_get_memory_versions,
         ])
         .manage(rag::RagState::new())
         .on_window_event(|window, event| {
@@ -188,6 +209,7 @@ fn main() {
             crate::rag::embedding::initialize_runtime(app.path().resource_dir()?.join("native"))?;
             app.state::<app_runtime::AppRuntime>().register("main", fs_api::startup_file());
             app.manage(document::DocumentService::new(fs_api::data_dir())?);
+            memory::get_archive_storage()?.recover_interrupted_operations()?;
             if let Some(w) = app.get_webview_window("main") {
                 w.set_title("StuartMD")?;
             }

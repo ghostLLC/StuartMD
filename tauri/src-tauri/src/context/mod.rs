@@ -8,6 +8,7 @@ pub mod compressor;
 pub mod model_spec;
 pub mod pyramid;
 pub mod service;
+pub mod sources;
 
 #[cfg(test)]
 #[path = "tests.rs"]
@@ -185,7 +186,7 @@ pub async fn stuart_context_validate_model_spec(window:tauri::WebviewWindow,prov
     let reserve=spec.protocol_reserve+(count as f64*spec.estimate_safety_ratio).ceil() as usize;
     let output=128.min(spec.max_output_tokens);
     service::check_final_budget(count,output,reserve,spec.context_window)?;
-    let context=service::ValidatedContext {messages_hash:format!("{:x}",sha2::Sha256::digest(serde_json::to_vec(&messages).map_err(|error|error.to_string())?)),model_spec_id:spec.identity()?,settings_revision:String::new(),document_id:"configuration-validation".into(),session_id:"configuration-validation".into(),window_id:"configuration-validation".into(),used_memory_ids:vec![],omitted_sources:vec![],summaries:vec![],source_anchors:vec![],messages,prompt_tokens:count,requested_output_tokens:output,protocol_reserve:reserve,context_window:spec.context_window,count_method:spec.count_method.clone()};
+    let context=service::ValidatedContext {messages_hash:format!("{:x}",sha2::Sha256::digest(serde_json::to_vec(&messages).map_err(|error|error.to_string())?)),model_spec_id:spec.identity()?,settings_revision:String::new(),document_id:None,session_id:"configuration-validation".into(),window_id:"configuration-validation".into(),used_memory_ids:vec![],omitted_sources:vec![],summaries:vec![],source_anchors:vec![],messages,prompt_tokens:count,requested_output_tokens:output,protocol_reserve:reserve,context_window:spec.context_window,count_method:spec.count_method.clone()};
     let usage=crate::ai::stream_completion(&provider,&key,&context,Some("fast"),cancellation,|_|Ok(())).await?;
     crate::fs_api::modify_settings(|settings| {
         if let Some(records)=settings.pointer_mut("/ai/token_counting_invalidations").and_then(serde_json::Value::as_object_mut) {records.remove(&context.model_spec_id);}

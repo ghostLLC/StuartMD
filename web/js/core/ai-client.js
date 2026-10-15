@@ -1,6 +1,6 @@
 (function (global) {
   "use strict";
-  const state = { ai: null };
+  const state = { ai: null, settingsRevision: null };
   function api() {
     const bridge = global.pywebview?.api;
     if (!bridge) throw new Error("原生接口尚未加载");
@@ -15,6 +15,8 @@
     const result = checked(await api().ai_get_config());
     if (!result.ai) throw new Error("AI设置响应缺少配置");
     state.ai = result.ai;
+    if (!result.settingsRevision) throw new Error("AI设置响应缺少配置版本");
+    state.settingsRevision = result.settingsRevision;
     return state.ai;
   }
   async function saveAi(next) {
@@ -26,6 +28,7 @@
     }
     if (!result.ok || !result.ai) throw new Error("AI设置没有完成保存");
     state.ai = result.ai;
+    state.settingsRevision = result.settingsRevision;
     if (!result.ai.enabled) await global.StuartAIService.cancel();
     return result;
   }
@@ -48,20 +51,17 @@
     const text = String(content ?? "");
     if (!text.trim()) throw new Error("记忆正文为空");
     const current = global.StuartMD.getDocument();
-    const now = Date.now(), memoryId = crypto.randomUUID();
-    const workspace = Object.hasOwn(metadata, "workspaceRoot") ? metadata.workspaceRoot : global.StuartMD.state.workspaceRoot || null;
-    const documentId = metadata.documentId || current.documentId;
-    const item = {
-      memoryId, tier: metadata.category === "preference" ? 3 : 2, category: metadata.category || "note", content: text,
-      confidence: 1, createdAt: now, lastAccessedAt: now, accessCount: 0, pinned: false,
-      scope: metadata.category === "preference" ? "global" : "document", workspaceId: metadata.category === "preference" ? null : workspace,
-      documentId: metadata.category === "preference" ? null : documentId, preferenceKey: metadata.preferenceKey || null,
-      version: metadata.version || 1, sourceMessageId: metadata.sourceMessageId || null,
-      sourceAnchor: metadata.sourceAnchor || { documentId, path: current.path, revision: current.revision, createdBy: "manual-confirmation" },
-      confirmed: true, supersededBy: null, requestId: metadata.requestId || null,
-    };
-    await api().organic_memory_upsert(item);
-    return { ok: true, memoryId };
+    const target = global.StuartAIService.snapshot.target;
+    const scope = metadata.scope || (metadata.category === "preference" ? "global" : "document");
+    const edit = { content: text, category: metadata.category || "note", scope,
+      workspaceKey: scope === "global" ? null : metadata.workspaceKey ?? target?.workspaceKey ?? null,
+      documentKey: scope === "document" ? metadata.documentKey ?? target?.documentKey : null,
+      preferenceKey: metadata.preferenceKey || null, pinned: metadata.pinned || false,
+      sourceMessageId: metadata.sourceMessageId || null, sourceRequestId: metadata.requestId || null,
+      sourceAnchor: metadata.sourceAnchor || { documentId: current.documentId, path: current.path,
+        revision: current.revision, createdBy: "manual-confirmation" } };
+    const saved = await api().companion_save_memory(metadata.recordId || null, metadata.expectedVersion || 0, edit);
+    return { ok: true, memoryId: saved.memoryId, recordId: saved.recordId, version: saved.version };
   }
   async function recordStyleFeedback(kind) {
     if (!["short", "ok", "long"].includes(kind)) throw new Error("回答长度反馈类型无效");
@@ -69,26 +69,25 @@
     const feedback = { ...style.feedback, [kind]: (style.feedback[kind] || 0) + 1 };
     const hint = global.StuartAIContext.lengthHintFromFeedback(feedback, style.length);
     const result = await saveStyle({ feedback, length_hint: hint });
-    if (cfg.memory_mode !== "off") {
-      const effective = await api().organic_memory_effective(null, null);
-      const previous = effective.find(item => item.preferenceKey === "answer-length");
-      await rememberSnippet(hint || "保持当前回答长度。", { category: "preference", preferenceKey: "answer-length", version: (previous?.version || 0) + 1 });
+    if (cfg.use_saved_memories) {
+      const effective = await api().companion_list_memories({ scope: "global", preferenceKey: "answer-length", limit: 1 });
+      const previous = effective.items[0];
+      await rememberSnippet(hint || "保持当前回答长度。", { category: "preference", preferenceKey: "answer-length",
+        recordId: previous?.recordId, expectedVersion: previous?.version || 0,
+        sourceMessageId: previous?.sourceMessageId, requestId: previous?.requestId, sourceAnchor: previous?.sourceAnchor });
     }
     return result;
   }
   async function handleMemoryAfterExplain(metadata, quote, answer) {
     const cfg = await ensureConfig(true);
-    if (cfg.memory_mode === "off") return { skipped: true };
-    if (cfg.memory_mode === "ask") return { ok: true, mode: "ask", ask: true };
+    if (cfg.learning_policy === "off") return { skipped: true };
+    if (cfg.learning_policy === "ask") return { ok: true, mode: "ask", ask: true };
     if (!metadata.sessionId || !metadata.requestId) throw new Error("学习记录缺少会话或请求编号");
     const messages = await api().session_get_messages(metadata.sessionId);
     const source = messages.find(message => message.requestId === metadata.requestId && message.role === "assistant" && message.completionStatus === "Completed");
     if (!source || source.content !== answer) throw new Error("学习正文与已经保存的完整回答不一致");
-    await rememberSnippet(`问题及引用：\n${quote}\n\n完整回答：\n${answer}`, {
-      ...metadata, category: "concept", preferenceKey: "learning:" + metadata.requestId, sourceMessageId: source.messageId,
-      sourceAnchor: { ...metadata.sourceAnchor, sessionId: metadata.sessionId, requestId: metadata.requestId, sourceHash: source.sourceHash },
-    });
-    return { ok: true, mode: "always" };
+    const learned = await api().companion_learn_request(metadata.requestId);
+    return { ok: true, mode: "automatic", ...learned };
   }
   global.StuartAI = { state, get config() { return state.ai; }, ensureConfig, saveAi, getStyle, saveStyle,
     recordStyleFeedback, setApiKey, clearApiKey, testProvider, activeProvider, rememberSnippet, handleMemoryAfterExplain,

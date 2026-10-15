@@ -7,10 +7,14 @@ if ($LASTEXITCODE -ne 0) { throw '创建实际验证记录失败' }
 function Test-DocumentModules {
     npm test
     if ($LASTEXITCODE -ne 0) { throw '前端文档模块测试失败' }
+    npm run test:companion
+    if ($LASTEXITCODE -ne 0) { throw '伴读语法、实际文档渲染及来源协议检查失败' }
     cargo test --manifest-path "$workspace/tauri/src-tauri/Cargo.toml" --locked -- --test-threads=1
     if ($LASTEXITCODE -ne 0) { throw 'Rust真实文件与数据库测试失败' }
     cargo test --manifest-path "$workspace/tests/native-documents/Cargo.toml" --locked -- --test-threads=1 --nocapture
     if ($LASTEXITCODE -ne 0) { throw '实际多进程、权限及异常恢复测试失败' }
+    node "$workspace/tests/repair-companion-store.cjs"
+    if ($LASTEXITCODE -ne 0) { throw '实际SQLite草稿的共享状态与身份迁移检查失败' }
 }
 try {
     switch ($Mode) {

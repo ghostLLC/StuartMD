@@ -31,7 +31,7 @@ fn actual_pdf_annotations_render_edit_and_preserve_rotation_cropbox() {
     let repeated_annotations=page_annotations(&repeated,repeated.get_pages()[&1]).unwrap();
     assert_eq!(repeated_annotations.len(),1);
     assert_eq!(repeated.dereference(&repeated_annotations[0]).unwrap().1.as_dict().unwrap().get(b"Contents").unwrap(),&pdf_text("再次写入的实际评论"));
-    let pdfium=Pdfium::new(Pdfium::bind_to_library(root.join("resources/native/bin/pdfium.dll")).unwrap());
+    let pdfium=crate::document::pdf_runtime::pdfium(&root.join("resources/native")).unwrap();
     let parsed=pdfium.load_pdf_from_byte_slice(&bytes,None).unwrap();
     let mut rendered=Vec::new();
     for number in [1,4,5] {
@@ -55,7 +55,7 @@ fn actual_pdf_annotations_render_edit_and_preserve_rotation_cropbox() {
     let verified_path=directory.join("verified.pdf");std::fs::copy(&path,&verified_path).unwrap();
     let external=std::fs::read(fixture()).unwrap();std::fs::write(&path,&external).unwrap();
     let conflict=service.save_pdf_annotations("pdf-verification",&read.document_id,&annotations).unwrap();assert_eq!(conflict.result,super::super::SaveStatus::Conflict);assert_eq!(std::fs::read(&path).unwrap(),external);
-    std::fs::write(root.join("docs/validation/3.5.11/pdf-annotation-results.json"),serde_json::to_vec_pretty(&serde_json::json!({"path":verified_path,"conflictPath":path,"rendered":rendered,"nativeEdit":true,"conflictPreserved":true,"passed":true})).unwrap()).unwrap();
+    std::fs::write(root.join("docs/validation/3.5.12/pdf-annotation-results.json"),serde_json::to_vec_pretty(&serde_json::json!({"path":verified_path,"conflictPath":path,"rendered":rendered,"nativeEdit":true,"conflictPreserved":true,"passed":true})).unwrap()).unwrap();
 }
 
 #[test]

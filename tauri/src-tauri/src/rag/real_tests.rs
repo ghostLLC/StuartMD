@@ -14,7 +14,7 @@ fn cosine(left:&[f32],right:&[f32])->f32 {left.iter().zip(right).map(|(left,righ
 #[tokio::test]
 #[ignore = "使用真实 ONNX 模型，由 Models 验收命令执行"]
 async fn actual_models_produce_normalized_multilingual_semantic_vectors() {
-    let reference:Value=serde_json::from_slice(&std::fs::read(workspace().join("docs/validation/3.5.11/model-reference.json")).expect("需要先执行独立ONNX Runtime参考计算")).unwrap();
+    let reference:Value=serde_json::from_slice(&std::fs::read(workspace().join("docs/validation/3.5.12/model-reference.json")).expect("需要先执行独立ONNX Runtime参考计算")).unwrap();
     let texts=vec!["如何保存文档并恢复未保存的修改？".to_owned(),"文档保存和草稿恢复的使用说明".to_owned(),"天文学介绍恒星、行星和银河系".to_owned(),"Instructions for saving documents and recovering unsaved edits".to_owned()];
     let mut evidence=Vec::new();
     for model in ["BAAI/bge-m3","sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"] {
@@ -37,7 +37,7 @@ async fn actual_models_produce_normalized_multilingual_semantic_vectors() {
         evidence.push(json!({"model":spec,"referenceCosines":reference_cosines,"relatedCosine":related,"unrelatedCosine":unrelated,"translatedCosine":translated,"vectors":vectors}));
         engine.unload().await;
     }
-    std::fs::write(workspace().join("docs/validation/3.5.11/actual-models.json"),serde_json::to_vec_pretty(&evidence).unwrap()).unwrap();
+    std::fs::write(workspace().join("docs/validation/3.5.12/actual-models.json"),serde_json::to_vec_pretty(&evidence).unwrap()).unwrap();
 }
 
 fn normalized(text:&str)->String {text.chars().filter(|character|!character.is_whitespace()).collect::<String>().to_lowercase()}
@@ -82,8 +82,8 @@ fn actual_pdf_native_ocr_rotation_cropbox_and_sources() {
     assert!(pdf_extract::extract_pdf_with_output(&fixtures.join("corrupt.pdf"),&native,&AtomicBool::new(false),&output("corrupt")).is_err());
     let low=pdf_extract::extract_pdf_with_output(&fixtures.join("low-confidence.pdf"),&native,&AtomicBool::new(false),&output("low"));
     match low {Ok(data)=>assert!(data.pages.iter().any(|page|page.needs_review)),Err(error)=>assert!(error.contains("没有有效文字"),"{error}")}
-    std::fs::write(workspace().join("docs/validation/3.5.11/actual-pdf.json"),serde_json::to_vec_pretty(&data).unwrap()).unwrap();
-    std::fs::write(workspace().join("docs/validation/3.5.11/pdf-source-measurements.json"),serde_json::to_vec_pretty(&measurements).unwrap()).unwrap();
+    std::fs::write(workspace().join("docs/validation/3.5.12/actual-pdf.json"),serde_json::to_vec_pretty(&data).unwrap()).unwrap();
+    std::fs::write(workspace().join("docs/validation/3.5.12/pdf-source-measurements.json"),serde_json::to_vec_pretty(&measurements).unwrap()).unwrap();
 }
 
 #[tokio::test]
@@ -138,6 +138,6 @@ async fn actual_generation_retains_valid_index_on_cancel_and_file_changes() {
     std::fs::write(root.join("invalid.pdf"),std::fs::read(workspace().join("tests/fixtures/pdf/corrupt.pdf")).unwrap()).unwrap();
     let partial=generation::build_generation(&root,&config,&engine,&cancel,&uuid::Uuid::new_v4().to_string(),|_|{}).await.unwrap();assert_eq!(partial.summary.status,"Partial");assert_eq!(partial.summary.failed_files.len(),1);
     let evidence=json!({"root":root,"first":first.summary,"updated":next.summary,"partial":partial.summary,"switched":switched.summary,"cancelDuringIndex":true,"sourceChangedDuringIndex":true,"pdfSourceReturned":true});
-    std::fs::write(workspace().join("docs/validation/3.5.11/actual-generations.json"),serde_json::to_vec_pretty(&evidence).unwrap()).unwrap();
+    std::fs::write(workspace().join("docs/validation/3.5.12/actual-generations.json"),serde_json::to_vec_pretty(&evidence).unwrap()).unwrap();
     engine.unload().await;
 }

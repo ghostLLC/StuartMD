@@ -2,6 +2,7 @@ pub mod encoding;
 pub mod identity;
 pub mod journal;
 pub mod pdf_annotations;
+pub(crate) mod pdf_runtime;
 pub mod save;
 
 pub use identity::DiskRevision;
@@ -16,6 +17,8 @@ use std::sync::Mutex;
 #[serde(rename_all = "camelCase")]
 pub struct DocumentReadResult {
     pub document_id: String,
+    #[serde(default)]
+    pub document_key: String,
     pub kind: String,
     pub path: Option<String>,
     pub name: String,
@@ -135,7 +138,11 @@ impl DocumentService {
     }
 
     fn read_result(document_id: &str, state: &DocumentState) -> DocumentReadResult {
-        DocumentReadResult { document_id: document_id.into(), kind: state.kind.clone(), path: state.path.as_ref().map(|path| identity::display_path(path)), name: state.path.as_ref().and_then(|path| path.file_name()).map(|name| name.to_string_lossy().into_owned()).unwrap_or_else(|| "未保存文档.md".into()), source: state.source.clone(), content: state.source.clone(), encoding: state.encoding.clone(), bom: state.bom, disk_revision: state.disk_revision.clone(), access_state: if state.source.is_some() || state.kind == "pdf" { "Editable" } else { "EncodingConfirmationRequired" }.into(), encoding_candidates: if state.source.is_none() && state.kind == "markdown" { encoding::candidates(&state.bytes) } else { vec![] }, default_separator: default_separator(state.source.as_deref().unwrap_or("")) }
+        let document_key = match &state.path {
+            Some(path) => format!("file:{}", identity::display_path(path)),
+            None => format!("draft:{document_id}"),
+        };
+        DocumentReadResult { document_id: document_id.into(), document_key, kind: state.kind.clone(), path: state.path.as_ref().map(|path| identity::display_path(path)), name: state.path.as_ref().and_then(|path| path.file_name()).map(|name| name.to_string_lossy().into_owned()).unwrap_or_else(|| "未保存文档.md".into()), source: state.source.clone(), content: state.source.clone(), encoding: state.encoding.clone(), bom: state.bom, disk_revision: state.disk_revision.clone(), access_state: if state.source.is_some() || state.kind == "pdf" { "Editable" } else { "EncodingConfirmationRequired" }.into(), encoding_candidates: if state.source.is_none() && state.kind == "markdown" { encoding::candidates(&state.bytes) } else { vec![] }, default_separator: default_separator(state.source.as_deref().unwrap_or("")) }
     }
 
     pub(crate) fn state(&self, owner: &str, document_id: &str) -> Result<DocumentState, String> {
@@ -204,6 +211,16 @@ impl DocumentService {
         let state = self.state(owner, document_id)?;
         let content_hash = if state.kind == "pdf" { identity::sha256(&state.bytes) } else { identity::sha256(state.current_source.as_bytes()) };
         Ok(DocumentContextSnapshot { document_id: document_id.into(), kind: state.kind, path: state.path.as_ref().map(|path| identity::display_path(path)), source: state.current_source, revision: state.current_editor_revision, content_hash, disk_revision: state.disk_revision })
+    }
+
+    pub fn document_key(document: &DocumentContextSnapshot) -> Result<String, String> {
+        match &document.path {
+            Some(path) => Ok(format!("file:{}", identity::display_path(&identity::canonical_target(Path::new(path))?))),
+            None => {
+                uuid::Uuid::parse_str(&document.document_id).map_err(|_| "恢复草稿身份无效")?;
+                Ok(format!("draft:{}", document.document_id))
+            }
+        }
     }
 }
 
