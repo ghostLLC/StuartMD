@@ -221,7 +221,7 @@ fn start_config(window:tauri::WebviewWindow,documents:&crate::document::Document
     let owner=window.label().to_owned();let rid=intent.request_id.clone();let cancellation=CancellationToken::new();
     let storage=crate::memory::get_archive_storage()?;
     let accepted={let mut registry=super::REQUESTS.lock().map_err(|_|"AI 请求锁损坏")?;
-        super::configuration::ensure_connection_available(provider["connection_id"].as_str().ok_or("模型连接编号缺失")?)?;
+        super::configuration::ensure_request_current(&provider)?;
         if registry.contains_key(&rid) || registry.values().any(|request|request.window_id==owner && !super::terminal(&request.status)){return Err("当前窗口已有活动请求，或请求编号已经使用".into());}
         if registry.len()>=512 {let mut archived:Vec<_>=registry.iter().filter(|(_,request)|super::terminal(&request.status)).map(|(id,request)|(id.clone(),request.created_at)).collect();archived.sort_by_key(|(_,created)|*created);for (id,_) in archived.into_iter().take(256){registry.remove(&id);}}
         let accepted=storage.begin_turn(&intent)?;context.session_id=accepted.session.session_id.clone();
@@ -359,15 +359,13 @@ async fn learn(window:&tauri::WebviewWindow,rid:&str)->Result<Value,String> {
     if record["status"].as_str()!=Some("Completed") {return Err("整理需要真实已完成答案".into());}
     let context=record["context"].clone();
     let snapshot=super::configuration::load_ai_configuration()?;
-    let captured=super::configuration::capture_request_model(snapshot.ai.active_model_id.as_deref().ok_or("请添加并选择模型")?,&snapshot.settings_revision)?;
-    let provider=captured.model.provider_value()?;
-    let config=serde_json::to_value(snapshot.ai).map_err(|e|e.to_string())?;
+    let model=snapshot.ai.models.iter().find(|model|Some(&model.id)==snapshot.ai.active_model_id.as_ref()).ok_or("请添加并选择模型")?;
     let target=ConversationTarget{document_key:session.document_key.clone(),workspace_key:session.workspace_key.clone(),runtime_document_id:session.document_id.clone(),window_id:window.label().into()};
     let probe={
         let mut tasks=LEARNING_TASKS.lock().map_err(|_|"记忆整理任务锁损坏")?;
         if tasks.contains_key(rid){return Err("当前答案已经正在整理记忆".into());}
         storage.set_request_learning_status(rid,window.label(),"Running",None)?;
-        let probe=match super::begin_provider_probe(window.label(),&captured.model.connection.id) {
+        let probe=match super::begin_provider_probe(window.label(),&model.provider_id) {
             Ok(probe)=>probe,
             Err(error)=>{storage.set_request_learning_status(rid,window.label(),"Failed",Some(&error))?;window.emit("learningChanged",json!({"requestId":rid,"sessionId":session.session_id,"target":target,"status":"Failed","error":error})).map_err(|e|e.to_string())?;return Err(error);}
         };
@@ -375,6 +373,9 @@ async fn learn(window:&tauri::WebviewWindow,rid:&str)->Result<Value,String> {
     };
     let _guard=LearningGuard{request_id:rid.into()};
     let result=async {
+        let captured=super::configuration::capture_request_model(&model.id,&snapshot.settings_revision)?;
+        let provider=captured.model.provider_value()?;
+        let config=serde_json::to_value(&captured.ai).map_err(|e|e.to_string())?;
         window.emit("learningChanged",json!({"requestId":rid,"sessionId":session.session_id,"target":target,"status":"Running"})).map_err(|e|e.to_string())?;
         let source=storage.get_session_messages(&session.session_id)?.into_iter().find(|message|message.request_id.as_deref()==Some(rid) && message.role=="assistant" && message.completion_status=="Completed").ok_or("整理缺少真实归档答案")?;
         let key=&captured.key;

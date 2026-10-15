@@ -34,7 +34,7 @@ impl AiModelCatalog {
 }
 impl CatalogModel {
     pub fn validate_thinking(&self, thinking: &str) -> Result<(), String> {
-        if thinking == "off" && self.thinking == "optional" || thinking == "on" && self.efforts.is_empty() || self.efforts.iter().any(|value| value == thinking) { Ok(()) }
+        if thinking == "default" || thinking == "off" && self.thinking == "optional" || thinking == "on" && self.efforts.is_empty() || self.efforts.iter().any(|value| value == thinking) { Ok(()) }
         else { Err(format!("{} 不支持所选思考参数：{thinking}", self.display_name)) }
     }
     pub fn counting(&self, region: &str) -> Result<Value, String> {

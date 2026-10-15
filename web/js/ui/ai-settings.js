@@ -1,6 +1,6 @@
 (function (global) {
   "use strict";
-  const labels = { off: "关闭思考", on: "开启思考", low: "较低强度", high: "较高强度", max: "最高强度" };
+  const labels = { default: "服务默认", off: "关闭思考", on: "开启思考", low: "较低强度", high: "较高强度", max: "最高强度" };
   const text = (tag, value, className) => { const element = document.createElement(tag); element.textContent = value; if (className) element.className = className; return element; };
   function input(type, value = "") { const control = document.createElement("input"); control.type = type; control.value = value; return control; }
   function select(choices, value) { const control = document.createElement("select"); for (const [id, label] of choices) { const option = text("option", label); option.value = id; control.append(option); } control.value = value; return control; }
@@ -61,7 +61,7 @@
     function editorForm(title, kind, id) {
       const form = document.createElement("form"); form.className = "ai-editor"; form.dataset.kind = kind;
       const error = text("div", "", "ai-model-notice"); error.dataset.error = ""; error.setAttribute("role", "status");
-      const reload = button("重新加载此表单", async () => { if (!await discardEditor()) return; if (kind === "model") await openModel(id); else if (kind === "connection") await openConnection(id); else await openAdd(); }); reload.hidden = true;
+      const reload = button("重新加载此表单", async () => { await client().ensureConfig(true); if (!await discardEditor()) return; refresh(client().snapshot); if (kind === "model") await openModel(id); else if (kind === "connection") await openConnection(id); else await openAdd(); }); reload.hidden = true;
       form.append(text("h4", title), error, reload); editorHost.replaceChildren(form);
       editor = { kind, id, revision: snapshot.settingsRevision, dirty: false, form, reload, error };
       form.addEventListener("input", event => { if (!event.target.dataset.changesProvider) editor.dirty = true; });
@@ -69,7 +69,7 @@
       return form;
     }
     function saveButton(form, action) {
-      const save = button("保存", async () => { try { await action(); closeEditor(); notice.textContent = "设置已经保存"; } catch (error) { if (String(error.message || error).includes("SettingsVersionConflict")) editor.reload.hidden = false; throw error; } }, true); save.dataset.save = "true";
+      const save = button("保存", async () => { try { await action(); closeEditor(); refresh(client().snapshot); notice.textContent = "设置已经保存"; } catch (error) { if (String(error.message || error).includes("SettingsVersionConflict")) editor.reload.hidden = false; throw error; } }, true); save.dataset.save = "true";
       const actions = document.createElement("div"); actions.className = "ai-row-actions"; actions.append(button("取消", () => discardEditor()), save); form.append(actions);
       return save;
     }
@@ -80,7 +80,7 @@
       const form = editorForm("编辑模型", "model", id), original = structuredClone(model), cap = capability(model);
       const name = input("text", model.display_name), apiName = input("text", model.model_id), output = input("number", model.max_output_tokens);
       name.required = true; apiName.required = true; output.min = "1"; output.step = "1"; if (cap) { apiName.readOnly = true; output.max = String(cap.output_limit); }
-      const choices = cap ? [...(cap.thinking === "optional" ? ["off"] : []), ...(cap.efforts.length ? cap.efforts : ["on"])] : ["off", "on", "low", "high", "max"];
+      const choices = cap ? ["default", ...(cap.thinking === "optional" ? ["off"] : []), ...(cap.efforts.length ? cap.efforts : ["on"])] : ["default", "off", "on", "low", "high", "max"];
       const thinking = select(choices.map(value => [value, labels[value]]), model.thinking);
       const counting = countingFields(model.token_counting), request = requestFields(model.overrides);
       form.append(field("显示名称", name), field("API 型号", apiName), field("思考方式", thinking), field("输出预算 Token", output), text("p", cap ? `上下文 ${cap.context_window.toLocaleString()} Token · 输出上限 ${cap.output_limit.toLocaleString()} Token` : "此型号的容量与参数使用保存的高级配置。", "hint small"), counting.box);
@@ -100,17 +100,20 @@
       if (!await discardEditor()) return;
       const form = editorForm("添加模型", "add", null), types = [...new Map(snapshot.catalog.providers.map(p => [p.type, p.label]))], provider = select([...types, ["custom", "自定义 OpenAI 兼容服务"]], types[0][0]);
       provider.dataset.changesProvider = "true";
-      const region = select([], ""), area = document.createElement("div"); region.dataset.changesProvider = "true";
-      form.append(field("服务商", provider), field("服务区域", region), area);
-      let selectedProvider = provider.value, selectedRegion = "";
+      const region = select([], ""), connection = select([], ""), connectionField = field("自定义服务连接", connection), area = document.createElement("div"); region.dataset.changesProvider = "true"; connection.dataset.changesProvider = "true"; connection.setAttribute("aria-label", "自定义服务连接");
+      form.append(field("服务商", provider), field("服务区域", region), connectionField, area);
+      let selectedProvider = provider.value, selectedRegion = "", selectedConnection = "";
       function fillRegions() { region.replaceChildren(); for (const item of snapshot.catalog.providers.filter(p => p.type === provider.value)) { const option = text("option", item.region_label); option.value = item.region; region.append(option); } if (provider.value === "custom") { const option = text("option", "自定义"); option.value = "custom"; region.append(option); } selectedRegion = region.value; }
+      function fillConnections() { connection.replaceChildren(); const create = text("option", "新建独立连接"); create.value = ""; connection.append(create); for (const item of snapshot.ai.providers.filter(item => item.type === "custom")) { const option = text("option", `${item.label} · ${item.base_url}`); option.value = item.id; connection.append(option); } selectedConnection = ""; connectionField.hidden = provider.value !== "custom"; }
       function renderArea() {
         area.replaceChildren(); form.querySelector(".ai-row-actions")?.remove();
-        const existing = snapshot.ai.providers.find(p => p.type === provider.value && p.region === region.value), key = input("password"); key.autocomplete = "new-password"; key.placeholder = existing?.key_set ? "已保存；留空继续使用" : "请输入 API Key";
+        const existing = provider.value === "custom" ? snapshot.ai.providers.find(p => p.id === connection.value) : snapshot.ai.providers.find(p => p.type === provider.value && p.region === region.value), key = input("password"); key.autocomplete = "new-password"; key.placeholder = existing?.key_set ? "已保存；留空继续使用" : "请输入 API Key";
         const providerSpec = snapshot.catalog.providers.find(p => p.type === provider.value && p.region === region.value), name = input("text", existing?.label || providerSpec?.label || "自定义服务"), base = input("url", existing?.base_url || ""), customName = input("text"), advanced = countingFields(null), request = requestFields();
+        const displayName = input("text"), output = input("number", 1024), thinking = select(Object.entries(labels), "default"), additional = input("checkbox"); output.min = "1"; output.step = "1"; output.setAttribute("aria-label", "输出预算 Token");
+        const advancedModel = document.createElement("details"); advancedModel.className = "ai-advanced"; advancedModel.append(text("summary", "添加其他型号"), field("同时添加此型号", additional), field("API 型号", customName), field("显示名称（可选）", displayName), field("思考方式", thinking), field("输出预算 Token", output), advanced.box, request.box);
         area.append(field("API Key", key), text("p", existing?.key_set ? "使用此连接已经保存的密钥，所选模型将共用此连接。" : "填写一次密钥后，可以同时添加多个模型。", "hint small"));
         const selected = new Set(), rows = document.createElement("div"); rows.className = "ai-catalog-options";
-        if (provider.value === "custom") { area.append(field("连接名称", name), field("API 地址", base), field("API 型号", customName), advanced.box, request.box); }
+        if (provider.value === "custom") { advancedModel.open = true; advancedModel.querySelector("summary").textContent = "自定义型号配置"; additional.checked = true; additional.closest("label").hidden = true; area.append(field("连接名称", name), field("API 地址", base), advancedModel); }
         else {
           const query = input("search"); query.placeholder = "搜索此服务商的模型"; query.setAttribute("aria-label", "搜索可添加模型"); area.append(query, rows);
           const available = snapshot.catalog.models.filter(m => m.provider_type === provider.value && m.regions.includes(region.value));
@@ -121,23 +124,27 @@
           }
           query.addEventListener("input", () => { for (const row of rows.children) row.hidden = !row.dataset.search.includes(query.value.trim().toLowerCase()); });
           area.append(text("p", `官方目录 · ${snapshot.catalog.verified_at} 核对。模型是否可调用取决于账号权限与实际验证。`, "hint small"));
-          if (existing?.discovered) for (const model of existing.discovered.models.filter(model => !available.some(item => item.model_id === model.modelId))) rows.append(text("div", `${model.modelId} · ${model.configurationStatus}`, "ai-model-meta"));
+          if (existing?.discovered) for (const model of existing.discovered.models.filter(model => !available.some(item => item.model_id === model.modelId))) rows.append(button(`${model.modelId} · 配置此型号`, () => { customName.value = model.modelId; additional.checked = true; advancedModel.open = true; editor.dirty = true; customName.focus(); }));
+          area.append(advancedModel);
         }
         saveButton(form, async () => {
-          let entries;
-          if (provider.value === "custom") { if (!customName.value.trim()) throw new Error("请填写 API 型号"); const counting = advanced.read(); if (!counting) throw new Error("自定义模型需要填写高级计数资料"); entries = [{ model_id: customName.value.trim(), token_counting: counting, overrides: request.read() }]; }
-          else { if (!selected.size) throw new Error("请勾选需要保存的模型"); entries = [...selected].map(model_id => ({ model_id })); }
-          const result = await client().updateConfig({ kind: "saveProviderModels", connection: { id: existing?.id || null, provider_type: provider.value, region: region.value, label: provider.value === "custom" ? name.value.trim() : providerSpec.label, base_url: provider.value === "custom" ? base.value.trim() : null }, models: entries, api_key: key.value || null }, editor.revision);
-          key.value = ""; const first = result.ai.models.find(m => entries.some(entry => entry.model_id === m.model_id) && result.ai.providers.find(p => p.id === m.provider_id)?.type === provider.value); models.querySelector(`[data-model-id="${first?.id}"]`)?.focus();
+          const entries = [...selected].map(model_id => ({ model_id }));
+          if (additional.checked) { if (!customName.value.trim()) throw new Error("请填写 API 型号"); const counting = advanced.read(); if (!counting) throw new Error("目录外型号需要填写高级计数资料"); const budget = Number(output.value); if (!Number.isSafeInteger(budget) || budget <= 0 || budget > counting.max_output_tokens || budget >= counting.context_window) throw new Error("输出预算必须在模型容量范围内"); entries.push({ model_id: customName.value.trim(), display_name: displayName.value.trim() || null, thinking: thinking.value, max_output_tokens: budget, token_counting: counting, overrides: request.read() }); }
+          if (!entries.length) throw new Error("请勾选需要保存的模型或填写其他型号");
+          const previousIds = new Set(snapshot.ai.providers.map(item => item.id));
+          const result = await client().updateConfig({ kind: "saveProviderModels", connection: { id: existing?.id || null, provider_type: provider.value, region: existing?.region || region.value, label: provider.value === "custom" ? name.value.trim() : providerSpec.label, base_url: provider.value === "custom" ? base.value.trim() : null }, models: entries, api_key: key.value || null }, editor.revision);
+          const savedConnection = existing?.id || result.ai.providers.find(item => !previousIds.has(item.id))?.id;
+          key.value = ""; const first = result.ai.models.find(m => m.provider_id === savedConnection && entries.some(entry => entry.model_id === m.model_id)); models.querySelector(`[data-model-id="${first?.id}"]`)?.focus();
         });
       }
       async function providerChanged(event) {
         if (editor.dirty && !await global.StuartUIConfirm("切换服务商或区域会丢弃当前添加表单中的输入，确认继续吗？")) { provider.value = selectedProvider; region.value = selectedRegion; return; }
-        if (event.target === provider) fillRegions();
+        if (event.target === provider) { fillRegions(); fillConnections(); }
         selectedProvider = provider.value; selectedRegion = region.value; editor.dirty = false; renderArea();
       }
       provider.addEventListener("change", event => providerChanged(event).catch(error => { editor.error.textContent = error.message || String(error); })); region.addEventListener("change", event => providerChanged(event).catch(error => { editor.error.textContent = error.message || String(error); }));
-      fillRegions(); renderArea(); provider.focus();
+      connection.addEventListener("change", () => { Promise.resolve().then(async () => { if (editor.dirty && !await global.StuartUIConfirm("切换连接会丢弃当前输入，确认继续吗？")) { connection.value = selectedConnection; return; } selectedConnection = connection.value; editor.dirty = false; renderArea(); }).catch(error => { editor.error.textContent = error.message || String(error); }); });
+      fillRegions(); fillConnections(); renderArea(); provider.focus();
     }
     function renderLists() {
       const focused = document.activeElement?.dataset.actionId, query = search.value.trim().toLocaleLowerCase(); models.replaceChildren(); connections.replaceChildren();
@@ -177,7 +184,7 @@
       const scope = select([["selection", "选中内容"], ["section", "当前章节"], ["document", "整篇文档"], ["workspace", "工作区资料"]], config.context_scope), learning = select([["off", "关闭"], ["ask", "询问"], ["automatic", "自动整理"]], config.learning_policy);
       const length = select([["brief", "简短"], ["normal", "适中"], ["detailed", "详细"]], original.length), tone = select([["neutral", "中性"], ["friendly", "亲切"], ["professional", "专业"], ["academic", "学术"]], original.tone), custom = document.createElement("textarea"), hint = document.createElement("textarea"); custom.rows = 3; custom.value = original.custom; hint.rows = 2; hint.value = original.length_hint;
       const error = text("div", "", "ai-model-notice"); error.dataset.error = ""; error.setAttribute("role", "status");
-      const reload = button("重新加载对话偏好", async () => { if (preferencesDraft.dirty && !await global.StuartUIConfirm("确认丢弃未保存的对话偏好吗？")) return; preferencesDraft = null; renderPreferences(); }); reload.hidden = true;
+      const reload = button("重新加载对话偏好", async () => { await client().ensureConfig(true); if (preferencesDraft.dirty && !await global.StuartUIConfirm("确认丢弃未保存的对话偏好吗？")) return; snapshot = client().snapshot; preferencesDraft = null; renderLists(); renderPreferences(); }); reload.hidden = true;
       preferencesDraft = { dirty: false, revision, error, reload };
       const shortcutField = field("问答快捷键", shortcut); shortcutField.append(button("录入快捷键", () => { global.StuartAIUI.uiState.recordingShortcut = true; shortcut.focus(); shortcut.placeholder = "请按下快捷键，Escape 取消"; }));
       preferences.append(field("启用 AI", enabled), shortcutField, field("默认材料范围", scope), field("使用已有记忆", memories), field("整理新记忆", learning), field("回答长度", length), field("回答语气", tone), field("风格说明", custom), field("长度提示", hint), error, reload, button("保存对话偏好", async () => {

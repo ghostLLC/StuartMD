@@ -94,6 +94,20 @@ impl Drop for CredentialMutation {
 pub fn ensure_connection_available(id:&str)->Result<(),String> {
     if MUTATING_CREDENTIALS.lock().map_err(|_|"凭据操作锁损坏")?.contains(id) {Err("服务商连接正在修改，请稍后重新发送".into())}else{Ok(())}
 }
+pub fn ensure_request_current(provider:&Value)->Result<(),String> {
+    let id=provider["connection_id"].as_str().ok_or("模型连接编号缺失")?;
+    ensure_connection_available(id)?;
+    crate::fs_api::with_settings_checked(|settings| {
+        let config:AiConfig=serde_json::from_value(settings["ai"].clone()).map_err(|e|e.to_string())?;
+        if config.preferences.get("enabled").and_then(Value::as_bool)!=Some(true) {return Err("AIDisabled".into());}
+        let model=config.models.iter().find(|model|Some(model.id.as_str())==provider["model_config_id"].as_str()).ok_or("模型已经删除，请重新选择")?;
+        let connection=config.providers.iter().find(|connection|connection.id==id).ok_or("连接已经删除，请重新选择")?;
+        if !model.enabled || !connection.enabled {return Err("所选模型或连接已经停用".into());}
+        let current=resolve_model(&config,&model.id,&load_catalog()?)?.provider_value()?;
+        if ["connection_id","base_url","credential_ref","credential_revision"].iter().any(|field|current[*field]!=provider[*field]) {return Err("SettingsVersionConflict：连接或凭据已经变化，请重新发送".into());}
+        Ok(())
+    })
+}
 
 fn forget_model(config:&mut AiConfig,id:&str) {
     if config.active_model_id.as_deref()==Some(id) {config.active_model_id=None;}
@@ -105,7 +119,9 @@ fn validate_model(config:&AiConfig,model:&SavedModel,catalog:&AiModelCatalog)->R
     let item=checked.models.iter_mut().find(|item|item.id==model.id).ok_or("模型不存在")?;
     *item=model.clone();item.enabled=true;
     let resolved=resolve_model(&checked,&model.id,catalog)?;
-    crate::context::model_spec::ProviderModelSpec::from_provider(&resolved.provider_value()?)?;
+    let provider=resolved.provider_value()?;
+    crate::context::model_spec::ProviderModelSpec::from_provider(&provider)?;
+    super::request_parameters::completion_body(&provider,&[],model.max_output_tokens,false,None)?;
     Ok(())
 }
 fn update_preferences(config:&mut AiConfig,preferences:Map<String,Value>)->Result<(),String> {
@@ -162,7 +178,8 @@ pub fn update_config(change:AiConfigChange,expected_revision:&str,confirm:bool)-
                 let was_empty=config.models.is_empty();let mut added=vec![];
                 for input in models {
                     if config.models.iter().any(|m|m.provider_id==id && m.model_id==input.model_id) {continue;}
-                    let capability=if connection.provider_type=="custom" {None}else{Some(catalog.model(&connection.provider_type,&connection.region,&input.model_id)?)};
+                    let capability=catalog.model(&connection.provider_type,&connection.region,&input.model_id).ok();
+                    if capability.is_none() && input.token_counting.is_none() {return Err("目录外型号需要填写高级计数资料".into());}
                     let model=SavedModel{id:uuid::Uuid::new_v4().to_string(),provider_id:id.clone(),model_id:input.model_id.clone(),display_name:input.display_name.unwrap_or_else(||capability.map(|c|c.display_name.clone()).unwrap_or(input.model_id)),catalog_id:capability.map(|c|format!("{}/{}",c.provider_type,c.model_id)),catalog_version:capability.map(|_|catalog.catalog_version.clone()),enabled:true,thinking:input.thinking.unwrap_or_else(||capability.map(|c|c.default_thinking.clone()).unwrap_or("off".into())),max_output_tokens:input.max_output_tokens.unwrap_or_else(||capability.map(|c|c.default_output_tokens).unwrap_or(8192)),token_counting:input.token_counting,overrides:input.overrides,verification:None};
                     added.push(model.id.clone());config.models.push(model.clone());validate_model(&config,&model,&catalog)?;
                 }
@@ -267,13 +284,14 @@ pub fn migrate_ai(raw: &Value) -> Result<AiConfig, String> {
     for previous in raw["providers"].as_array().ok_or("旧版 AI 连接列表无效")? {
         let id = previous["id"].as_str().ok_or("旧版连接编号缺失")?.to_owned();
         crate::ai_chat::sanitize_provider_id(&id)?;
-        let provider_type = previous["type"].as_str().unwrap_or(&id).to_owned();
-        let region = previous["region"].as_str().unwrap_or(if provider_type == "qwen" {"cn-beijing"} else {"cn"}).to_owned();
+        let declared_type=previous["type"].as_str().unwrap_or(&id);
+        let provider_type=if ["deepseek","qwen","kimi","glm"].contains(&declared_type) {declared_type}else{"custom"}.to_owned();
+        let region = previous["region"].as_str().unwrap_or(if provider_type == "qwen" {"cn-beijing"} else if provider_type=="custom" {"custom"}else {"cn"}).to_owned();
         let connection = ProviderConnection {id:id.clone(),r#type:provider_type.clone(),label:previous["label"].as_str().unwrap_or(&id).into(),region:region.clone(),kind:previous["kind"].as_str().unwrap_or("openai_compat").into(),base_url:previous["base_url"].as_str().unwrap_or("").into(),enabled:previous["enabled"].as_bool().unwrap_or(true),builtin:previous["builtin"].as_bool().unwrap_or(false),credential_ref:if crate::ai_chat::provider_has_key(&id)? {Some(id.clone())} else {None},credential_revision:"legacy".into(),key_set:false,discovered:None};
         config.providers.push(connection);
         if let Some(model_id) = previous["model"].as_str().filter(|name|!name.trim().is_empty()) {
             let capability = catalog.model(&provider_type,&region,model_id).ok();
-            let thinking = match raw["thinking"].as_str().unwrap_or("balanced") {"fast"=>"off","deep" if capability.is_some_and(|c|c.efforts.is_empty())=>"on","deep"=>"high",_ if capability.is_some_and(|c|!c.efforts.is_empty())=>"high",_=>"on"}.to_owned();
+            let thinking = match raw["thinking"].as_str().unwrap_or("balanced") {"fast"=>"off","deep" if capability.is_some_and(|c|c.efforts.is_empty())=>"on","deep"=>"high",_=>"default"}.to_owned();
             let model = SavedModel {id:uuid::Uuid::new_v4().to_string(),provider_id:id.clone(),model_id:model_id.into(),display_name:capability.map(|m|m.display_name.clone()).unwrap_or_else(||model_id.into()),catalog_id:capability.map(|m|format!("{provider_type}/{}",m.model_id)),catalog_version:capability.map(|_|catalog.catalog_version.clone()),enabled:previous["enabled"].as_bool().unwrap_or(true),thinking:if let Some(m)=capability {if m.validate_thinking(&thinking).is_ok(){thinking}else{m.default_thinking.clone()}}else{thinking},max_output_tokens:raw["max_output_tokens"].as_u64().unwrap_or(2048) as usize,token_counting:previous.get("token_counting").cloned(),overrides:json!({"legacy_provider":previous.as_object().ok_or("旧版连接无效")?.iter().filter(|(key,_)|!["id","label","kind","base_url","model","enabled","builtin","api_key","key","key_set","token_counting"].contains(&key.as_str())).map(|(k,v)|(k.clone(),v.clone())).collect::<Map<_,_>>()}),verification:None};
             if active == Some(id.as_str()) { config.active_model_id=Some(model.id.clone());config.default_model_id=Some(model.id.clone()); }
             config.models.push(model);
@@ -343,6 +361,22 @@ pub fn capture_request_model(model_config_id: &str, expected_revision: &str) -> 
 mod checks {
     use super::*;
     #[test]
+    fn legacy_independent_custom_connection_keeps_routing() {
+        let counting=crate::context::model_spec::default_counting("deepseek","deepseek-chat").unwrap().unwrap();
+        let migrated=migrate_ai(&json!({"providers":[{"id":"openrouter","base_url":"https://api.deepseek.com/v1","model":"deepseek-chat","token_counting":counting}],"active_provider_id":"openrouter","thinking":"balanced","max_output_tokens":2048})).unwrap();
+        assert_eq!(migrated.providers[0].r#type,"custom");
+        assert_eq!(migrated.providers[0].id,"openrouter");
+        let resolved=resolve_model(&migrated,&migrated.models[0].id,&load_catalog().unwrap()).unwrap();
+        assert_eq!(resolved.provider_value().unwrap()["base_url"],"https://api.deepseek.com/v1");
+    }
+    #[test]
+    fn legacy_balanced_keeps_service_default_parameters() {
+        let migrated=migrate_ai(&json!({"providers":[{"id":"deepseek","base_url":"https://api.deepseek.com/v1","model":"deepseek-flash"}],"active_provider_id":"deepseek","thinking":"balanced","max_output_tokens":2048})).unwrap();
+        let provider=resolve_model(&migrated,&migrated.models[0].id,&load_catalog().unwrap()).unwrap().provider_value().unwrap();
+        let body=super::super::request_parameters::completion_body(&provider,&[],2048,false,None).unwrap();
+        assert!(body.get("thinking").is_none());assert!(body.get("reasoning_effort").is_none());
+    }
+    #[test]
     #[ignore = "需要独立目录中的实际用户配置副本"]
     fn settings_file_probe() {
         let directory=std::path::PathBuf::from(std::env::var("STUART_DATA_DIR").expect("必须指定独立目录"));
@@ -352,6 +386,38 @@ mod checks {
             if let Some(reference)=&connection.credential_ref {assert!(!crate::ai_chat::read_api_key(reference).unwrap().is_empty());}
         }
         crate::fs_api::atomic_write_file(&directory.join("configuration-result.json"),&serde_json::to_vec(&snapshot).unwrap()).unwrap();
+    }
+
+    #[test]
+    #[ignore = "需要独立目录中的实际用户配置副本"]
+    fn settings_ui_operation() {
+        let directory=std::path::PathBuf::from(std::env::var("STUART_DATA_DIR").expect("必须指定独立目录"));
+        assert!(directory.to_string_lossy().contains("native-artifacts"));
+        let input:Value=serde_json::from_slice(&std::fs::read(directory.join("ui-operation.json")).unwrap()).unwrap();
+        let result=if input["kind"]=="read" {load_ai_configuration()} else {update_config(serde_json::from_value(input["change"].clone()).unwrap(),input["revision"].as_str().unwrap(),false)};
+        let output=match result {Ok(value)=>serde_json::to_value(value).unwrap(),Err(error)=>json!({"error":error})};
+        crate::fs_api::atomic_write_file(&directory.join("ui-result.json"),&serde_json::to_vec(&output).unwrap()).unwrap();
+    }
+
+    #[test]
+    #[ignore = "需要独立目录中的实际用户配置副本"]
+    fn actual_advanced_models() {
+        let directory=std::path::PathBuf::from(std::env::var("STUART_DATA_DIR").expect("必须指定独立目录"));
+        assert!(directory.to_string_lossy().contains("native-artifacts"));
+        let before=load_ai_configuration().unwrap();
+        let provider=before.ai.providers.iter().find(|p|p.r#type=="deepseek" && p.credential_ref.is_some()).unwrap().clone();
+        let secret=crate::ai_chat::read_api_key(provider.credential_ref.as_deref().unwrap()).unwrap();
+        let mut counting=crate::context::model_spec::default_counting("deepseek","deepseek-v4-flash").unwrap().unwrap();
+        counting["context_window"]=json!(4096);counting["max_output_tokens"]=json!(2048);
+        let model=||ModelInput{model_id:"deepseek-v4-flash".into(),display_name:None,thinking:Some("default".into()),max_output_tokens:Some(1024),token_counting:Some(counting.clone()),overrides:json!({"thinking_parameter":"none","output_parameter":"max_tokens","json_output":true})};
+        let official=update_config(AiConfigChange::SaveProviderModels{connection:ConnectionInput{id:Some(provider.id.clone()),provider_type:"deepseek".into(),region:provider.region.clone(),label:provider.label.clone(),base_url:None,enabled:Some(true)},models:vec![model()],api_key:None},&before.settings_revision,false).expect("官方连接应允许添加具有明确高级配置的目录外型号");
+        assert!(official.ai.models.iter().any(|m|m.provider_id==provider.id && m.model_id=="deepseek-v4-flash" && m.max_output_tokens==1024));
+        let mut saved=official;
+        for label in ["阅读服务一","阅读服务二"] {
+            saved=update_config(AiConfigChange::SaveProviderModels{connection:ConnectionInput{id:None,provider_type:"custom".into(),region:"custom".into(),label:label.into(),base_url:Some(provider.base_url.clone()),enabled:Some(true)},models:vec![model()],api_key:Some(secret.to_string())},&saved.settings_revision,false).unwrap();
+        }
+        assert_eq!(saved.ai.providers.iter().filter(|p|p.r#type=="custom" && ["阅读服务一","阅读服务二"].contains(&p.label.as_str())).count(),2);
+        crate::fs_api::atomic_write_file(&directory.join("advanced-snapshot.json"),&serde_json::to_vec(&saved).unwrap()).unwrap();
     }
 
     #[test]
@@ -374,7 +440,10 @@ mod checks {
         let mut edited=models[0].clone();edited.display_name="DeepSeek 阅读模型".into();
         let edited=update_config(AiConfigChange::EditModel{model:edited},&selected.settings_revision,false).unwrap();
         assert_eq!(edited.ai.models.iter().find(|m|m.id==models[1].id).unwrap().model_id,models[1].model_id);
+        let pending=capture_request_model(&models[1].id,&edited.settings_revision).unwrap();
+        let pending_provider=pending.model.provider_value().unwrap();
         let rotated=update_config(AiConfigChange::SetCredential{provider_id:provider.id.clone(),api_key:secret.to_string()},&edited.settings_revision,false).unwrap();
+        assert!(ensure_request_current(&pending_provider).is_err(),"凭据轮换完成后需要拒绝尚未登记的旧请求");
         crate::fs_api::atomic_write_file(&std::path::Path::new(&directory).join("picker-snapshot-after.json"),&serde_json::to_vec(&rotated).unwrap()).unwrap();
         let connection=rotated.ai.providers.iter().find(|p|p.id==provider.id).unwrap();
         assert_ne!(connection.credential_ref,provider.credential_ref);

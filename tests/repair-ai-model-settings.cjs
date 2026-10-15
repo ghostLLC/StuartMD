@@ -2,6 +2,7 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const { spawnSync } = require("node:child_process");
 const { JSDOM } = require("jsdom");
 const root = path.resolve(__dirname, "..");
 const html = fs.readFileSync(path.join(root, "web/index.html"), "utf8");
@@ -53,7 +54,48 @@ async function verifySavedConfiguration() {
   assert.ok(window.document.querySelector(".ai-editor [data-error]").textContent.includes("当前输入"));
   const preferencesInput = window.document.querySelector(".ai-preferences textarea"); preferencesInput.value = "保留正在填写的回答风格"; preferencesInput.dispatchEvent(new window.Event("input", { bubbles: true }));
   settings.refresh(before); assert.equal(preferencesInput.value, "保留正在填写的回答风格");
-  settings.dispose(); first.dispose(); second.dispose(); dom.window.close();
+  settings.dispose(); first.dispose(); second.dispose();
+  const failures = [];
+  async function check(name, action) { try { await action(); console.log(`${name}通过`); } catch (error) { failures.push(error); console.error(`${name}：${error.message}`); } }
+  await check("自定义连接独立选择", async () => {
+    const page = window.StuartAISettings.mount(window.document.querySelector("#set-ai-section"), before); await page.openAdd();
+    const provider = window.document.querySelector(".ai-editor select"); provider.value = "custom"; provider.dispatchEvent(new window.Event("change", { bubbles: true }));
+    const connection = window.document.querySelector('[aria-label="自定义服务连接"]'); assert.ok(connection, "添加自定义模型需要选择已有连接或创建独立连接");
+    assert.equal(connection.value, ""); assert.equal(connection.options.length, before.ai.providers.filter(item => item.type === "custom").length + 1);
+    page.dispose();
+  });
+  await check("目录外型号高级添加", async () => {
+    const page = window.StuartAISettings.mount(window.document.querySelector("#set-ai-section"), before); await page.openAdd();
+    const control = [...window.document.querySelectorAll(".ai-editor summary")].find(item => item.textContent === "添加其他型号"); assert.ok(control, "官方连接需要目录外型号的高级添加入口");
+    page.dispose();
+  });
+  await check("小容量模型输出预算", async () => {
+    const page = window.StuartAISettings.mount(window.document.querySelector("#set-ai-section"), before); await page.openAdd();
+    const provider = window.document.querySelector(".ai-editor select"); provider.value = "custom"; provider.dispatchEvent(new window.Event("change", { bubbles: true }));
+    assert.ok(window.document.querySelector('[aria-label="输出预算 Token"]'), "添加自定义模型需要提供输出预算字段"); page.dispose();
+  });
+  function operation(value) {
+    fs.writeFileSync(path.join(directory, "ui-operation.json"), JSON.stringify(value));
+    const result = spawnSync("cargo", ["test", "--manifest-path", path.join(root, "tauri/src-tauri/Cargo.toml"), "--locked", "ai::configuration::checks::settings_ui_operation", "--", "--ignored", "--test-threads=1"], { env: { ...process.env, STUART_DATA_DIR: directory }, encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr + result.stdout);
+    return JSON.parse(fs.readFileSync(path.join(directory, "ui-result.json"), "utf8"));
+  }
+  window.pywebview = { api: { ai_get_config: async () => operation({ kind: "read" }), ai_update_config: async (change, revision) => operation({ kind: "write", change, revision }) } };
+  window.eval(fs.readFileSync(path.join(root, "web/js/core/ai-client.js"), "utf8"));
+  await check("冲突后读取真实最新配置", async () => {
+    await window.StuartAI.ensureConfig(true); const initial = window.StuartAI.snapshot;
+    const page = window.StuartAISettings.mount(window.document.querySelector("#set-ai-section"), initial);
+    await page.openModel(initial.ai.models[0].id);
+    const modified = operation({ kind: "write", revision: initial.settingsRevision, change: { kind: "updatePreferences", preferences: { use_saved_memories: !initial.ai.use_saved_memories } } }); assert.ok(!modified.error);
+    const save = window.document.querySelector('.ai-editor [data-save="true"]');
+    save.click(); while (save.disabled) await new Promise(resolve => setTimeout(resolve, 10));
+    const reload = [...window.document.querySelectorAll(".ai-editor button")].find(item => item.textContent === "重新加载此表单"); assert.equal(reload.hidden, false);
+    reload.click(); while (reload.disabled) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(window.StuartAI.snapshot.settingsRevision, modified.settingsRevision, "重新加载必须读取原生端最新快照");
+    const nextSave = window.document.querySelector('.ai-editor [data-save="true"]'); nextSave.click(); while (nextSave.disabled) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(window.document.querySelector(".ai-editor"), null); page.dispose();
+  });
+  dom.window.close(); if (failures.length) throw new AggregateError(failures, "模型配置回归检查失败");
   console.log("真实保存配置的跨厂商列表、两个选择组件、键盘操作及编辑输入保留检查通过；窗口与视觉检查 SkippedByUser");
 }
 verifySavedConfiguration().catch(error => { console.error(error); process.exitCode = 1; });

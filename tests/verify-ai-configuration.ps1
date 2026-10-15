@@ -31,6 +31,8 @@ try {
         }
     }
     foreach ($entry in $keyHashes) { if ($entry.Hash -ne (Get-FileHash -LiteralPath $entry.Path -Algorithm SHA256).Hash) { throw '迁移改写密钥密文' } }
+    cargo test --manifest-path "$workspace/tauri/src-tauri/Cargo.toml" --locked ai::configuration::checks::actual_advanced_models -- --ignored --test-threads=1
+    if ($LASTEXITCODE -ne 0) { throw '真实配置的高级型号及独立连接保存检查失败' }
     cargo test --manifest-path "$workspace/tauri/src-tauri/Cargo.toml" --locked ai::configuration::checks::actual_atomic_changes -- --ignored --test-threads=1
     if ($LASTEXITCODE -ne 0) { throw '真实文件上的多模型修改、版本冲突或密钥轮换检查失败' }
     node "$workspace/tests/repair-ai-model-settings.cjs" $testDirectory
