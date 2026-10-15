@@ -10,6 +10,7 @@ use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 use crate::context::service::{ContextInput, ValidatedContext};
 pub mod companion;
+pub mod model_catalog;
 
 struct Request {
     window_id: String, document_id: Option<String>, document_key: Option<String>, workspace_key: Option<String>, session_id: String,

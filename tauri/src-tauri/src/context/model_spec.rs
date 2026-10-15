@@ -69,7 +69,7 @@ impl ProviderModelSpec {
                 }
             }
             "qwen-provider" => {
-                if self.provider_id != "qwen" || self.count_endpoint.as_deref()!=Some("https://dashscope.aliyuncs.com/api/v1/tokenizer") {
+                if self.provider_id != "qwen" || ![Some("https://dashscope.aliyuncs.com/api/v1/tokenizer"),Some("https://dashscope-intl.aliyuncs.com/api/v1/tokenizer")].contains(&self.count_endpoint.as_deref()) {
                     return Err("TokenCountingUnavailable：Qwen 计数地址无效".into());
                 }
             }
