@@ -14,7 +14,7 @@ const APP_ID: &str = "StuartMD";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const PROG_ID: &str = "StuartMD.Markdown";
 pub const PROG_ID_PDF: &str = "StuartMD.PDF";
-pub const SETTINGS_SCHEMA: i64 = 5;
+pub const SETTINGS_SCHEMA: i64 = 6;
 const PDF_MAX: u64 = 40 * 1024 * 1024;
 pub const PDF_MAX_BYTES: u64 = 100 * 1024 * 1024; // 100 MB 上限
 pub const MD_EXTS: [&str; 5] = [".md", ".markdown", ".mdown", ".mkd", ".txt"];
@@ -228,6 +228,7 @@ pub fn migrate_settings(raw: Option<Value>) -> Value {
         .get("schema_version")
         .and_then(|v| v.as_i64())
         .unwrap_or(1);
+    assert!(from_v <= SETTINGS_SCHEMA, "设置版本高于当前软件版本");
 
     if from_v < 2 {
         if let Some(obj) = s.as_object_mut() {
@@ -281,6 +282,11 @@ pub fn migrate_settings(raw: Option<Value>) -> Value {
         }
     }
 
+    if from_v < 6 {
+        let ai=crate::ai::configuration::migrate_ai(s.get("ai").unwrap_or(&crate::ai_chat::builtin_ai_defaults())).expect("迁移 AI 设置失败");
+        s["ai"]=crate::ai::configuration::stored_value(&ai).expect("AI 设置序列化失败");
+    }
+
     if let (Some(obj), Some(defaults)) = (s.as_object_mut(), default_settings().as_object().cloned()) {
         for (k, v) in defaults {
             obj.entry(k).or_insert(v);
@@ -329,18 +335,29 @@ fn settings_guard() -> std::sync::MutexGuard<'static, ()> {
     SETTINGS_LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-fn load_settings_migrated_unlocked() -> Value {
+fn load_settings_checked_unlocked() -> Result<Value,String> {
     let path = settings_path();
-    let before = if path.exists() { Some(load_json(&path)) } else { None };
+    let before = if path.exists() { Some(serde_json::from_slice::<Value>(&fs::read(&path).map_err(|e|e.to_string())?).map_err(|e|format!("设置 JSON 无效：{e}"))?) } else { None };
+    if before.as_ref().and_then(|value|value["schema_version"].as_i64()).is_some_and(|version|version>SETTINGS_SCHEMA) {return Err("设置版本高于当前软件版本".into());}
     let s = migrate_settings(before.clone());
     let changed = match &before {
         None => true,
         Some(b) => b != &s,
     };
     if changed {
-        let _ = save_json(&path, &s);
+        save_json(&path, &s)?;
     }
-    s
+    Ok(s)
+}
+fn load_settings_migrated_unlocked() -> Value {
+    load_settings_checked_unlocked().expect("加载或迁移设置失败")
+}
+pub fn with_settings_checked<T>(reader:impl FnOnce(&Value)->Result<T,String>)->Result<T,String> {
+    let _guard=settings_guard();
+    reader(&load_settings_checked_unlocked()?)
+}
+pub fn load_settings_checked()->Result<Value,String> {
+    with_settings_checked(|settings|Ok(settings.clone()))
 }
 
 pub fn load_settings_migrated() -> Value {
@@ -354,7 +371,7 @@ where
 {
     let _guard = settings_guard();
     let path = settings_path();
-    let mut current = load_settings_migrated_unlocked();
+    let mut current = load_settings_checked_unlocked()?;
 
     modifier(&mut current)?;
 
@@ -989,6 +1006,7 @@ pub fn stuart_save_settings(data: Value) -> Result<bool, String> {
     modify_settings(|cur| {
         if let (Some(obj), Some(patch)) = (cur.as_object_mut(), data.as_object()) {
             for (k, v) in patch {
+                if ["ai","schema_version","app_version"].contains(&k.as_str()) {continue;}
                 obj.insert(k.clone(), v.clone());
             }
         }
@@ -1619,5 +1637,16 @@ mod tests {
         assert!(atomic_write_file(&f, b"hello draft").is_ok());
         assert!(f.is_file());
         let _ = fs::remove_file(&f);
+    }
+
+    #[test]
+    fn ai_migration_retains_independent_model_entries() {
+        let settings = migrate_settings(Some(json!({"schema_version":5,"ai":{"enabled":true,"active_provider_id":"deepseek","thinking":"fast","max_output_tokens":2048,"providers":[{"id":"deepseek","label":"DeepSeek","kind":"openai_compat","base_url":"https://api.deepseek.com/v1","model":"deepseek-flash","enabled":true,"builtin":true}]}})));
+        let models = settings["ai"]["models"].as_array().expect("AI 配置需要独立模型列表");
+        assert!(!models.is_empty());
+        let again = migrate_settings(Some(settings.clone()));
+        assert_eq!(again["ai"],settings["ai"]);
+        let ids: HashSet<_> = models.iter().map(|model|model["id"].as_str().unwrap()).collect();
+        assert_eq!(ids.len(),models.len());
     }
 }

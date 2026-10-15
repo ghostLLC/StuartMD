@@ -10,7 +10,7 @@ fn key_path(id:&str)->Result<PathBuf,String> {
     fs::create_dir_all(&directory).map_err(|error|format!("创建密钥目录失败：{error}"))?;
     Ok(directory.join(format!("{id}.bin")))
 }
-fn sanitize_provider_id(id:&str)->Result<String,String> {
+pub(crate) fn sanitize_provider_id(id:&str)->Result<String,String> {
     if id.is_empty() || id.len()>64 || id.starts_with('.') || id.contains("..") || !id.chars().all(|character|character.is_ascii_alphanumeric() || ['-','_','.'].contains(&character)) {return Err("服务商编号无效".into());}
     Ok(id.to_owned())
 }
@@ -18,7 +18,7 @@ fn pinned_base_url(id:&str)->Option<&'static str> {
     match id {"deepseek"=>Some("https://api.deepseek.com/v1"),"qwen"=>Some("https://dashscope.aliyuncs.com/compatible-mode/v1"),"kimi"=>Some("https://api.moonshot.cn/v1"),"glm"=>Some("https://open.bigmodel.cn/api/paas/v4"),_=>None}
 }
 fn normalize_base_url(raw:&str)->String {raw.trim().trim_end_matches('/').trim_end_matches("/chat/completions").trim_end_matches('/').to_owned()}
-fn validate_base_url(raw:&str)->Result<String,String> {
+pub(crate) fn validate_base_url(raw:&str)->Result<String,String> {
     let base=normalize_base_url(raw);let parsed=url::Url::parse(&base).map_err(|error|format!("API地址无效：{error}"))?;
     let host=parsed.host_str().ok_or("API地址缺少主机")?;
     if parsed.scheme()!="https" && !(parsed.scheme()=="http" && ["localhost","127.0.0.1","[::1]","::1"].contains(&host)) {return Err("API地址必须使用https，本机服务可以使用http".into());}
@@ -75,85 +75,26 @@ pub(crate) fn read_api_key(id:&str)->Result<Zeroizing<String>,String> {
     let plain=dpapi_unprotect(&blob)?;
     match String::from_utf8(plain) {Ok(key) if !key.is_empty()=>Ok(Zeroizing::new(key)),Ok(_)=>Err("密钥为空".into()),Err(error)=>{let mut bytes=error.into_bytes();bytes.zeroize();Err("密钥编码无效".into())}}
 }
-fn provider_has_key(id:&str)->bool {key_path(id).expect("密钥路径无效").is_file()}
+pub(crate) fn provider_has_key(id:&str)->Result<bool,String> {Ok(key_path(id)?.is_file())}
 
 pub fn builtin_ai_defaults()->Value {
-    json!({"enabled":true,"active_provider_id":"deepseek","explain_shortcut":"Alt+E","thinking":"balanced","context_scope":"document","max_output_tokens":2048,"memory_mode":"ask","use_saved_memories":true,"learning_policy":"ask",
-        "style":{"length":"normal","tone":"neutral","custom":"","length_hint":"","feedback":{"short":0,"ok":0,"long":0}},
-        "providers":[
-            {"id":"deepseek","label":"DeepSeek","kind":"openai_compat","base_url":"https://api.deepseek.com/v1","model":"deepseek-flash","enabled":true,"builtin":true},
-            {"id":"qwen","label":"通义千问 Qwen","kind":"openai_compat","base_url":"https://dashscope.aliyuncs.com/compatible-mode/v1","model":"qwen-plus","enabled":true,"builtin":true},
-            {"id":"kimi","label":"Kimi (Moonshot)","kind":"openai_compat","base_url":"https://api.moonshot.cn/v1","model":"moonshot-v1-8k","enabled":true,"builtin":true},
-            {"id":"glm","label":"智谱 GLM","kind":"openai_compat","base_url":"https://open.bigmodel.cn/api/paas/v4","model":"glm-4-air","enabled":true,"builtin":true},
-            {"id":"custom","label":"自定义 OpenAI 兼容","kind":"openai_compat","base_url":"","model":"","enabled":false,"builtin":true}]})
-}
-fn merge_ai_settings(mut ai:Value)->Value {
-    let defaults=builtin_ai_defaults();let object=ai.as_object_mut().expect("AI设置必须是JSON对象");
-    let legacy=object.get("memory_mode").and_then(Value::as_str).unwrap_or("ask").to_owned();
-    object.entry("use_saved_memories").or_insert_with(||json!(legacy!="off"));
-    object.entry("learning_policy").or_insert_with(||json!(if legacy=="always" {"automatic"} else {legacy.as_str()}));
-    if object.get("context_scope").and_then(Value::as_str).is_some_and(|scope|["full","neighborhood"].contains(&scope)) {
-        object.insert("context_scope".into(),json!("document"));
-    }
-    for (name,value) in defaults.as_object().expect("AI默认设置无效") {object.entry(name.clone()).or_insert_with(||value.clone());}
-    let style=object.get_mut("style").and_then(Value::as_object_mut).expect("AI回答样式设置必须是对象");
-    for (name,value) in defaults["style"].as_object().expect("AI默认回答样式无效") {style.entry(name.clone()).or_insert_with(||value.clone());}
-    let providers=object.get_mut("providers").and_then(Value::as_array_mut).expect("AI服务商设置必须是数组");
-    for provider in providers {
-        let provider=provider.as_object_mut().expect("服务商设置必须是对象");provider.remove("api_key");provider.remove("key");
-        let id=provider["id"].as_str().expect("服务商编号必须是字符串");let has_key=provider_has_key(id);provider.insert("key_set".into(),json!(has_key));
-    }
-    ai
+    crate::ai::configuration::stored_value(&crate::ai::configuration::defaults()).expect("默认 AI 配置序列化失败")
 }
 pub fn load_ai_settings()->Value {
-    let settings=crate::fs_api::load_settings_migrated();merge_ai_settings(settings.get("ai").cloned().unwrap_or_else(||json!({})))
+    serde_json::to_value(crate::ai::configuration::load_ai_configuration().expect("读取 AI 配置失败").ai).expect("AI 配置序列化失败")
 }
 pub fn settings_revision()->Result<String,String> {
-    Ok(format!("{:x}",Sha256::digest(serde_json::to_vec(&load_ai_settings()).map_err(|error|error.to_string())?)))
+    Ok(crate::ai::configuration::load_ai_configuration()?.settings_revision)
 }
 pub(crate) fn active_provider(ai:&Value)->Result<Value,String> {
-    let id=ai["active_provider_id"].as_str().ok_or("当前服务商编号缺失")?;
-    ai["providers"].as_array().ok_or("服务商配置缺失")?.iter().find(|provider|provider["id"].as_str()==Some(id)).cloned().ok_or("当前服务商配置不存在".into())
+    let config:crate::ai::configuration::AiConfig=serde_json::from_value(ai.clone()).map_err(|e|e.to_string())?;
+    crate::ai::configuration::resolve_model(&config,config.active_model_id.as_deref().ok_or("请添加并选择模型")?,&crate::ai::model_catalog::load_catalog()?)?.provider_value()
 }
 #[tauri::command]
-pub fn stuart_ai_get_config()->Result<Value,String> {Ok(json!({"ok":true,"ai":load_ai_settings(),"settingsRevision":settings_revision()?}))}
+pub fn stuart_ai_get_config()->Result<crate::ai::configuration::AiConfigSnapshot,String> {crate::ai::configuration::load_ai_configuration()}
 #[tauri::command]
-pub async fn stuart_ai_save_config(app:tauri::AppHandle,ai:Value,confirm:Option<bool>)->Result<Value,String> {
-    let previous=load_ai_settings();
-    if !ai.is_object() {return Err("AI设置必须是JSON对象".into());}
-    let mut next=merge_ai_settings(ai);
-    if !["always","ask","off"].contains(&next["memory_mode"].as_str().ok_or("记忆学习方式缺失")?) {return Err("记忆学习方式无效".into());}
-    let learning=next["learning_policy"].as_str().ok_or("整理新记忆方式缺失")?.to_owned();
-    if !["off","ask","automatic"].contains(&learning.as_str()) {return Err("整理新记忆方式无效".into());}
-    if next["use_saved_memories"].as_bool().is_none() {return Err("使用已有记忆设置必须是布尔值".into());}
-    if !["selection","section","document","workspace"].contains(&next["context_scope"].as_str().ok_or("提问范围缺失")?) {return Err("提问范围无效".into());}
-    if next["explain_shortcut"].as_str().is_some_and(|key|key.eq_ignore_ascii_case("Alt+I")) {return Err("选区问答快捷键与伴读 Alt+I 冲突".into());}
-    next["memory_mode"]=json!(if learning=="automatic" {"always"} else {learning.as_str()});
-    if !["fast","balanced","deep"].contains(&next["thinking"].as_str().ok_or("思考方式缺失")?) {return Err("思考方式无效".into());}
-    if next["max_output_tokens"].as_u64().is_none_or(|tokens|tokens==0) {return Err("输出Token预算必须大于零".into());}
-    let mut ids=std::collections::HashSet::new();
-    for provider in next["providers"].as_array_mut().ok_or("服务商配置必须是数组")? {
-        let object=provider.as_object_mut().ok_or("服务商配置必须是对象")?;
-        let id=sanitize_provider_id(object["id"].as_str().ok_or("服务商编号缺失")?)?;
-        if !ids.insert(id.clone()) {return Err("服务商编号重复".into());}
-        object.remove("api_key");object.remove("key");object.remove("key_set");
-        if let Some(base)=pinned_base_url(&id) {object.insert("base_url".into(),json!(base));}
-        else if let Some(raw)=object.get("base_url").and_then(Value::as_str).filter(|value|!value.trim().is_empty()) {
-            let base=validate_base_url(raw)?;
-            let old=previous["providers"].as_array().and_then(|providers|providers.iter().find(|provider|provider["id"].as_str()==Some(&id))).and_then(|provider|provider["base_url"].as_str()).unwrap_or("");
-            if normalize_base_url(old)!=base && provider_has_key(&id) && confirm!=Some(true) {
-                return Ok(json!({"ok":false,"needs_confirm":true,"reason":"修改API地址会将已保存密钥发送到新的主机","detail":{"provider_id":id,"key_sent_to":url::Url::parse(&base).map_err(|error|error.to_string())?.host_str(),"old_base_url":old,"new_base_url":base}}));
-            }
-            object.insert("base_url".into(),json!(base));
-        }
-        if object.contains_key("token_counting") {crate::context::model_spec::ProviderModelSpec::from_provider(&Value::Object(object.clone()))?;}
-    }
-    active_provider(&next)?;
-    if next["enabled"].as_bool()!=Some(true) {crate::ai::cancel_all();}
-    crate::fs_api::modify_settings(|settings|{settings.as_object_mut().ok_or("设置必须是对象")?.insert("ai".into(),next.clone());Ok(())})?;
-    if next["enabled"].as_bool()!=Some(true) {crate::ai::cancel_all_and_wait().await?;}
-    app.emit("ai-config-changed",json!({"enabled":next["enabled"]})).map_err(|error|error.to_string())?;
-    Ok(json!({"ok":true,"ai":load_ai_settings(),"settingsRevision":settings_revision()?}))
+pub async fn stuart_ai_save_config(_app:tauri::AppHandle,_ai:Value,_confirm:Option<bool>)->Result<Value,String> {
+    Err("请使用类型化 AI 配置操作".into())
 }
 #[tauri::command]
 pub async fn stuart_ai_set_api_key(provider_id:String,api_key:String)->Result<Value,String> {

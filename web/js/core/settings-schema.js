@@ -5,12 +5,15 @@
 (function (global) {
   "use strict";
 
-  const SCHEMA_VERSION = 5;
+  const SCHEMA_VERSION = 6;
 
   function defaultAi() {
     return {
       enabled: true,
-      active_provider_id: "deepseek",
+      active_model_id: null,
+      default_model_id: null,
+      recent_model_ids: [],
+      models: [],
       explain_shortcut: "Alt+E",
       thinking: "balanced",
       context_scope: "document",
@@ -26,53 +29,7 @@
         length_hint: "",
         feedback: { short: 0, ok: 0, long: 0 },
       },
-      providers: [
-        {
-          id: "deepseek",
-          label: "DeepSeek",
-          kind: "openai_compat",
-          base_url: "https://api.deepseek.com/v1",
-          model: "deepseek-flash",
-          enabled: true,
-          builtin: true,
-        },
-        {
-          id: "qwen",
-          label: "通义千问 Qwen",
-          kind: "openai_compat",
-          base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-          model: "qwen-plus",
-          enabled: true,
-          builtin: true,
-        },
-        {
-          id: "kimi",
-          label: "Kimi (Moonshot)",
-          kind: "openai_compat",
-          base_url: "https://api.moonshot.cn/v1",
-          model: "moonshot-v1-8k",
-          enabled: true,
-          builtin: true,
-        },
-        {
-          id: "glm",
-          label: "智谱 GLM",
-          kind: "openai_compat",
-          base_url: "https://open.bigmodel.cn/api/paas/v4",
-          model: "glm-4-air",
-          enabled: true,
-          builtin: true,
-        },
-        {
-          id: "custom",
-          label: "自定义 OpenAI 兼容",
-          kind: "openai_compat",
-          base_url: "",
-          model: "",
-          enabled: false,
-          builtin: true,
-        },
-      ],
+      providers: [],
     };
   }
 
@@ -103,6 +60,7 @@
   function migrate(raw) {
     const s = Object.assign({}, raw || {});
     const from = parseInt(s.schema_version, 10) || 1;
+    if (from > SCHEMA_VERSION) throw new Error("设置版本高于当前软件版本");
     if (from < 2) {
       if (!s.language) s.language = "zh-CN";
       if (!s.plugins_disabled) s.plugins_disabled = [];
