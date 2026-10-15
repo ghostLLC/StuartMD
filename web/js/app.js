@@ -861,12 +861,26 @@
     if (dd) dd.hidden = true;
   }
 
+  function selectionFormattingContext() {
+    return { preview: el.preview, source: el.source, selection: window.getSelection(), activeElement: document.activeElement };
+  }
+
+  function isMermaidFormattingSelection() {
+    return window.StuartCore.selectionFormatting.isRestricted(selectionFormattingContext());
+  }
+
+  function updateSelToolbarFormatting() {
+    const bar = document.getElementById("sel-toolbar");
+    if (bar && window.StuartCore.selectionFormatting.updateToolbar(bar, selectionFormattingContext())) hideSelDropdown();
+  }
+
   function showSelToolbarNear(rect) {
     const bar = document.getElementById("sel-toolbar");
     if (!bar || !rect) return;
     hideBlockHandle();
     hideBlockMenu();
     captureSelectionCache();
+    updateSelToolbarFormatting();
     bar.hidden = false;
     const w = bar.offsetWidth || 320;
     const h = bar.offsetHeight || 40;
@@ -882,6 +896,7 @@
   }
 
   function openSelDropdown(kind, anchorBtn) {
+    if (isMermaidFormattingSelection()) { hideSelDropdown(); return; }
     const dd = document.getElementById("sel-dropdown");
     if (!dd) return;
     const items = [];
@@ -940,6 +955,7 @@
   }
 
   function wrapInlineMarkdown(pre, post, placeholder) {
+    if (isMermaidFormattingSelection()) return;
     const text = placeholder || "文本";
     // Preview / contenteditable path
     if (state.mode !== "source") {
@@ -1077,6 +1093,7 @@
   }
 
   function applySelFormat(kind) {
+    if (kind !== "ai-explain" && isMermaidFormattingSelection()) { hideSelDropdown(); return; }
     if (kind === "bold") wrapInlineMarkdown("**", "**");
     else if (kind === "italic") wrapInlineMarkdown("*", "*");
     else if (kind === "strike") wrapInlineMarkdown("~~", "~~");
@@ -1222,7 +1239,10 @@
           const inEd =
             (el.preview && (el.preview.contains(sel.anchorNode) || el.preview.contains(sel.focusNode))) ||
             (el.source && (el.source === document.activeElement || el.source.contains(sel.anchorNode)));
-          if (inEd) captureSelectionCache();
+          if (inEd) {
+            captureSelectionCache();
+            if (isSelToolbarVisible()) updateSelToolbarFormatting();
+          }
         }
       } catch (_) {}
     });
@@ -6048,6 +6068,7 @@ ${previewHtml}
   }
 
   function wrapSelection(pre, post) {
+    if (isMermaidFormattingSelection()) return;
     const ta = el.source;
     const s = ta.selectionStart;
     const e = ta.selectionEnd;
@@ -6062,6 +6083,7 @@ ${previewHtml}
 
   /** Prefix/suffix current line(s) in source (headings / lists). */
   function sourceLineTransform(fn) {
+    if (isMermaidFormattingSelection()) return;
     const ta = el.source;
     const v = ta.value;
     const s = ta.selectionStart;

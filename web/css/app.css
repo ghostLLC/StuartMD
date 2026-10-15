@@ -1182,6 +1182,10 @@ kbd {
   display: none !important;
 }
 
+.sel-toolbar [hidden] {
+  display: none !important;
+}
+
 .sel-toolbar button {
   border: none;
   background: transparent;
@@ -3370,9 +3374,6 @@ body[data-theme="wallpaper"] {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
-}
-
-  will-change: auto;
 }
 
 /* ===== AI 3.0.0 ===== */
