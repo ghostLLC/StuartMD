@@ -109,12 +109,12 @@ pub async fn stuart_rag_set_workspace(window:tauri::WebviewWindow,app:tauri::App
     let id=workspace_id(&root);
     let existing=state.workspaces.read().map_err(|error|error.to_string())?.get(&id).cloned();
     let workspace=if let Some(workspace)=existing {workspace}else {
-        let catalog=GenerationCatalog::open(&root)?;
+        let mut catalog=GenerationCatalog::open(&root)?;
         let generation=catalog.current()?;
         let mut config=state.config.read().map_err(|error|error.to_string())?.clone();
         #[cfg(debug_assertions)] {config.native_resources=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../resources/native");}
         #[cfg(not(debug_assertions))] {config.native_resources=app.path().resource_dir().map_err(|error|error.to_string())?.join("native");}
-        let selected=catalog.selected_model()?.or_else(||generation.as_ref().map(|generation|generation.model.model_id.clone())).unwrap_or(config.model_id.clone());
+        let selected=catalog.selected_model()?.ok_or("知识模型配置缺失")?;
         config.model_id=selected.clone();config.embedding_dim=model_spec(&selected)?.dimension;
         let storage=if let Some(generation)=&generation {
             let mut active_config=config.clone();active_config.db_path=generation.database_path.clone();active_config.model_id=generation.model.model_id.clone();active_config.embedding_dim=generation.model.dimension;
@@ -124,7 +124,7 @@ pub async fn stuart_rag_set_workspace(window:tauri::WebviewWindow,app:tauri::App
         } else {None};
         let mut status=RagStatus {status:generation.as_ref().map(|generation|generation.status.clone()).unwrap_or("Uninitialized".into()),workspace_id:id.clone(),index_generation:generation.as_ref().map(|generation|generation.generation_id.clone()),model_id:generation.as_ref().map(|generation|generation.model.model_id.clone()).unwrap_or(selected.clone()),selected_model_id:selected,embedding_dim:generation.as_ref().map(|generation|generation.model.dimension).unwrap_or(config.embedding_dim),..Default::default()};
         if let Some(storage)=&storage {let metadata=storage.get_vault_meta()?;status.doc_count=metadata.document_count;status.chunk_count=metadata.chunk_count;status.last_indexed=metadata.last_indexed;}
-        if let Some(generation)=&generation {status.failed_files=serde_json::from_str(&generation.failures_json).map_err(|error|error.to_string())?;status.source_changed=generation.parser_version!=PARSER_VERSION;}
+        if let Some(generation)=&generation {status.failed_files=serde_json::from_str(&generation.failures_json).map_err(|error|error.to_string())?;status.source_changed=generation.parser_version!=PARSER_VERSION || generation.model.model_id!=config.model_id;}
         WorkspaceBinding {root:root.clone(),storage,generation,status,config,operation:Arc::new(tokio::sync::Mutex::new(())),source_revision:Arc::new(std::sync::atomic::AtomicU64::new(0)),indexed_revision:0}
     };
     let response=RagSetWorkspaceResponse {status:workspace.status.status.clone(),doc_count:workspace.status.doc_count,document_count:workspace.status.doc_count,chunk_count:workspace.status.chunk_count,last_indexed:workspace.status.last_indexed,model_id:workspace.status.model_id.clone(),selected_model_id:workspace.config.model_id.clone(),embedding_dim:workspace.status.embedding_dim,schema_version:"2".into(),workspace_id:id,index_generation:workspace.status.index_generation.clone()};
@@ -226,18 +226,6 @@ pub async fn stuart_rag_cancel_sync(window:tauri::WebviewWindow,state:State<'_,R
         finished.await;
     }
     Ok(true)
-}
-
-#[tauri::command]
-pub async fn stuart_rag_set_model(window:tauri::WebviewWindow,state:State<'_,RagState>,model_id:String,workspace_root:Option<String>)->Result<RagStatus,String> {
-    let mut workspace=window_binding(&window,&state,workspace_root.as_deref())?;
-    let operation=workspace.operation.clone();let _operation=operation.try_lock().map_err(|_|"当前工作区知识任务尚未结束")?;
-    let engine=state.engine_for(&model_id)?;
-    let spec=engine.validated_spec().await.map_err(|error|error.to_string())?;
-    GenerationCatalog::open(&workspace.root)?.select_model(&model_id)?;
-    workspace.config.model_id=model_id.clone();workspace.config.embedding_dim=spec.dimension;workspace.status.selected_model_id=model_id;
-    let status=workspace.status.clone();record_binding(&state,workspace)?;
-    Ok(status)
 }
 
 #[tauri::command]

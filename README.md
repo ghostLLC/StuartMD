@@ -1,8 +1,8 @@
 # StuartMD
 
-Windows Markdown / PDF 阅读与编辑器。当前代码版本为 **3.5.13**，使用 Tauri 2 和共享前端。
+Windows Markdown / PDF 阅读与编辑器。当前代码版本为 **3.5.14**，使用 Tauri 2 和共享前端。
 
-安装文件通过 [GitHub Releases](https://github.com/ghostLLC/StuartMD/releases) 提供。当前分支的构建文件名称为 `StuartMD_3.5.13_x64-setup.exe`；验证范围见 `docs/validation/3.5.13/acceptance.md`。
+安装文件通过 [GitHub Releases](https://github.com/ghostLLC/StuartMD/releases) 提供。当前分支的构建文件名称为 `StuartMD_3.5.14_x64-setup.exe`；验证范围见 `docs/validation/3.5.14/acceptance.md`。
 
 ## 文档编辑
 
@@ -40,9 +40,9 @@ Windows Markdown / PDF 阅读与编辑器。当前代码版本为 **3.5.13**，�
 
 ## 知识资料
 
-打开工作目录后，在知识页面选择 BGE-M3 或多语言 MiniLM 并建立索引。首次准备模型需要下载清单中固定版本的实际模型资源，程序会校验 SHA-256。
+打开工作目录后，在知识页面建立索引。软件统一使用 BGE-M3 进行语义检索，自动准备固定版本的模型资源并校验 SHA-256。已有索引需要更新时，会在新索引成功建立后替换；更新失败或取消时保留原索引文件。
 
-查询结合全文检索与实际语义向量。结果包含来源文件、Markdown 位置或 PDF 页码和矩形，可以打开来源或引用到问答。来源修改、移动、删除以及模型切换均参与索引状态检查；部分索引需要明确确认后引用。
+查询结合全文检索与实际语义向量。结果包含来源文件、Markdown 位置或 PDF 页码和矩形，可以打开来源或引用到问答。来源修改、移动和删除均参与索引状态检查；部分索引需要明确确认后引用。
 
 ## 快捷键
 
@@ -74,7 +74,7 @@ pwsh -File scripts/verify-release.ps1
 
 完整验收命令由 `scripts/verify-repair.ps1` 的 `Core`、`Browser`、`Native`、`Models`、`Providers`、`Installer` 模式运行。Models 模式需要按照 `tests/model-reference-requirements.txt` 配置独立 Python 环境；Providers 模式使用当前用户已经配置的 DeepSeek 加密密钥和独立测试目录。密钥内容不会进入验证日志。Installer 模式执行本机安装、SQLite 一致性备份、实际用户数据保留和进程启动检查。
 
-实际结果和各项验证范围见 [3.5.13 验收](docs/validation/3.5.13/acceptance.md)。公开发布前执行 `pwsh -File scripts/verify-release.ps1 -Publication`，全部必要检查通过并具有当前源代码指纹后允许发布。用户要求跳过的界面检查记录为 `SkippedByUser`。
+实际结果和各项验证范围见 [3.5.14 验收](docs/validation/3.5.14/acceptance.md)。公开发布前执行 `pwsh -File scripts/verify-release.ps1 -Publication`，全部必要检查通过并具有当前源代码指纹后允许发布。用户要求跳过的界面检查记录为 `SkippedByUser`。
 
 ```powershell
 Set-Location tauri

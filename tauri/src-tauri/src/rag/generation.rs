@@ -27,6 +27,23 @@ pub struct Generation {
 
 pub struct GenerationCatalog { root: PathBuf, connection: Connection }
 
+#[cfg(test)]
+mod checks {
+    use super::*;
+    #[test]
+    fn existing_workspace_uses_bge_without_a_model_choice() {
+        let directory=tempfile::tempdir().unwrap();
+        let mut catalog=GenerationCatalog::open(directory.path()).unwrap();
+        catalog.select_model("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2").unwrap();
+        assert_eq!(catalog.selected_model().unwrap().as_deref(),Some("BAAI/bge-m3"));
+        drop(catalog);
+        let mut reopened=GenerationCatalog::open(directory.path()).unwrap();
+        assert_eq!(reopened.selected_model().unwrap().as_deref(),Some("BAAI/bge-m3"));
+        assert_eq!(reopened.connection.query_row("SELECT value FROM workspace_settings WHERE key='selected_model'",[],|row|row.get::<_,String>(0)).unwrap(),"BAAI/bge-m3");
+        assert!(reopened.current().unwrap().is_none());
+    }
+}
+
 pub fn workspace_id(root: &Path) -> String {
     format!("{:x}", Sha256::digest(root.to_string_lossy().to_lowercase().as_bytes()))
 }
@@ -73,8 +90,11 @@ impl GenerationCatalog {
         Ok(())
     }
 
-    pub fn selected_model(&self)->Result<Option<String>,String> {
-        self.connection.query_row("SELECT value FROM workspace_settings WHERE key='selected_model'",[],|row|row.get(0)).optional().map_err(|error|error.to_string())
+    pub fn selected_model(&mut self)->Result<Option<String>,String> {
+        let previous:Option<String>=self.connection.query_row("SELECT value FROM workspace_settings WHERE key='selected_model'",[],|row|row.get(0)).optional().map_err(|error|error.to_string())?;
+        let model=super::model_registry::KNOWLEDGE_MODEL_ID;
+        if previous.as_deref()!=Some(model) {self.select_model(model)?;}
+        Ok(Some(model.into()))
     }
 
     pub fn select_model(&mut self,model_id:&str)->Result<(),String> {

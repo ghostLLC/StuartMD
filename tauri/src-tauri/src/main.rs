@@ -147,7 +147,6 @@ fn main() {
             rag_ipc::stuart_rag_get_status,
             rag_ipc::stuart_rag_sync_workspace,
             rag_ipc::stuart_rag_cancel_sync,
-            rag_ipc::stuart_rag_set_model,
             rag_ipc::stuart_pdf_context,
             // 文档修改审核
             security::diff_guard::stuart_companion_preview_diff,

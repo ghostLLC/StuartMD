@@ -124,7 +124,6 @@
     rag_get_status: (workspaceRoot) => invoke("stuart_rag_get_status", { workspaceRoot: workspaceRoot || null }),
     rag_sync_workspace: (workspaceRoot) => invoke("stuart_rag_sync_workspace", { workspaceRoot: workspaceRoot || null }),
     rag_cancel_sync: (workspaceRoot, jobId) => invoke("stuart_rag_cancel_sync", { workspaceRoot: workspaceRoot || null, jobId: jobId || null }),
-    rag_set_model: (modelId, workspaceRoot) => invoke("stuart_rag_set_model", { modelId, workspaceRoot: workspaceRoot || null }),
     pdf_context: (path, pageNumber) => invoke("stuart_pdf_context", { path, pageNumber }),
     // StuartMD Diff Gatekeeper (M4)
     companion_preview_diff: (originalPath, proposedContent, currentRev, documentId) =>

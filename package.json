@@ -1,6 +1,6 @@
 {
   "name": "stuartmd-validation",
-  "version": "3.5.13",
+  "version": "3.5.14",
   "private": true,
   "scripts": {
     "test": "node --test tests/project-audit-core.cjs tests/repair-document-state.cjs tests/repair-text-buffer.cjs tests/repair-write-coordinator.cjs tests/repair-selection-formatting.cjs",

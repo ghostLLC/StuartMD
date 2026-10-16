@@ -136,7 +136,7 @@ impl Default for RagConfig {
         Self {
             db_path: PathBuf::from(".stuart/rag.db"),
             embedding_dim: 1024,
-            model_id: "BAAI/bge-m3".to_string(),
+            model_id: super::model_registry::KNOWLEDGE_MODEL_ID.to_string(),
             busy_timeout_ms: 5000,
             reader_pool_size: 4,
             mmap_size: 33554432, // 32MB
