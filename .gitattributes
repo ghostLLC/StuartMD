@@ -1,2 +1,3 @@
 *.pdf binary
 web/libs/pdfjs/** -text
+web/libs/textarea-caret* -text

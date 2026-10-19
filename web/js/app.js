@@ -141,6 +141,8 @@
     hlLight: $("#hl-light"),
     hlDark: $("#hl-dark"),
   };
+  const documentViewport = new window.StuartCore.DocumentViewport(el);
+  documentViewport.bind();
 
   // ---------- Markdown ----------
   const md = window.markdownit({
@@ -172,7 +174,6 @@
   }
 
   let renderTimer = null;
-  let previewScrollRatio = 0;
   /** P0: skip full preview rebuild when content is unchanged */
   let lastPreviewSource = null;
   let lastOutlineSig = "";
@@ -1785,7 +1786,7 @@
           const target =
             el.preview.querySelector(`[id="${CSS.escape(id)}"]`) ||
             findHeadingByText(id);
-          if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+          if (target) { documentViewport.userIntent(); target.scrollIntoView({ behavior: "smooth", block: "start" }); }
           return;
         }
         if (/^https?:\/\//i.test(href) || /^mailto:/i.test(href)) {
@@ -3253,10 +3254,12 @@
 
   function renderMarkdown(text) {
     if (state.mode === "source") return;
+    documentViewport.capturePreview();
     const document = activeDocument;
     const render = document?.beginRender(state.mode, state.theme, 0);
     // 每个文档版本使用独立的渲染编号。
     applyBlockEditing();
+    documentViewport.rendered();
     if (document && activeDocument === document && document.confirmRender(render)) lastPreviewSource = document.source;
   }
 
@@ -3300,13 +3303,8 @@
           updateStats();
           return;
         }
-        const pane = el.previewPane;
-        const max = pane.scrollHeight - pane.clientHeight;
-        previewScrollRatio = max > 0 ? pane.scrollTop / max : 0;
         renderMarkdown(next);
         lastPreviewSource = next;
-        const newMax = pane.scrollHeight - pane.clientHeight;
-        pane.scrollTop = previewScrollRatio * newMax;
       }, delay);
     });
   }
@@ -3330,6 +3328,7 @@
   }
 
   function scrollToHeading(h) {
+    documentViewport.userIntent();
     if (!h || !h.isConnected) return;
     const scroller = $("#preview-pane") || el.preview.closest(".preview-pane") || el.preview.parentElement;
     try {
@@ -3351,7 +3350,9 @@
   }
 
   function jumpToHeadingIndex(index) {
+    const owner = activeDocument, binding = documentViewport.binding;
     const go = () => {
+      if (activeDocument !== owner || documentViewport.binding !== binding) return;
       const heads = liveHeadings();
       const h = heads[index];
       if (h) scrollToHeading(h);
@@ -3546,15 +3547,18 @@
 
   // ---------- Mode ----------
   function setMode(mode, persist = true) {
+    documentViewport.changeMode(mode);
     state.mode = mode;
     el.editorArea.classList.remove("mode-preview", "mode-split", "mode-source");
     el.editorArea.classList.add(`mode-${mode}`);
     $$(".mode-btn").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
     el.splitResizer.hidden = mode !== "split";
     el.statusMode.textContent = { preview: "阅读", split: "分栏", source: "源码" }[mode];
+    documentViewport.restoreSource();
     if (mode !== "source") {
       window.__stuartMd = md;
       scheduleRender();
+      documentViewport.scheduleRestore();
     }
     if (persist && state.apiReady && window.pywebview?.api?.save_settings) {
       window.pywebview.api.save_settings({ mode }).catch(() => {});
@@ -3565,6 +3569,8 @@
   function setDocument(payload) {
     // Last line of defense: never swap documents under an open block editor.
     commitActiveEditsForHistory();
+    documentViewport.capture();
+    documentViewport.detach();
     if (renderTimer) cancelAnimationFrame(renderTimer);
     clearTimeout(scheduleRender._t);
     activeDocument = payload?.document || new window.StuartCore.DocumentSession(payload);
@@ -3605,6 +3611,7 @@
           name: state.name,
           b64,
           annotations: annotations || [],
+          viewState: activeDocument.viewState,
         });
       }
       markActiveTreeItem();
@@ -3624,12 +3631,14 @@
     el.dirtyDot.hidden = !state.dirty;
     el.welcome.hidden = true;
     el.editorArea.hidden = false;
+    documentViewport.attach(activeDocument, state.mode);
     const pdfArea = $("#pdf-area");
     if (pdfArea) pdfArea.hidden = true;
     el.statusPath.textContent = path || "未保存文档";
     updateWindowTitle();
     // applyBlockEditing already fills lastPreviewBlocks / lastPreviewSource
     renderMarkdown(state.content);
+    documentViewport.restoreSource();
     if (state.mode !== "source") lastPreviewSource = state.content;
     markActiveTreeItem();
     updatePinUi();
@@ -3960,6 +3969,7 @@
     // Flush in-flight block edits first — otherwise a contenteditable session
     // is silently dropped when this is called without a prior mousedown commit.
     commitActiveEditsForHistory();
+    documentViewport.capture();
     if (!state.activeTabId) return;
     const tab = state.tabs.find((t) => t.id === state.activeTabId);
     if (!tab || tab.kind === "pdf") return;
@@ -4174,6 +4184,7 @@
         state.dirty = !!next.dirty;
         el.dirtyDot.hidden = !next.dirty;
       } else {
+        documentViewport.detach();
         state.activeTabId = null;
         activeDocument = null;
         state._selCache = null;
@@ -5088,12 +5099,7 @@ ${previewHtml}
         if (idx < 0) idx = text.toLowerCase().lastIndexOf(needle);
       }
       if (idx >= 0) {
-        ta.focus();
-        ta.setSelectionRange(idx, idx + q.length);
-        const style = getComputedStyle(ta);
-        const lineHeight = parseFloat(style.lineHeight) || 22;
-        const linesBefore = text.slice(0, idx).split("\n").length;
-        ta.scrollTop = Math.max(0, (linesBefore - 3) * lineHeight);
+        documentViewport.navigateSource(idx, idx + q.length, 2);
         state.findHits = [];
         state.findIndex = -1;
         const elc = $("#find-count");
@@ -5165,6 +5171,7 @@ ${previewHtml}
   }
 
   function highlightCurrentHit() {
+    documentViewport.userIntent();
     (state.findHits || []).forEach((n, i) => n.classList.toggle("current", i === state.findIndex));
     const cur = state.findHits[state.findIndex];
     if (cur) cur.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -7695,9 +7702,7 @@ ${previewHtml}
       to = lines.slice(0, endLine).reduce((offset,line) => offset + line.length + 1, 0) - 1;
     }
     if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < from || to > el.source.value.length) throw new Error("来源位置超出当前正文");
-    el.source.focus(); el.source.setSelectionRange(from, to);
-    const lineHeight = parseFloat(getComputedStyle(el.source).lineHeight);
-    el.source.scrollTop = Math.max(0, (el.source.value.slice(0, from).split("\n").length - 2) * lineHeight);
+    documentViewport.navigateSource(from, to);
     captureSelectionCache();
   }
 

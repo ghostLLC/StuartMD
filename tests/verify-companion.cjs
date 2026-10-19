@@ -7,6 +7,7 @@ const esbuild = require("esbuild");
 const root = path.resolve(__dirname, "..");
 const scripts = ["web/js/ui/companion.js", "web/js/ui/memory.js", "web/js/ui/ai-ui.js", "web/js/ui/conversation-view.js", "web/js/core/message-renderer.js", "web/js/core/conversation-store.js", "web/js/core/ai-service.js", "web/js/core/ai-client.js", "web/js/core/tauri-bridge.js", "web/js/app.js"];
 scripts.push("web/js/ui/model-picker.js", "web/js/ui/ai-settings.js", "web/js/core/settings-schema.js");
+scripts.push("web/js/core/document-viewport.js", "web/js/pdf-viewer.js");
 for (const script of scripts) {
   const result = spawnSync(process.execPath, ["--check", path.join(root, script)], { encoding: "utf8" });
   assert.equal(result.status, 0, `${script}: ${result.stderr}`);

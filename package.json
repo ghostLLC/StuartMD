@@ -1,16 +1,17 @@
 {
   "name": "stuartmd-validation",
-  "version": "3.5.14",
+  "version": "3.5.15",
   "private": true,
   "scripts": {
-    "test": "node --test tests/project-audit-core.cjs tests/repair-document-state.cjs tests/repair-text-buffer.cjs tests/repair-write-coordinator.cjs tests/repair-selection-formatting.cjs",
+    "test": "node --test tests/project-audit-core.cjs tests/repair-document-state.cjs tests/repair-document-view.cjs tests/repair-text-buffer.cjs tests/repair-write-coordinator.cjs tests/repair-selection-formatting.cjs",
     "test:companion": "node tests/verify-companion.cjs",
     "verify:release": "node scripts/verify-release.cjs"
   },
   "dependencies": {
     "diff": "8.0.2",
     "markdown-it-texmath": "1.0.0",
-    "pdfjs-dist": "3.11.174"
+    "pdfjs-dist": "3.11.174",
+    "textarea-caret": "3.1.0"
   },
   "devDependencies": {
     "@iarna/toml": "2.2.5",

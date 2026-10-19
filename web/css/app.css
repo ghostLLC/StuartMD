@@ -1181,6 +1181,10 @@ kbd {
   caret-color: var(--accent);
 }
 
+#input-textarea-caret-position-mirror-div {
+  scrollbar-gutter: stable;
+}
+
 #preview {
   width: 100%;
   max-width: var(--content-max);
@@ -2589,6 +2593,7 @@ body[data-theme="wallpaper"] #preview *::selection {
 #preview-pane {
   overflow-x: hidden;
   overflow-y: auto;
+  overflow-anchor: none;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
 }

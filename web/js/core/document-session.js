@@ -1,6 +1,6 @@
 (function (global) {
   "use strict";
-  const TextBuffer = typeof module === "object" ? require("./text-buffer.js").TextBuffer : global.StuartCore.TextBuffer;
+  const { TextBuffer, editsBetween, mapTextOffset } = typeof module === "object" ? require("./text-buffer.js") : global.StuartCore;
   class DocumentSession {
     constructor(record = {}) {
       this.documentId = record.documentId || global.crypto.randomUUID();
@@ -22,18 +22,36 @@
       this.selection = null;
       this.sessionId = null;
       this.conflict = null;
+      this.viewState = { preview: null, source: null, pdf: null };
     }
     get source() { return this.buffer.source; }
     get dirty() { return this.revision !== this.persistedRevision; }
     updateEditor(text) {
       if (this.accessState !== "Editable") throw new Error("请确认文件编码后编辑");
+      const previous = this.buffer.editorText;
       const edits = this.buffer.updateEditor(text);
-      if (edits.length) { this.revision++; this.selection = null; this.renderEpoch++; }
+      if (edits.length) { this.rebaseView(previous); this.revision++; this.selection = null; this.renderEpoch++; }
       return edits;
     }
     updateSource(text) {
       if (this.accessState !== "Editable") throw new Error("请确认文件编码后编辑");
-      if (text !== this.source) { this.buffer = new TextBuffer(text, this.buffer.defaultSeparator); this.revision++; this.selection = null; this.renderEpoch++; }
+      if (text !== this.source) {
+        const previous = this.buffer.editorText;
+        this.buffer = new TextBuffer(text, this.buffer.defaultSeparator);
+        this.rebaseView(previous);
+        this.revision++; this.selection = null; this.renderEpoch++;
+      }
+    }
+    rebaseView(previous) {
+      const { preview, source } = this.viewState;
+      if (!preview?.anchor && !source) return;
+      const edits = editsBetween(previous, this.buffer.editorText);
+      if (preview?.anchor) preview.anchor.offset = mapTextOffset(preview.anchor.offset, edits);
+      if (source) {
+        source.start = mapTextOffset(source.start, edits);
+        source.end = mapTextOffset(source.end, edits);
+        if (source.anchor) source.anchor.offset = mapTextOffset(source.anchor.offset, edits);
+      }
     }
     snapshot() {
       return Object.freeze({ documentId: this.documentId, revision: this.revision, source: this.source, path: this.path, title: this.title,

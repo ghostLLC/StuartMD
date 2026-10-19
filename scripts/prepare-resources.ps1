@@ -5,6 +5,12 @@ $manifest = Get-Content -LiteralPath (Join-Path $workspace 'resources/native-man
 $native = Join-Path $workspace 'resources/native'
 $package = Join-Path $workspace 'node_modules/pdfjs-dist'
 $pdfMetadata = Get-Content -LiteralPath (Join-Path $package 'package.json') -Raw | ConvertFrom-Json
+$caretPackage = Join-Path $workspace 'node_modules/textarea-caret'
+if (-not $VerifyOnly) {
+    Copy-Item -LiteralPath (Join-Path $caretPackage 'index.js') -Destination (Join-Path $workspace 'web/libs/textarea-caret.js') -Force
+    Copy-Item -LiteralPath (Join-Path $caretPackage 'LICENSE') -Destination (Join-Path $workspace 'web/libs/textarea-caret-LICENSE') -Force
+}
+if ((Get-FileHash -LiteralPath (Join-Path $caretPackage 'index.js') -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath (Join-Path $workspace 'web/libs/textarea-caret.js') -Algorithm SHA256).Hash) { throw '源码位置测量依赖内容不一致' }
 if ($pdfMetadata.version -ne $manifest.pdfJsVersion) { throw 'PDF.js版本不符合资源清单' }
 if (-not $VerifyOnly) {
     $pdfDestination = Join-Path $workspace 'web/libs/pdfjs'

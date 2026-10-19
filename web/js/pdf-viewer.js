@@ -55,7 +55,41 @@
     _pendingSel: null,
     _pageText: {},
     _pageTextBusy: {},
+    viewState: null,
+    viewReady: false,
+    restoringView: null,
+    renderEpoch: 0,
   };
+
+  function capturePdfView() {
+    if (!state.viewReady || !state.viewState) return null;
+    if (state.restoringView) return state.viewState.pdf;
+    const e = el(), top = e.scroll.getBoundingClientRect().top + e.scroll.clientTop;
+    const pages = Array.from(e.scroll.querySelectorAll(".pdf-page"));
+    const page = pages.find(item => item.getBoundingClientRect().bottom > top) || pages.at(-1);
+    const bounds = page?.getBoundingClientRect();
+    state.viewState.pdf = {
+      page: page ? Number(page.dataset.page) : state.page,
+      scale: state.scale, rotation: state.rotation, spread: state.spread,
+      top: e.scroll.scrollTop, left: e.scroll.scrollLeft,
+      pageOffset: bounds?.height ? (top - bounds.top) / bounds.height : 0,
+    };
+    return state.viewState.pdf;
+  }
+
+  function restorePdfView() {
+    const pending = state.restoringView;
+    if (!pending || pending.epoch !== state.loadEpoch || !state.viewReady) return;
+    const e = el(), view = pending.view;
+    const page = e.scroll.querySelector(`.pdf-page[data-page="${view.page}"]`);
+    let top = view.top ?? 0;
+    if (page && Number.isFinite(view.pageOffset)) {
+      const bounds = page.getBoundingClientRect();
+      top = e.scroll.scrollTop + bounds.top - e.scroll.getBoundingClientRect().top - e.scroll.clientTop + view.pageOffset * bounds.height;
+    }
+    e.scroll.scrollTop = Math.max(0, top);
+    e.scroll.scrollLeft = view.left ?? 0;
+  }
 
   let annotHist = { stack: [], i: -1, max: 21 };
   const annotationRecords = new Map();
@@ -139,10 +173,11 @@
   }
 
   async function reloadSavedPdf(documentId, record) {
-    const view = state.documentId === documentId ? { page: state.page, scale: state.scale, rotation: state.rotation, scrollTop: el().scroll.scrollTop } : null;
+    const view = state.documentId === documentId ? capturePdfView() : null;
+    const viewState = state.viewState;
     const payload = await api("pdf_document_snapshot", documentId);
     if (state.documentId !== documentId) return;
-    await openPdf({ ...payload, annotations: record.items, view });
+    await openPdf({ ...payload, annotations: record.items, view, viewState });
   }
 
   async function applyAnnotSnapshot(snapshot) {
@@ -358,6 +393,10 @@
   }
 
   async function openPdfDocument(payload) {
+    capturePdfView();
+    state.viewReady = false;
+    state.restoringView = null;
+    clearTimeout(zoomTimer);
     const epoch = ++state.loadEpoch;
     if (!window.pdfjsLib) {
       toast("PDF 引擎未加载");
@@ -374,6 +413,8 @@
     hideHoverTip();
     state.path = payload.path;
     state.documentId = payload.documentId;
+    state.viewState = payload.viewState || { pdf: null };
+    let view = payload.view || state.viewState.pdf;
     state.fileFingerprint = null;
     state._pendingSel = null; state._pageText = {}; state._pageTextBusy = {};
     state.name = payload.name;
@@ -382,10 +423,14 @@
     state.annotationRecord = record;
     annotHist = record.history;
     state.annotations = cloneAnnots(record.items);
-    state.page = payload.view?.page || 1;
-    state.rotation = payload.view?.rotation || 0;
-    state.scale = payload.view?.scale || 1.2;
+    state.page = view?.page || 1;
+    state.rotation = view?.rotation || 0;
+    state.scale = view?.scale || 1.2;
+    state.spread = view?.spread ?? false;
+    e.btnSpread?.classList.toggle("active", state.spread);
     e.scroll.innerHTML = "";
+    e.scroll.scrollTop = 0;
+    e.scroll.scrollLeft = 0;
 
     try {
       let docInit;
@@ -417,11 +462,14 @@
       if (epoch !== state.loadEpoch) { await pdf.destroy(); return; }
       state.doc = pdf; state.loadingTask = null;
       state.total = state.doc.numPages;
+      state.page = Math.min(state.page, state.total);
+      if (view) view = { ...view, page: state.page };
       e.pageInput.value = String(state.page);
       e.pageInput.max = String(state.total);
       e.pageLabel.textContent = `/ ${state.total}`;
 
       const p1 = await state.doc.getPage(1);
+      if (epoch !== state.loadEpoch) return;
       const vp1 = p1.getViewport({ scale: 1, rotation: p1.rotate + state.rotation });
       state.landscape = vp1.width >= vp1.height;
       await normalizeAnnotationCoordinates(state.doc, record);
@@ -429,14 +477,22 @@
       await loadNativePdfAnnotations();
       if (epoch !== state.loadEpoch) return;
       if (!annotHist.stack.length) resetAnnotHistory();
-      if (!payload.view) {
+      if (!view) {
         if (state.landscape) await fitToWidth(false);
         else await fitScaleToHeight(false);
       }
+      if (epoch !== state.loadEpoch) return;
       await renderAll();
-      if (payload.view && epoch === state.loadEpoch) el().scroll.scrollTop = payload.view.scrollTop;
+      if (epoch !== state.loadEpoch) return;
+      state.viewReady = true;
+      if (view) {
+        state.viewState.pdf = view;
+        state.restoringView = { epoch, view };
+        restorePdfView();
+      } else capturePdfView();
       document.title = `${payload.name} — StuartMD`;
     } catch (err) {
+      if (epoch !== state.loadEpoch) return;
       console.error("PDF open failed", err);
       toast("PDF 打开失败：" + (err && err.message ? err.message : err));
       e.area.hidden = true;
@@ -590,6 +646,7 @@
       wrap.style.width = `${viewport.width}px`;
       wrap.style.height = `${viewport.height}px`;
       wrap.style.minHeight = `${viewport.height}px`;
+      restorePdfView();
 
       // Clear placeholder
       const ph = wrap.querySelector(".pdf-page-placeholder");
@@ -723,6 +780,10 @@
   async function renderAll() {
     const e = el();
     if (!state.doc || !e.scroll) return;
+    const capturedDoc = state.doc, epoch = state.loadEpoch, renderEpoch = ++state.renderEpoch;
+    const view = capturePdfView() || state.viewState?.pdf;
+    state.viewReady = false;
+    state.restoringView = null;
     clearLiveZoom();
 
     // 1. Cancel in-flight renders and clean up canvases
@@ -750,10 +811,13 @@
     const total = state.total || 0;
     let vp0 = null;
     try {
-      const page1 = await state.doc.getPage(1);
+      const page1 = await capturedDoc.getPage(1);
+      if (capturedDoc !== state.doc || epoch !== state.loadEpoch || renderEpoch !== state.renderEpoch) return;
       const rotation = ((page1.rotate || 0) + state.rotation) % 360;
       vp0 = page1.getViewport({ scale: state.scale, rotation });
     } catch (_) {}
+
+    if (capturedDoc !== state.doc || epoch !== state.loadEpoch || renderEpoch !== state.renderEpoch) return;
 
     const pageEls = [];
     const frag = document.createDocumentFragment();
@@ -783,6 +847,11 @@
     }
     e.scroll.appendChild(frag);
     bindHighlightLayer();
+    state.viewReady = true;
+    if (view) {
+      state.restoringView = { epoch, view };
+      restorePdfView();
+    }
 
     state.baseScale = state.scale;
 
@@ -803,7 +872,9 @@
   async function fitScaleToHeight(reRender = true) {
     const e = el();
     if (!state.doc) return;
-    const page = await state.doc.getPage(1);
+    const capturedDoc = state.doc, epoch = state.loadEpoch;
+    const page = await capturedDoc.getPage(1);
+    if (capturedDoc !== state.doc || epoch !== state.loadEpoch) return;
     const rotation = ((page.rotate || 0) + state.rotation) % 360;
     const vp1 = page.getViewport({ scale: 1, rotation });
     const avail = Math.max(320, e.scroll.clientHeight - 40);
@@ -814,7 +885,9 @@
   async function fitToWidth(reRender = true) {
     const e = el();
     if (!state.doc) return;
-    const page = await state.doc.getPage(1);
+    const capturedDoc = state.doc, epoch = state.loadEpoch;
+    const page = await capturedDoc.getPage(1);
+    if (capturedDoc !== state.doc || epoch !== state.loadEpoch) return;
     const rotation = ((page.rotate || 0) + state.rotation) % 360;
     const vp1 = page.getViewport({ scale: 1, rotation });
     const gap = state.spread ? 12 : 0;
@@ -826,7 +899,9 @@
 
   async function rotateView() {
     state.rotation = ((state.rotation || 0) + 90) % 360;
-    const page = state.doc ? await state.doc.getPage(1) : null;
+    const capturedDoc = state.doc, epoch = state.loadEpoch;
+    const page = capturedDoc ? await capturedDoc.getPage(1) : null;
+    if (capturedDoc !== state.doc || epoch !== state.loadEpoch) return;
     if (page) {
       const rotation = ((page.rotate || 0) + state.rotation) % 360;
       const vp = page.getViewport({ scale: 1, rotation });
@@ -1713,6 +1788,7 @@
 
   let zoomTimer = 0;
   async function setZoom(scale, immediate) {
+    const epoch = state.loadEpoch;
     state.scale = Math.max(0.35, Math.min(4, scale));
     clearTimeout(zoomTimer);
     if (immediate) {
@@ -1724,6 +1800,7 @@
     applyLiveZoom();
     // Longer settle after wheel burst → fewer full re-renders, smoother feel
     zoomTimer = setTimeout(async () => {
+      if (epoch !== state.loadEpoch) return;
       clearLiveZoom();
       state.baseScale = state.scale;
       await renderAll();
@@ -1732,6 +1809,9 @@
 
   function bindChrome() {
     const e = el();
+    for (const type of ["wheel", "touchstart", "pointerdown", "keydown"]) {
+      e.area.addEventListener(type, () => { state.restoringView = null; }, { capture: true, passive: true });
+    }
     const on = (id, fn) => {
       const n = document.getElementById(id);
       if (n) n.addEventListener("click", fn);
@@ -1906,6 +1986,7 @@
 
   async function openAnchor(hit) {
     await state.openPromise;
+    state.restoringView = null;
     if (!state.doc || hit.sourceHash !== window.StuartMD.getDocument().diskRevision.rawByteSha256) throw new Error("PDF来源文件指纹与知识命中不同");
     const pageNumber = Number(hit.pageNumber ?? hit.page);
     if (!Number.isInteger(pageNumber) || pageNumber < 1 || pageNumber > state.total) throw new Error("PDF来源页码超出文档范围");
@@ -1936,6 +2017,10 @@
   }
 
   function hidePdf() {
+    capturePdfView();
+    state.viewReady = false;
+    state.restoringView = null;
+    clearTimeout(zoomTimer);
     state.loadEpoch++;
     const e = el();
     e.area.hidden = true;

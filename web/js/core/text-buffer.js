@@ -23,6 +23,16 @@
     return edits;
   }
 
+  function mapTextOffset(position, edits) {
+    let delta = 0;
+    for (const edit of edits) {
+      if (position < edit.from) break;
+      if (position < edit.to) return edit.from + delta;
+      delta += edit.insertedText.length - (edit.to - edit.from);
+    }
+    return position + delta;
+  }
+
   class TextBuffer {
     constructor(source = "", defaultSeparator) {
       this.source = String(source);
@@ -65,5 +75,6 @@
   global.StuartCore = global.StuartCore || {};
   global.StuartCore.TextBuffer = TextBuffer;
   global.StuartCore.editsBetween = editsBetween;
-  if (typeof module === "object") module.exports = { TextBuffer, editsBetween };
+  global.StuartCore.mapTextOffset = mapTextOffset;
+  if (typeof module === "object") module.exports = { TextBuffer, editsBetween, mapTextOffset };
 })(typeof window !== "undefined" ? window : globalThis);
