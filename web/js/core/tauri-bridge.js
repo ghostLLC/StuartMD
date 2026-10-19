@@ -38,6 +38,7 @@
     read_pdf: (path) => invoke("stuart_read_pdf", { path }),
     pdf_document_snapshot: (documentId) => invoke("pdf_document_snapshot", { documentId }),
     read_dir_tree: (path) => invoke("stuart_read_dir_tree", { path }),
+    read_document_directory: (documentId) => invoke("stuart_read_document_directory", { documentId }),
     get_recents: () => invoke("stuart_get_recents"),
     open_path: async (path) => {
       const result = await invoke("stuart_open_path", { path });

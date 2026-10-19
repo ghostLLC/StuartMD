@@ -143,6 +143,7 @@
   };
   const documentViewport = new window.StuartCore.DocumentViewport(el);
   documentViewport.bind();
+  const folderView = new window.StuartCore.FolderView(el.fileTree, el.folderName, $("#btn-refresh-folder"));
 
   // ---------- Markdown ----------
   const md = window.markdownit({
@@ -177,7 +178,6 @@
   /** P0: skip full preview rebuild when content is unchanged */
   let lastPreviewSource = null;
   let lastOutlineSig = "";
-  let lastTreePath = null;
   /** P3: last rendered markdown blocks for dirty update */
   let lastPreviewBlocks = [];
 
@@ -3574,6 +3574,8 @@
     if (renderTimer) cancelAnimationFrame(renderTimer);
     clearTimeout(scheduleRender._t);
     activeDocument = payload?.document || new window.StuartCore.DocumentSession(payload);
+    folderView.cancel();
+    folderView.update(activeDocument, state.apiReady);
     state._selCache = null;
     aiUI.lastQuote = "";
     aiUI.lastMessages = [];
@@ -3675,7 +3677,10 @@
     }
     if (activeDocument === document) {
       window.StuartAIService?.setDocument(document);
+      if (state.path !== document.path) folderView.cancel();
       state.path = document.path;
+      folderView.update(activeDocument, state.apiReady);
+      folderView.highlight(document.path);
       state.name = document.title;
       state.content = document.source;
       state.dirty = document.dirty;
@@ -4187,6 +4192,8 @@
         documentViewport.detach();
         state.activeTabId = null;
         activeDocument = null;
+        folderView.cancel();
+        folderView.update(null, state.apiReady);
         state._selCache = null;
         state.path = null;
         state.name = "未命名.md";
@@ -4697,7 +4704,7 @@
     if (res.result === "Conflict") return;
     toast(document.dirty ? "捕获版本已另存为，当前正文继续保持待保存状态" : "已保存为：" + document.title);
     await refreshRecents();
-    if (state.folder) await loadFolder(state.folder);
+    if (activeDocument === document) await refreshDocumentFolder();
   }
 
   async function newDocument() {
@@ -4748,6 +4755,8 @@
   // ---------- Folder tree ----------
   async function openFolder() {
     if (!state.apiReady) return;
+    folderView.cancel();
+    folderView.update(activeDocument, state.apiReady);
     const path = await window.pywebview.api.open_folder_dialog();
     if (!path) return;
     await loadFolder(path);
@@ -4756,7 +4765,11 @@
 
   async function loadFolder(path) {
     if (!state.apiReady || !path) return;
+    folderView.cancel();
+    folderView.update(activeDocument, state.apiReady);
+    const sequence = folderView.sequence;
     const res = await window.pywebview.api.read_dir_tree(path);
+    if (sequence !== folderView.sequence) return;
     if (res?.error) {
       toast(res.error);
       // Stale last_folder from an older install/machine
@@ -4772,12 +4785,31 @@
     await window.pywebview.api.rag_set_workspace(res.path);
     await window.StuartAIService.setWorkspace(res.path);
     window.dispatchEvent(new CustomEvent("stuart-workspace-changed", { detail: { workspaceRoot: res.path } }));
-    el.folderName.textContent = res.name || res.path;
-    el.folderName.title = res.path;
-    renderTree(res.items || [], el.fileTree, 0);
+    if (sequence !== folderView.sequence) return;
+    folderView.render(res, activeDocument?.path);
     toggleSidebar(true);
     showSidebarPanel("files");
     persistSession();
+  }
+
+  async function refreshDocumentFolder() {
+    if (!state.apiReady || !activeDocument?.path || folderView.pending) return;
+    const ticket = folderView.begin(activeDocument);
+    folderView.update(activeDocument, state.apiReady);
+    try {
+      const result = await window.pywebview.api.read_document_directory(ticket.document.documentId);
+      if (!folderView.current(ticket, activeDocument)) return;
+      if (!folderView.matchesPath(result.documentPath, ticket.path)) return;
+      const { selected, changedDirectory } = folderView.render(result, activeDocument.path);
+      showSidebarPanel("files");
+      if (changedDirectory && selected) selected.scrollIntoView({ block: "nearest" });
+      toast(result.truncated ? "目录已刷新，部分深层目录或超出数量限制的条目未显示" : "已刷新当前文件所在目录");
+    } catch (error) {
+      if (folderView.current(ticket, activeDocument)) toast("目录刷新失败：" + (error instanceof Error ? error.message : String(error)));
+    } finally {
+      folderView.finish(ticket);
+      folderView.update(activeDocument, state.apiReady);
+    }
   }
 
   function bindTreeDelegates() {
@@ -4827,63 +4859,8 @@
     });
   }
 
-  function renderTree(items, container, depth) {
-    container.innerHTML = "";
-    if (!items.length) {
-      container.innerHTML = `<div class="empty-hint">目录中没有 Markdown 文件</div>`;
-      return;
-    }
-    const frag = document.createDocumentFragment();
-    const walk = (list, d, parent) => {
-      const local = document.createDocumentFragment();
-      list.forEach((item) => {
-        if (item.type === "dir") {
-          const row = document.createElement("div");
-          row.className = "tree-item dir";
-          row.style.paddingLeft = `${8 + d * 14}px`;
-          row.innerHTML = `<span class="chev">›</span><span class="name"></span>`;
-          row.querySelector(".name").textContent = item.name;
-          const kids = document.createElement("div");
-          kids.className = "tree-children";
-          if (item.children?.length) walk(item.children, d + 1, kids);
-          local.appendChild(row);
-          local.appendChild(kids);
-        } else {
-          const row = document.createElement("div");
-          row.className = "tree-item file";
-          row.dataset.path = item.path || "";
-          row.style.paddingLeft = `${8 + d * 14 + 14}px`;
-          row.textContent = item.name;
-          row.title = `${item.path}（中键或右键：新窗口打开）`;
-          local.appendChild(row);
-        }
-      });
-      parent.appendChild(local);
-    };
-    walk(items, depth, frag);
-    container.appendChild(frag);
-  }
-
   function markActiveTreeItem() {
-    // P0: skip full tree walk when active path is unchanged
-    if (state.path === lastTreePath) return;
-    const prev = lastTreePath;
-    lastTreePath = state.path;
-    const tree = el.fileTree;
-    if (!tree) return;
-    // Only touch previous + current nodes
-    if (prev) {
-      try {
-        const old = tree.querySelector(`.tree-item.file[data-path="${CSS.escape(prev)}"]`);
-        if (old) old.classList.remove("active");
-      } catch (_) {}
-    }
-    if (state.path) {
-      try {
-        const cur = tree.querySelector(`.tree-item.file[data-path="${CSS.escape(state.path)}"]`);
-        if (cur) cur.classList.add("active");
-      } catch (_) {}
-    }
+    folderView.highlight(state.path);
   }
 
   // ---------- Recents ----------
@@ -5668,9 +5645,7 @@ ${previewHtml}
         toast(`主题：${themeLabel(theme)}`);
       });
     });
-    $("#btn-refresh-folder").addEventListener("click", () => {
-      if (state.folder) loadFolder(state.folder);
-    });
+    $("#btn-refresh-folder").addEventListener("click", refreshDocumentFolder);
     $("#btn-find-close").addEventListener("click", closeFind);
     $("#btn-find-go")?.addEventListener("click", () => startFindFromInput(false));
     $("#btn-find-next").addEventListener("click", () => findNext(1));
@@ -7291,6 +7266,7 @@ ${previewHtml}
 
     async function onReady() {
       state.apiReady = true;
+      folderView.update(activeDocument, true);
       try {
         const s = await window.pywebview.api.get_settings();
         // wallpaper first so theme can apply

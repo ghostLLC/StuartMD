@@ -7,6 +7,7 @@ mod ai;
 mod app_runtime;
 mod document;
 mod fs_api;
+mod folder_tree;
 mod win_api;
 mod rag;
 mod rag_ipc;
@@ -71,6 +72,7 @@ fn main() {
             fs_api::stuart_read_pdf,
             fs_api::stuart_read_pdf_binary,
             fs_api::stuart_read_dir_tree,
+            fs_api::stuart_read_document_directory,
             fs_api::stuart_get_recents,
             fs_api::stuart_open_path,
             fs_api::stuart_open_in_new_window,

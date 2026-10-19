@@ -1,10 +1,11 @@
 {
   "name": "stuartmd-validation",
-  "version": "3.5.16",
+  "version": "3.5.17",
   "private": true,
   "scripts": {
     "test": "node --test tests/project-audit-core.cjs tests/repair-document-state.cjs tests/repair-document-view.cjs tests/repair-text-buffer.cjs tests/repair-write-coordinator.cjs tests/repair-selection-formatting.cjs",
     "test:companion": "node tests/verify-companion.cjs",
+    "test:folder": "cargo build --manifest-path tauri/src-tauri/Cargo.toml --locked --example folder-tree && node --test tests/repair-folder-refresh.cjs",
     "verify:release": "node scripts/verify-release.cjs"
   },
   "dependencies": {

@@ -1,8 +1,8 @@
 # StuartMD
 
-Windows Markdown / PDF 阅读与编辑器。当前代码版本为 **3.5.16**，使用 Tauri 2 和共享前端。
+Windows Markdown / PDF 阅读与编辑器。当前代码版本为 **3.5.17**，使用 Tauri 2 和共享前端。
 
-安装文件通过 [GitHub Releases](https://github.com/ghostLLC/StuartMD/releases) 提供。当前分支的构建文件名称为 `StuartMD_3.5.16_x64-setup.exe`；验证范围见 `docs/validation/3.5.16/acceptance.md`。
+安装文件通过 [GitHub Releases](https://github.com/ghostLLC/StuartMD/releases) 提供。当前分支的构建文件名称为 `StuartMD_3.5.17_x64-setup.exe`；验证范围见 `docs/validation/3.5.17/acceptance.md`。
 
 ## 文档编辑
 
@@ -11,6 +11,8 @@ Windows Markdown / PDF 阅读与编辑器。当前代码版本为 **3.5.16**，�
 编辑保留未修改区域的原文和换行。打开需要确认编码的文件时，先查看编码预览；保存检查实际文件版本，外部修改会暂停自动保存并显示基础内容、本地内容及外部内容。草稿包含未保存文档和空正文，启动恢复界面可以查看与恢复已经持久化的修改。
 
 多标签分别保存编辑状态，多窗口分别管理文档访问权限。支持文件夹目录树、页宽设置、浅色与深色主题，以及简体中文、繁体中文和 English。
+
+左侧刷新按钮读取当前文件所在目录，显示 Markdown、TXT 和 PDF 文档，并高亮当前文件。刷新同一目录时保留展开状态和滚动位置；未保存文档需要保存后使用。伴读工作区通过“打开文件夹”设置。
 
 ## PDF 阅读与批注
 
@@ -74,7 +76,7 @@ pwsh -File scripts/verify-release.ps1
 
 完整验收命令由 `scripts/verify-repair.ps1` 的 `Core`、`Browser`、`Native`、`Models`、`Providers`、`Installer` 模式运行。Models 模式需要按照 `tests/model-reference-requirements.txt` 配置独立 Python 环境；Providers 模式使用当前用户已经配置的 DeepSeek 加密密钥和独立测试目录。密钥内容不会进入验证日志。Installer 模式执行本机安装、SQLite 一致性备份、实际用户数据保留和进程启动检查。
 
-实际结果和各项验证范围见 [3.5.16 验收](docs/validation/3.5.16/acceptance.md)。公开发布前执行 `pwsh -File scripts/verify-release.ps1 -Publication`，全部必要检查通过并具有当前源代码指纹后允许发布。用户要求跳过的界面检查记录为 `SkippedByUser`。
+实际结果和各项验证范围见 [3.5.17 验收](docs/validation/3.5.17/acceptance.md)。公开发布前执行 `pwsh -File scripts/verify-release.ps1 -Publication`，全部必要检查通过并具有当前源代码指纹后允许发布。用户要求跳过的界面检查记录为 `SkippedByUser`。
 
 ```powershell
 Set-Location tauri

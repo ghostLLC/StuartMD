@@ -801,6 +801,18 @@ body {
   font-weight: 600;
 }
 
+#btn-refresh-folder[aria-busy="true"] svg {
+  animation: folder-refresh-spin 0.8s linear infinite;
+}
+
+@keyframes folder-refresh-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #btn-refresh-folder[aria-busy="true"] svg { animation: none; }
+}
+
 .tree-item.dir {
   font-weight: 600;
   color: var(--text);

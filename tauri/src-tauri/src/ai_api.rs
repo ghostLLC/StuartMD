@@ -264,17 +264,21 @@ pub fn stuart_search_md(root: String, query: String, limit: Option<usize>) -> Va
     })
 }
 
-/// List Markdown files under a workspace root (depth-limited via walk_md).
+/// 按深度限制列出工作区 Markdown 和文本文件。
 #[tauri::command]
 pub fn stuart_workspace_files(root: String) -> Value {
     let p = match crate::fs_api::ensure_dir_allowed(&root) {
         Ok(p) => p,
         Err(e) => return json!({"error": e}),
     };
-    let items = crate::fs_api::walk_md_public(&p);
+    let tree = match crate::fs_api::walk_md_public(&p) {
+        Ok(tree) => tree,
+        Err(error) => return json!({"error": error}),
+    };
     json!({
         "ok": true,
         "root": crate::fs_api::display_path(&p),
-        "items": items
+        "items": tree["items"],
+        "truncated": tree["truncated"]
     })
 }

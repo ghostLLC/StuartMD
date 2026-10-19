@@ -17,12 +17,12 @@ pub const PROG_ID_PDF: &str = "StuartMD.PDF";
 pub const SETTINGS_SCHEMA: i64 = 6;
 const PDF_MAX: u64 = 40 * 1024 * 1024;
 pub const PDF_MAX_BYTES: u64 = 100 * 1024 * 1024; // 100 MB 上限
-pub const MD_EXTS: [&str; 5] = [".md", ".markdown", ".mdown", ".mkd", ".txt"];
+pub use crate::folder_tree::{display_path, MD_EXTS};
 
 static ATOMIC_WRITE_SEQ: AtomicU64 = AtomicU64::new(1);
 
-pub fn walk_md_public(dir: &Path) -> Vec<Value> {
-    walk_md(dir, 1, 4)
+pub fn walk_md_public(dir: &Path) -> Result<Value, String> {
+    crate::folder_tree::scan(dir, false, 4, None)
 }
 
 static STARTUP_FILE: OnceLock<Option<String>> = OnceLock::new();
@@ -509,18 +509,6 @@ fn canonical_target(path: &Path) -> Result<PathBuf, String> {
         return Err("拒绝解析到网络共享的路径".into());
     }
     Ok(canon)
-}
-
-/// UI-safe path string: strip the `\\?\` verbatim prefix Windows canonicalize adds.
-pub fn display_path(p: &Path) -> String {
-    let s = p.to_string_lossy().to_string();
-    if let Some(rest) = s.strip_prefix("\\\\?\\UNC\\") {
-        return format!("\\\\{rest}");
-    }
-    if let Some(rest) = s.strip_prefix("\\\\?\\") {
-        return rest.to_string();
-    }
-    s
 }
 
 fn parse_canon_dir(raw: &str) -> Result<PathBuf, String> {
@@ -1150,67 +1138,6 @@ pub fn stuart_read_pdf_binary(window: tauri::WebviewWindow, path: String) -> Res
     Ok(Response::new(bytes))
 }
 
-fn walk_md(dir: &Path, depth: i32, max_depth: i32) -> Vec<Value> {
-    walk_md_capped(dir, depth, max_depth, &mut 0)
-}
-
-fn walk_md_capped(dir: &Path, depth: i32, max_depth: i32, count: &mut usize) -> Vec<Value> {
-    const MAX_NODES: usize = 2500;
-    if depth > max_depth || *count >= MAX_NODES {
-        return vec![];
-    }
-    let mut items = vec![];
-    let Ok(rd) = fs::read_dir(dir) else {
-        return items;
-    };
-    let mut entries: Vec<_> = rd.flatten().collect();
-    entries.sort_by_key(|e| {
-        let is_dir = e.path().is_dir();
-        let name = e.file_name().to_string_lossy().to_lowercase();
-        (!is_dir, name)
-    });
-    for e in entries {
-        if *count >= MAX_NODES {
-            break;
-        }
-        let name = e.file_name().to_string_lossy().to_string();
-        if name.starts_with('.') {
-            continue;
-        }
-        let p = e.path();
-        if p.is_dir() {
-            let children = walk_md_capped(&p, depth + 1, max_depth, count);
-            let has_md = fs::read_dir(&p)
-                .map(|rd| {
-                    rd.flatten().any(|c| {
-                        c.path().is_file()
-                            && c
-                                .path()
-                                .extension()
-                                .and_then(|x| x.to_str())
-                                .map(|x| {
-                                    let e = format!(".{}", x.to_lowercase());
-                                    MD_EXTS.contains(&e.as_str())
-                                })
-                                .unwrap_or(false)
-                    })
-                })
-                .unwrap_or(false);
-            if !children.is_empty() || has_md {
-                *count += 1;
-                items.push(json!({"name": name, "path": display_path(&p), "type": "dir", "children": children}));
-            }
-        } else if let Some(ext) = p.extension().and_then(|x| x.to_str()) {
-            let e2 = format!(".{}", ext.to_lowercase());
-            if MD_EXTS.contains(&e2.as_str()) {
-                *count += 1;
-                items.push(json!({"name": name, "path": display_path(&p), "type": "file"}));
-            }
-        }
-    }
-    items
-}
-
 #[tauri::command]
 pub fn stuart_read_dir_tree(window: tauri::WebviewWindow, path: String) -> Value {
     let root = match ensure_dir_allowed(&path) {
@@ -1218,11 +1145,29 @@ pub fn stuart_read_dir_tree(window: tauri::WebviewWindow, path: String) -> Value
         Err(e) => return json!({"error": e}),
     };
     if let Err(error) = ensure_window_read_allowed(&window, &path) { return json!({"error":error}); }
-    json!({
-        "path": display_path(&root),
-        "name": root.file_name().unwrap_or_default().to_string_lossy(),
-        "items": walk_md(&root, 1, 3)
-    })
+    match crate::folder_tree::scan(&root, true, 3, None) {
+        Ok(tree) => tree,
+        Err(error) => json!({"error": error}),
+    }
+}
+
+fn document_directory(service: &crate::document::DocumentService, owner: &str, document_id: &str) -> Result<(PathBuf, Value), String> {
+    let document = service.state(owner, document_id)?;
+    let path = document.path.ok_or("保存文档后可定位所在文件夹")?;
+    let root = path.parent().ok_or("文件所在目录缺失")?.to_path_buf();
+    let mut tree = crate::folder_tree::scan(&root, true, 3, Some(&path))?;
+    tree["documentPath"] = json!(display_path(&path));
+    Ok((root, tree))
+}
+
+#[tauri::command]
+pub async fn stuart_read_document_directory(window: tauri::WebviewWindow, document_id: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let service = window.state::<crate::document::DocumentService>();
+        let (root, tree) = document_directory(&service, window.label(), &document_id)?;
+        register_window_path(&window, &display_path(&root))?;
+        Ok(tree)
+    }).await.map_err(|error| format!("目录读取任务失败：{error}"))?
 }
 
 #[tauri::command]
@@ -1527,6 +1472,27 @@ pub fn stuart_open_welcome(window: tauri::WebviewWindow) -> Value {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn document_directory_uses_owned_document_and_preserves_content() {
+        let temp = tempfile::tempdir().unwrap();
+        let directory = temp.path().join("资料");
+        fs::create_dir(&directory).unwrap();
+        let file = directory.join("正文.md");
+        fs::write(&file, "# 原有正文").unwrap();
+        let service = crate::document::DocumentService::new(temp.path().join("data")).unwrap();
+        let document = service.read("window-a", &file).unwrap();
+        let (root, tree) = document_directory(&service, "window-a", &document.document_id).unwrap();
+        assert_eq!(root, fs::canonicalize(&directory).unwrap());
+        assert_eq!(tree["items"][0]["name"], "正文.md");
+        assert!(document_directory(&service, "window-b", &document.document_id).is_err());
+        let unsaved = service.new_document("window-a").unwrap();
+        assert!(document_directory(&service, "window-a", &unsaved.document_id).is_err());
+        assert_eq!(fs::read_to_string(&file).unwrap(), "# 原有正文");
+        fs::remove_file(&file).unwrap();
+        assert!(document_directory(&service, "window-a", &document.document_id).unwrap().1["items"].as_array().unwrap().is_empty());
+        fs::remove_dir(&directory).unwrap();
+        assert!(document_directory(&service, "window-a", &document.document_id).is_err());
+    }
     use super::*;
 
     #[test]
