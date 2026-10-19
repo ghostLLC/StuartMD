@@ -1,6 +1,12 @@
 param([switch]$VerifyOnly)
 $ErrorActionPreference = 'Stop'
 $workspace = Split-Path -Parent $PSScriptRoot
+$homeIcon = Join-Path $workspace 'web/assets/app.ico'
+if (-not $VerifyOnly) {
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $homeIcon) | Out-Null
+    Copy-Item -LiteralPath (Join-Path $workspace 'assets/app.ico') -Destination $homeIcon -Force
+}
+if ((Get-FileHash -LiteralPath $homeIcon -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath (Join-Path $workspace 'assets/app.ico') -Algorithm SHA256).Hash) { throw '开始页面与应用图标内容不一致' }
 $manifest = Get-Content -LiteralPath (Join-Path $workspace 'resources/native-manifest.json') -Raw | ConvertFrom-Json
 $native = Join-Path $workspace 'resources/native'
 $package = Join-Path $workspace 'node_modules/pdfjs-dist'

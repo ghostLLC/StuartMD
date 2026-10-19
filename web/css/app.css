@@ -204,13 +204,6 @@
   border-top-color: #ecd97a;
 }
 
-[data-theme="minion"] .logo-mark {
-  background: radial-gradient(circle at 35% 30%, #fff6b0 0%, #f5d33d 55%, #e6c020 100%);
-  border: 2px solid #c9a20a;
-  color: #2c2416;
-  box-shadow: inset 0 -4px 10px rgba(0, 0, 0, 0.08);
-}
-
 [data-theme="minion"] .markdown-body blockquote {
   border-left-color: #2f6fed;
   background: #fff8dc;
@@ -985,16 +978,9 @@ body {
   width: 64px;
   height: 64px;
   margin: 0 auto 16px;
-  border-radius: 16px;
-  background: var(--bg-soft);
-  color: var(--text);
-  border: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: -0.5px;
+  display: block;
+  object-fit: contain;
+  user-select: none;
 }
 
 .welcome-card h1 {

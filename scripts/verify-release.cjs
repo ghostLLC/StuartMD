@@ -4,10 +4,11 @@ const path = require('node:path');
 const toml = require('@iarna/toml');
 const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
+const { JSDOM } = require('jsdom');
 const root = path.resolve(__dirname, '..');
 const version = toml.parse(fs.readFileSync(path.join(root, 'tauri/src-tauri/Cargo.toml'), 'utf8')).package.version;
 const configuration = JSON.parse(fs.readFileSync(path.join(root, 'tauri/src-tauri/tauri.conf.json'), 'utf8'));
-assert.equal(version, '3.5.15');
+assert.equal(version, '3.5.16');
 assert.equal(configuration.version, version);
 assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version, version);
 for (const file of ['README.md', 'samples/示例文档.md', 'samples/欢迎使用 StuartMD.md']) {
@@ -20,6 +21,14 @@ assert.ok(fs.readFileSync(path.join(root, 'tauri/src-tauri/src/fs_api.rs'), 'utf
 assert.match(execFileSync('rustc', ['--version'], { cwd: root, encoding: 'utf8' }), /^rustc 1\.98\.1 /);
 const resources = JSON.parse(fs.readFileSync(path.join(root, 'resources/native-manifest.json'), 'utf8'));
 const sha256 = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+const home = new JSDOM(fs.readFileSync(path.join(root, 'web/index.html'), 'utf8'));
+const homeLogo = home.window.document.querySelector('#welcome img.logo-mark');
+assert.ok(homeLogo, '开始页面必须使用应用图标');
+assert.equal(homeLogo.getAttribute('src'), 'assets/app.ico');
+assert.equal(homeLogo.getAttribute('alt'), 'StuartMD');
+assert.equal(sha256(path.join(root, 'web/assets/app.ico')), sha256(path.join(root, 'assets/app.ico')));
+assert.deepEqual(configuration.bundle.icon, ['../../assets/app.ico']);
+home.window.close();
 assert.equal(sha256(path.join(root, 'web/libs/textarea-caret.js')), sha256(path.join(root, 'node_modules/textarea-caret/index.js')));
 assert.equal(sha256(path.join(root, 'web/libs/textarea-caret-LICENSE')), sha256(path.join(root, 'node_modules/textarea-caret/LICENSE')));
 const evidence = { version, pdfjs: require('pdfjs-dist/package.json').version, resourceManifestHash: sha256(path.join(root, 'resources/native-manifest.json')), nativeManifest: resources };

@@ -1,8 +1,8 @@
 # StuartMD
 
-Windows Markdown / PDF 阅读与编辑器。当前代码版本为 **3.5.15**，使用 Tauri 2 和共享前端。
+Windows Markdown / PDF 阅读与编辑器。当前代码版本为 **3.5.16**，使用 Tauri 2 和共享前端。
 
-安装文件通过 [GitHub Releases](https://github.com/ghostLLC/StuartMD/releases) 提供。当前分支的构建文件名称为 `StuartMD_3.5.15_x64-setup.exe`；验证范围见 `docs/validation/3.5.15/acceptance.md`。
+安装文件通过 [GitHub Releases](https://github.com/ghostLLC/StuartMD/releases) 提供。当前分支的构建文件名称为 `StuartMD_3.5.16_x64-setup.exe`；验证范围见 `docs/validation/3.5.16/acceptance.md`。
 
 ## 文档编辑
 
@@ -74,7 +74,7 @@ pwsh -File scripts/verify-release.ps1
 
 完整验收命令由 `scripts/verify-repair.ps1` 的 `Core`、`Browser`、`Native`、`Models`、`Providers`、`Installer` 模式运行。Models 模式需要按照 `tests/model-reference-requirements.txt` 配置独立 Python 环境；Providers 模式使用当前用户已经配置的 DeepSeek 加密密钥和独立测试目录。密钥内容不会进入验证日志。Installer 模式执行本机安装、SQLite 一致性备份、实际用户数据保留和进程启动检查。
 
-实际结果和各项验证范围见 [3.5.15 验收](docs/validation/3.5.15/acceptance.md)。公开发布前执行 `pwsh -File scripts/verify-release.ps1 -Publication`，全部必要检查通过并具有当前源代码指纹后允许发布。用户要求跳过的界面检查记录为 `SkippedByUser`。
+实际结果和各项验证范围见 [3.5.16 验收](docs/validation/3.5.16/acceptance.md)。公开发布前执行 `pwsh -File scripts/verify-release.ps1 -Publication`，全部必要检查通过并具有当前源代码指纹后允许发布。用户要求跳过的界面检查记录为 `SkippedByUser`。
 
 ```powershell
 Set-Location tauri
