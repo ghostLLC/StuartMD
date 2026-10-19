@@ -1,0 +1,98 @@
+{
+  "version": "3.5.16",
+  "pdfjs": "3.11.174",
+  "resourceManifestHash": "7f4b8b20d441adac793ce927aa5818be7c465064bbe17df40986c3d218fb14d5",
+  "nativeManifest": {
+    "schemaVersion": 1,
+    "pdfiumApi": 7881,
+    "onnxRuntimeVersion": "1.20.1",
+    "tesseractVersion": "5.4.0.20240606",
+    "ocrDpi": 300,
+    "ocrRecognitionDpi": [
+      300,
+      150
+    ],
+    "ocrLanguages": [
+      "chi_sim",
+      "chi_tra",
+      "eng"
+    ],
+    "archives": [
+      {
+        "name": "pdfium-7881.tgz",
+        "url": "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/7881/pdfium-win-x64.tgz",
+        "sha256": "73cc0de638ac2095e7445bf56a38200a5b7c7ca0e9f4ba144598f2457377ac08",
+        "kind": "pdfium"
+      },
+      {
+        "name": "tesseract-5.4.0.exe",
+        "url": "https://github.com/UB-Mannheim/tesseract/releases/download/v5.4.0.20240606/tesseract-ocr-w64-setup-5.4.0.20240606.exe",
+        "sha256": "c885fff6998e0608ba4bb8ab51436e1c6775c2bafc2559a19b423e18678b60c9",
+        "kind": "tesseract"
+      },
+      {
+        "name": "onnxruntime-win-x64-1.20.1.zip",
+        "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.20.1/onnxruntime-win-x64-1.20.1.zip",
+        "sha256": "78d447051e48bd2e1e778bba378bec4ece11191c9e538cf7b2c4a4565e8f5581",
+        "kind": "onnxruntime"
+      }
+    ],
+    "languageRevision": "87416418657359cb625c412a48b6e1d6d41c29bd",
+    "files": [
+      {
+        "path": "onnxruntime/onnxruntime.dll",
+        "sha256": "4cb41e89b8bf30578e1dd95e9c40292d61974a4bfcd666409302c4f0c5aa8ce0"
+      },
+      {
+        "path": "bin/pdfium.dll",
+        "sha256": "79d4676b656cfb1abcea88f9ade3b4b0826c5200382db5f4ec72a636c598c118"
+      },
+      {
+        "path": "tesseract/tesseract.exe",
+        "sha256": "babb405f4366b480d02cd8ff2bac8d497170f6c1711ce6f3d5d8bf0fb7fa6ed9"
+      },
+      {
+        "path": "tesseract/libtesseract-5.dll",
+        "sha256": "279488c41bd341edaa03dcd097faa33604ba330e6254ac97bcaf2229d8d7ac1a"
+      },
+      {
+        "path": "tesseract/libleptonica-6.dll",
+        "sha256": "26861baff4d25446a03ed1f6064d2eae7435eddf51bb36af4e634c0eb4eb3af0"
+      },
+      {
+        "path": "tesseract/tessdata/eng.traineddata",
+        "sha256": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2"
+      },
+      {
+        "path": "tesseract/tessdata/chi_sim.traineddata",
+        "sha256": "a5fcb6f0db1e1d6d8522f39db4e848f05984669172e584e8d76b6b3141e1f730"
+      },
+      {
+        "path": "tesseract/tessdata/chi_tra.traineddata",
+        "sha256": "529c5b5797d64b126065cd55f2bb4c7fd7b15790798091b1ff259941a829330b"
+      }
+    ],
+    "pdfJsVersion": "3.11.174",
+    "pdfJsCmapCount": 168,
+    "pdfJsFontCount": 16
+  },
+  "aiModelCatalog": {
+    "version": "2026-10-15",
+    "verifiedAt": "2026-10-15",
+    "sha256": "6aaee8b0f128221e028bc9105672b1fcd77d80b8505a3f576324d60a73d8d80a",
+    "models": [
+      "deepseek-flash",
+      "deepseek-v4-pro",
+      "qwen3.8-max",
+      "qwen3.8-flash",
+      "qwen3.7-plus",
+      "kimi-k3",
+      "kimi-k2.6",
+      "kimi-k2.7-code",
+      "kimi-k2.7-code-highspeed",
+      "glm-5.3",
+      "glm-5.3-flash",
+      "glm-5.3-flashx"
+    ]
+  }
+}

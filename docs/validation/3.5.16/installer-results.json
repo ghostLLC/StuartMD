@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "previousVersion": "3.5.15",
+  "startedWithVersion": "3.5.15",
+  "installedVersion": "3.5.16",
+  "applicationSha256": "0fc5aeb85c1c907202da85b9ce3320bf3d07472e4fe7b1aa7752dc733841d185",
+  "installerSha256": "8877199e9caef9f23d4e4b0a9dc196ce4aed2d6a3b1d3fc704f7a6fa2de34f6d",
+  "verifiedResources": 20,
+  "userDataPreservation": {
+    "preservedFiles": 32,
+    "preservedDatabases": 6,
+    "preservedRows": 240
+  },
+  "installedProcessStartup": "SkippedByUser",
+  "webviewVersion": null,
+  "backupDirectory": "C:\\Users\\Administrator\\Desktop\\Stuart\\tests\\native-artifacts\\installer-734bce82-f283-4da9-99b4-fb6023c5a347",
+  "upgradeBaselineDirectory": "",
+  "isolatedWindowsUpgrade": "NotVerified",
+  "nativeUiAcceptance": "SkippedByUser",
+  "completedAt": "2026-10-19T02:58:08.8883970Z"
+}
