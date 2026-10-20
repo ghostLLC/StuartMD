@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "version": "3.5.18",
+  "status": "Passed",
+  "sourceFingerprint": "e1f8bf02eef8557d03b87b787f15f8cc8ccccf8e5db2a4f130451638f4468f6c",
+  "command": "cargo tauri build --bundles nsis",
+  "log": "tests/native-artifacts/icons-3.5.18-build.log",
+  "installer": "C:\\Users\\Administrator\\Desktop\\Stuart\\tauri\\src-tauri\\target\\release\\bundle\\nsis\\StuartMD_3.5.18_x64-setup.exe",
+  "installerBytes": 86945262,
+  "installerSha256": "98b536164cf9e1a752bc01cd79ccb48a684b4a28db525a0a1df0bb9391e87450",
+  "applicationSha256": "2d3150980ec2c571cb7249552cc74d81fee268bc9681f4b7ce0f871731c96e42"
+}

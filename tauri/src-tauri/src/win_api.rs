@@ -233,6 +233,33 @@ pub fn stuart_get_file_association_status() -> Value {
     }
 }
 
+#[cfg(target_os = "windows")]
+fn markdown_document_icon(exe: &Path) -> Result<String, String> {
+    let icon = exe.parent().ok_or("应用程序目录缺失")?.join("file-md.ico");
+    if !icon.is_file() { return Err(format!("Markdown 文档图标缺失：{}", icon.display())); }
+    Ok(format!("\"{}\",0", icon.display()))
+}
+
+#[cfg(target_os = "windows")]
+fn register_markdown_icons(classes: &winreg::RegKey, exe: &Path, icon: &str) -> Result<(), String> {
+    let write_icon = |prog_id: &str| -> Result<(), String> {
+        let (key, _) = classes.create_subkey(format!(r"{}\DefaultIcon", prog_id)).map_err(|error| error.to_string())?;
+        key.set_value("", &icon).map_err(|error| error.to_string())
+    };
+    write_icon(PROG_ID)?;
+    let command = match classes.open_subkey(r"Markdown\shell\open\command") {
+        Ok(key) => key.get_value::<String, _>("").map_err(|error| error.to_string())?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.to_string()),
+    };
+    // 仅更新本应用安装程序注册的 Markdown 类型。
+    if command.eq_ignore_ascii_case(&format!("{} \"%1\"", exe.display()))
+        || command.eq_ignore_ascii_case(&format!("\"{}\" \"%1\"", exe.display())) {
+        write_icon("Markdown")?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn stuart_register_file_association() -> Value {
     #[cfg(target_os = "windows")]
@@ -246,12 +273,10 @@ pub fn stuart_register_file_association() -> Value {
         let icon_app = format!("{},0", exe_s);
         // Distinct file-type icons shipped beside the exe (resources)
         let icon_dir = exe.parent().map(|p| p.to_path_buf()).unwrap_or_else(exe_dir);
-        let icon_md_path = icon_dir.join("file-md.ico");
         let icon_pdf_path = icon_dir.join("file-pdf.ico");
-        let icon_md = if icon_md_path.is_file() {
-            format!("{},0", icon_md_path.to_string_lossy())
-        } else {
-            icon_app.clone()
+        let icon_md = match markdown_document_icon(&exe) {
+            Ok(icon) => icon,
+            Err(error) => return json!({"error": error}),
         };
         let icon_pdf = if icon_pdf_path.is_file() {
             format!("{},0", icon_pdf_path.to_string_lossy())
@@ -360,8 +385,13 @@ pub fn stuart_register_file_association() -> Value {
             let _ = k.0.set_value("Path", &exe_dir().to_string_lossy().as_ref());
         }
 
-        // Do NOT spawn cmd/ie4uinit here — it flashes a console window on every boot.
-        // Registry writes are enough for Explorer "Open with" after a refresh.
+        let classes = match hkcu.open_subkey_with_flags(r"Software\Classes", KEY_READ | KEY_WRITE) {
+            Ok(classes) => classes,
+            Err(error) => return json!({"error": error.to_string()}),
+        };
+        if let Err(error) = register_markdown_icons(&classes, &exe, &icon_md) {
+            return json!({"error": format!("Markdown 文档图标注册失败：{error}")});
+        }
 
         {
             use windows_sys::Win32::UI::Shell::{SHChangeNotify, SHCNF_IDLIST};
@@ -741,6 +771,47 @@ fn uuid_like() -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn markdown_icons_update_owned_registry_types_and_preserve_other_handlers() {
+        use winreg::{enums::HKEY_CURRENT_USER, RegKey};
+        let directory = tempfile::Builder::new().prefix("Stuart icon resources ").tempdir().unwrap();
+        let exe = directory.path().join("stuartmd.exe");
+        fs::hard_link(std::env::current_exe().unwrap(), &exe).unwrap();
+        fs::copy(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/file-md.ico"), directory.path().join("file-md.ico")).unwrap();
+        let icon = markdown_document_icon(&exe).unwrap();
+        assert_eq!(icon, format!("\"{}\",0", directory.path().join("file-md.ico").display()));
+        let root = RegKey::predef(HKEY_CURRENT_USER);
+        let location = format!(r"Software\StuartMD\Tests\Icons-{}", uuid::Uuid::new_v4());
+        let (classes, _) = root.create_subkey(&location).unwrap();
+        let (command, _) = classes.create_subkey(r"Markdown\shell\open\command").unwrap();
+        let (alias_icon, _) = classes.create_subkey(r"Markdown\DefaultIcon").unwrap();
+        let (application, _) = classes.create_subkey(r"Applications\stuartmd.exe\DefaultIcon").unwrap();
+        let app_icon = format!("\"{}\",0", exe.display());
+        application.set_value("", &app_icon).unwrap();
+        for open_command in [format!("{} \"%1\"", exe.display()), format!("\"{}\" \"%1\"", exe.display())] {
+            command.set_value("", &open_command).unwrap();
+            alias_icon.set_value("", &app_icon).unwrap();
+            register_markdown_icons(&classes, &exe, &icon).unwrap();
+            assert_eq!(alias_icon.get_value::<String, _>("").unwrap(), icon);
+            assert_eq!(command.get_value::<String, _>("").unwrap(), open_command);
+            assert_eq!(application.get_value::<String, _>("").unwrap(), app_icon);
+        }
+        let other_exe = PathBuf::from(std::env::var_os("WINDIR").unwrap()).join("System32/notepad.exe");
+        assert!(other_exe.is_file());
+        command.set_value("", &format!("\"{}\" \"%1\"", other_exe.display())).unwrap();
+        let other_icon = format!("\"{}\",0", other_exe.display());
+        alias_icon.set_value("", &other_icon).unwrap();
+        register_markdown_icons(&classes, &exe, &icon).unwrap();
+        assert_eq!(alias_icon.get_value::<String, _>("").unwrap(), other_icon);
+        assert_eq!(classes.open_subkey(format!(r"{}\DefaultIcon", PROG_ID)).unwrap().get_value::<String, _>("").unwrap(), icon);
+        drop((application, alias_icon, command, classes));
+        assert!(location.starts_with(r"Software\StuartMD\Tests\Icons-"));
+        root.delete_subkey_all(&location).unwrap();
+        fs::remove_file(directory.path().join("file-md.ico")).unwrap();
+        assert!(markdown_document_icon(&exe).is_err());
+    }
 
     #[test]
     fn test_reveal_local_path_rejects_unc_urls_ads() {

@@ -13,6 +13,7 @@ function sourceFingerprint() {
   }
   for (const relative of ['web', 'samples', 'tauri/src-tauri/src', 'tauri/src-tauri/capabilities', 'tauri/src-tauri/Cargo.toml', 'tauri/src-tauri/Cargo.lock', 'tauri/src-tauri/tauri.conf.json', 'package.json', 'package-lock.json', 'rust-toolchain.toml', 'resources/models/manifest.json', 'resources/native-manifest.json', 'resources/tokenizers-manifest.json']) collect(relative);
   collect('resources/ai-model-catalog.json');
+  collect('tauri/src-tauri/windows');
   const hash = crypto.createHash('sha256');
   for (const relative of files.sort()) { hash.update(relative); hash.update('\0'); hash.update(fs.readFileSync(path.join(root, relative))); hash.update('\0'); }
   return hash.digest('hex');
