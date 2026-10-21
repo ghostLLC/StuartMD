@@ -6,6 +6,15 @@
   function select(choices, value) { const control = document.createElement("select"); for (const [id, label] of choices) { const option = text("option", label); option.value = id; control.append(option); } control.value = value; return control; }
   function field(label, control) { const wrapper = text("label", label, "ai-field"); wrapper.append(control); return wrapper; }
   function button(label, action, primary = false) { const control = text("button", label, primary ? "btn primary" : "btn"); control.type = "button"; control.addEventListener("click", async () => { if (control.disabled) return; control.disabled = true; try { await action(); } catch (error) { const owner = control.closest(".ai-editor, .ai-preferences, .ai-settings"); owner?.querySelector("[data-error]")?.replaceChildren(text("span", error.message || String(error))); } finally { control.disabled = false; } }); return control; }
+  function badge(label, tone = "neutral") { return text("span", label, `ai-badge ai-badge-${tone}`); }
+  function providerMark(provider) {
+    const mark = text("span", ({ deepseek: "D", qwen: "Q", kimi: "K", glm: "G" })[provider?.type] || "AI", "ai-provider-mark");
+    mark.dataset.provider = provider?.type || "custom"; mark.setAttribute("aria-hidden", "true"); return mark;
+  }
+  function disclosure(label, id) {
+    const box = document.createElement("details"); box.className = "ai-more"; box.dataset.disclosureId = id;
+    const summary = text("summary", label); summary.dataset.actionId = `${id}-more`; box.append(summary); return box;
+  }
   function countingFields(initial) {
     const box = document.createElement("details"); box.className = "ai-advanced"; box.append(text("summary", "高级计数配置"));
     const enabled = input("checkbox"); enabled.checked = !!initial; box.append(field("使用自定义计数资料", enabled));
@@ -43,14 +52,28 @@
     let snapshot = initialSnapshot, editor = null, preferencesDraft = null;
     container.classList.add("ai-settings"); container.replaceChildren();
     const heading = document.createElement("div"); heading.className = "ai-section-heading";
-    heading.append(text("h3", "已保存模型"), button("添加模型", () => openAdd(), true));
+    heading.append(text("h3", "模型与服务"), button("添加模型", () => openAdd(), true));
     const search = input("search"); search.placeholder = "搜索模型或服务商"; search.setAttribute("aria-label", "搜索模型或服务商");
     const notice = text("div", "", "ai-model-notice"); notice.dataset.error = ""; notice.setAttribute("role", "status");
     const models = document.createElement("div"); models.id = "ai-saved-models";
     const editorHost = document.createElement("div"); editorHost.className = "ai-editor-host";
     const connections = document.createElement("div"); connections.id = "ai-connections";
     const preferences = document.createElement("div"); preferences.className = "ai-preferences";
-    container.append(heading, text("p", "添加一次连接，即可保存多个模型。日常从顶部或伴读的模型列表直接选择。", "hint small"), search, notice, models, editorHost, text("h3", "服务商连接"), connections, text("h3", "对话偏好"), preferences);
+    const recommendations = document.createElement("div"); recommendations.className = "ai-recommendations";
+    const modelPanel = document.createElement("section"), connectionPanel = document.createElement("section"), preferencePanel = document.createElement("section");
+    modelPanel.append(search, models, recommendations); connectionPanel.append(connections); preferencePanel.append(preferences);
+    const navigation = document.createElement("div"); navigation.className = "ai-settings-tabs"; navigation.setAttribute("role", "tablist"); navigation.setAttribute("aria-label", "AI 设置分类");
+    const panels = [modelPanel, connectionPanel, preferencePanel];
+    const tabs = ["我的模型", "连接管理", "对话偏好"].map((label, index) => {
+      const tab = button(label, () => showPanel(index)); tab.id = `ai-settings-tab-${index}`; tab.setAttribute("role", "tab"); tab.setAttribute("aria-controls", `ai-settings-panel-${index}`);
+      panels[index].id = `ai-settings-panel-${index}`; panels[index].setAttribute("role", "tabpanel"); panels[index].setAttribute("aria-labelledby", tab.id);
+      tab.addEventListener("keydown", event => {
+        const next = event.key === "ArrowRight" ? (index + 1) % 3 : event.key === "ArrowLeft" ? (index + 2) % 3 : event.key === "Home" ? 0 : event.key === "End" ? 2 : null;
+        if (next !== null) { event.preventDefault(); showPanel(next); tabs[next].focus(); }
+      }); navigation.append(tab); return tab;
+    });
+    function showPanel(index) { panels.forEach((panel, i) => { panel.hidden = i !== index; tabs[i].setAttribute("aria-selected", String(i === index)); tabs[i].tabIndex = i === index ? 0 : -1; }); }
+    container.append(heading, navigation, notice, editorHost, ...panels); showPanel(0);
     const client = () => global.StuartAI;
     async function change(value, confirm = false) { const result = await client().updateConfig(value, snapshot.settingsRevision, confirm); refresh(result); return result; }
     async function discardEditor() {
@@ -96,9 +119,9 @@
       form.append(field("启用连接", enabled), field("连接名称", name), field("服务地址", base), field("API Key", key), text("p", "密钥由当前 Windows 用户加密保存，同一连接的全部模型共用。", "hint small"));
       saveButton(form, () => client().updateConfig({ kind: "saveProviderModels", connection: { id, provider_type: provider.type, region: provider.region, label: name.value.trim(), base_url: base.value.trim(), enabled: enabled.checked }, models: [], api_key: key.value || null }, editor.revision)); name.focus();
     }
-    async function openAdd() {
+    async function openAdd(providerType) {
       if (!await discardEditor()) return;
-      const form = editorForm("添加模型", "add", null), types = [...new Map(snapshot.catalog.providers.map(p => [p.type, p.label]))], provider = select([...types, ["custom", "自定义 OpenAI 兼容服务"]], types[0][0]);
+      const form = editorForm("添加模型", "add", null), types = [...new Map(snapshot.catalog.providers.map(p => [p.type, p.label]))], provider = select([...types, ["custom", "自定义 OpenAI 兼容服务"]], providerType || types[0][0]);
       provider.dataset.changesProvider = "true";
       const region = select([], ""), connection = select([], ""), connectionField = field("自定义服务连接", connection), area = document.createElement("div"); region.dataset.changesProvider = "true"; connection.dataset.changesProvider = "true"; connection.setAttribute("aria-label", "自定义服务连接");
       form.append(field("服务商", provider), field("服务区域", region), connectionField, area);
@@ -119,6 +142,8 @@
           const available = snapshot.catalog.models.filter(m => m.provider_type === provider.value && m.regions.includes(region.value));
           for (const model of available) {
             const check = input("checkbox"), row = document.createElement("label"); row.className = "ai-catalog-option"; row.dataset.search = `${model.display_name} ${model.model_id}`.toLowerCase();
+            const alreadySaved = existing && snapshot.ai.models.some(m => m.provider_id === existing.id && m.model_id === model.model_id);
+            check.disabled = !!alreadySaved; check.checked = !!alreadySaved;
             check.value = model.model_id; check.addEventListener("change", () => { if (check.checked) selected.add(model.model_id); else selected.delete(model.model_id); });
             const detail = document.createElement("div"); detail.append(text("strong", model.display_name), text("div", `${model.model_id} · 上下文 ${model.context_window.toLocaleString()} Token${existing && snapshot.ai.models.some(m => m.provider_id === existing.id && m.model_id === model.model_id) ? " · 已保存" : ""}`, "ai-model-meta"), text("div", `${model.description} · ${model.thinking === "always" ? "始终思考" : "支持切换思考"}`, "ai-model-meta")); row.append(check, detail); rows.append(row);
           }
@@ -147,34 +172,63 @@
       fillRegions(); fillConnections(); renderArea(); provider.focus();
     }
     function renderLists() {
-      const focused = document.activeElement?.dataset.actionId, query = search.value.trim().toLocaleLowerCase(); models.replaceChildren(); connections.replaceChildren();
+      const focused = document.activeElement?.dataset.actionId, query = search.value.trim().toLocaleLowerCase();
+      const expanded = new Set([...container.querySelectorAll("details[data-disclosure-id][open]")].map(item => item.dataset.disclosureId));
+      models.replaceChildren(); connections.replaceChildren(); recommendations.replaceChildren();
       for (const model of snapshot.ai.models) {
         const info = global.StuartModelPicker.status(snapshot, model), connection = info.connection;
         if (!`${model.display_name} ${model.model_id} ${connection?.label}`.toLocaleLowerCase().includes(query)) continue;
         const row = document.createElement("div"); row.className = "ai-saved-row"; row.dataset.modelId = model.id; row.tabIndex = -1;
+        row.classList.toggle("is-active", model.id === snapshot.ai.active_model_id);
         const detail = document.createElement("div"); detail.className = "ai-row-detail";
-        const marks = [model.id === snapshot.ai.active_model_id && "当前选择", model.id === snapshot.ai.default_model_id && "默认模型"].filter(Boolean);
-        detail.append(text("strong", model.display_name), text("div", [connection?.label, connection?.region, model.model_id, ...marks].filter(Boolean).join(" · "), "ai-model-meta"), text("div", info.label, "ai-model-meta"));
+        const title = text("div", "", "ai-model-title"); title.append(text("strong", model.display_name));
+        if (model.id === snapshot.ai.active_model_id) title.append(badge("当前使用", "accent"));
+        if (model.id === snapshot.ai.default_model_id) title.append(badge("默认"));
+        const state = !model.enabled || !connection?.enabled ? ["已停用", "neutral"] : !connection?.key_set ? ["待配置密钥", "warning"] : info.reason ? ["需要配置", "warning"] : model.verification?.status === "Passed" ? ["已验证", "success"] : model.verification?.status === "Failed" ? ["验证失败", "warning"] : ["未验证", "neutral"];
+        const meta = text("div", "", "ai-model-subtitle"); meta.append(text("span", connection?.label || "", "ai-model-meta"), badge(...state));
+        detail.append(title, meta); if (info.reason && connection?.key_set && model.enabled && connection.enabled) detail.append(text("div", info.reason, "ai-model-meta"));
         const actions = document.createElement("div"); actions.className = "ai-row-actions";
-        const choose = button(model.id === snapshot.ai.active_model_id ? "当前选择" : "选择", () => change({ kind: "selectModel", model_id: model.id })); choose.disabled = !!info.reason || model.id === snapshot.ai.active_model_id;
-        const verify = button("验证回答", async () => { notice.textContent = "正在发送公开测试消息并核验计数、正文及用量…"; const result = await global.pywebview.api.ai_verify_model(model.id, snapshot.settingsRevision); await client().ensureConfig(true); notice.textContent = result.status === "Passed" ? "模型回答验证通过" : result.stages.filter(stage => stage.status === "Failed").map(stage => stage.error).join("；"); }); verify.disabled = !!info.reason;
-        actions.append(choose, button("编辑", () => openModel(model.id)), button("设为默认", () => change({ kind: "setDefaultModel", model_id: model.id })), verify, button(model.enabled ? "停用" : "启用", () => change({ kind: "setModelEnabled", model_id: model.id, enabled: !model.enabled })), button("删除", async () => { if (await global.StuartUIConfirm(`确认删除模型「${model.display_name}」吗？已有会话与服务商连接将继续保留。`)) await change({ kind: "deleteModel", model_id: model.id }); }));
-        [...actions.children].forEach((control, index) => { control.dataset.actionId = `${model.id}-${index}`; });
-        row.append(detail, actions); if (model.verification) { const history = document.createElement("details"); history.append(text("summary", "验证详情"), text("div", `测试消息发送时间：${new Date(model.verification.checkedAt).toLocaleString()}`, "ai-model-meta")); for (const stage of model.verification.stages) history.append(text("p", `${stage.stage} · ${stage.status}${stage.error ? ` · ${stage.error}` : ""}`, "ai-model-meta")); row.append(history); } models.append(row);
+        if (!connection?.key_set) actions.append(button("配置密钥", () => openConnection(connection.id), true));
+        else if (model.id !== snapshot.ai.active_model_id) { const choose = button("使用", () => change({ kind: "selectModel", model_id: model.id })); choose.disabled = !!info.reason; actions.append(choose); }
+        actions.append(button("编辑", () => openModel(model.id)));
+        const more = disclosure("更多", `model-${model.id}`), extra = text("div", "", "ai-more-actions");
+        const makeDefault = button("设为默认", () => change({ kind: "setDefaultModel", model_id: model.id })); makeDefault.disabled = !!info.reason || model.id === snapshot.ai.default_model_id;
+        const verify = button("验证回答", async () => { notice.textContent = "正在验证模型回答…"; const result = await global.pywebview.api.ai_verify_model(model.id, snapshot.settingsRevision); await client().ensureConfig(true); refresh(client().snapshot); notice.textContent = result.status === "Passed" ? "模型回答验证通过" : result.stages.filter(stage => stage.status === "Failed").map(stage => stage.error).join("；"); }); verify.disabled = !!info.reason;
+        const remove = button("删除模型", async () => { if (await global.StuartUIConfirm(`确认删除模型「${model.display_name}」吗？已有会话与服务商连接将继续保留。`)) await change({ kind: "deleteModel", model_id: model.id }); }); remove.classList.add("ai-danger");
+        extra.append(makeDefault, verify, button(model.enabled ? "停用模型" : "启用模型", () => change({ kind: "setModelEnabled", model_id: model.id, enabled: !model.enabled })), remove);
+        more.append(text("div", `${model.model_id} · ${connection?.region || ""}`, "ai-model-meta"), extra);
+        if (model.verification) { more.append(text("div", `验证时间：${new Date(model.verification.checkedAt).toLocaleString()}`, "ai-model-meta")); for (const stage of model.verification.stages) more.append(text("p", `${stage.stage} · ${stage.status}${stage.error ? ` · ${stage.error}` : ""}`, "ai-model-meta")); }
+        row.append(providerMark(connection), detail, actions, more);
+        row.querySelectorAll("button").forEach((control, index) => { control.dataset.actionId = `${model.id}-${index}`; }); models.append(row);
       }
       if (!models.childElementCount) models.append(text("p", snapshot.ai.models.length ? "没有匹配的模型" : "尚未添加模型。选择服务商并填写 API Key，即可一次添加多个模型。", "ai-model-meta"));
       for (const connection of snapshot.ai.providers) {
         const associated = snapshot.ai.models.filter(m => m.provider_id === connection.id), row = document.createElement("div"); row.className = "ai-saved-row";
-        const detail = document.createElement("div"); detail.className = "ai-row-detail"; detail.append(text("strong", connection.label), text("div", `${connection.region} · ${associated.length} 个模型 · ${connection.key_set ? "密钥已保存" : "尚未保存密钥"}`, "ai-model-meta"), text("div", connection.base_url, "ai-model-meta"));
+        const detail = document.createElement("div"); detail.className = "ai-row-detail"; detail.append(text("strong", connection.label), text("div", `${associated.length} 个模型`, "ai-model-meta"), badge(connection.key_set ? "已保存密钥" : "待配置密钥", connection.key_set ? "success" : "warning"));
         const actions = document.createElement("div"); actions.className = "ai-row-actions";
-        actions.append(button("编辑连接", () => openConnection(connection.id)), button("清除密钥", async () => { if (await global.StuartUIConfirm(`确认清除「${connection.label}」的密钥吗？${associated.length} 个模型需要重新配置密钥。`)) { await client().clearApiKey(connection.id, snapshot.settingsRevision); } }), button("删除连接", async () => { if (await global.StuartUIConfirm(`删除「${connection.label}」将清除密钥并删除以下模型：${associated.map(m => m.display_name).join("、") || "没有关联模型"}。确认删除吗？`)) await change({ kind: "deleteProvider", provider_id: connection.id }, true); }));
+        actions.append(button(connection.key_set ? "编辑连接" : "配置密钥", () => openConnection(connection.id)));
+        const more = disclosure("更多", `connection-${connection.id}`), extra = text("div", "", "ai-more-actions");
+        const clear = button("清除密钥", async () => { if (await global.StuartUIConfirm(`确认清除「${connection.label}」的密钥吗？${associated.length} 个模型需要重新配置密钥。`)) { await client().clearApiKey(connection.id, snapshot.settingsRevision); refresh(client().snapshot); } }); clear.disabled = !connection.key_set;
+        const remove = button("删除连接", async () => { if (await global.StuartUIConfirm(`删除「${connection.label}」将清除密钥并删除以下模型：${associated.map(m => m.display_name).join("、") || "没有关联模型"}。确认删除吗？`)) await change({ kind: "deleteProvider", provider_id: connection.id }, true); }); remove.classList.add("ai-danger");
+        extra.append(clear, remove);
         const spec = snapshot.catalog.providers.find(p => p.type === connection.type && p.region === connection.region);
-        if (spec?.discovery || connection.type === "custom") actions.append(button("获取模型目录", async () => { notice.textContent = "正在获取目录…"; const result = await global.pywebview.api.ai_discover_models(connection.id, snapshot.settingsRevision); await client().ensureConfig(true); notice.textContent = `目录获取完成，共 ${result.models.length} 个名称；模型回答请分别验证。`; }));
-        if (connection.discovered) detail.append(text("div", `在线目录 · ${new Date(connection.discovered.fetchedAt).toLocaleString()} · ${connection.discovered.source}`, "ai-model-meta"));
-        row.append(detail, actions); connections.append(row);
+        if (spec?.discovery || connection.type === "custom") { const discover = button("获取在线目录", async () => { notice.textContent = "正在获取目录…"; const result = await global.pywebview.api.ai_discover_models(connection.id, snapshot.settingsRevision); await client().ensureConfig(true); refresh(client().snapshot); notice.textContent = `已获取 ${result.models.length} 个型号，可在添加模型时查看。`; }); discover.disabled = !connection.key_set || !connection.enabled; extra.append(discover); }
+        more.append(text("div", `${spec?.region_label || connection.region} · ${connection.base_url}`, "ai-model-meta"), extra);
+        if (connection.discovered) more.append(text("div", `在线目录更新：${new Date(connection.discovered.fetchedAt).toLocaleString()}`, "ai-model-meta"));
+        row.append(providerMark(connection), detail, actions, more); row.querySelectorAll("button").forEach((control, index) => { control.dataset.actionId = `connection-${connection.id}-${index}`; }); connections.append(row);
       }
       if (!connections.childElementCount) connections.append(text("p", "添加模型时会同时保存服务商连接。", "ai-model-meta"));
-      if (focused) [...models.querySelectorAll("[data-action-id]")].find(control => control.dataset.actionId === focused)?.focus();
+      const recommendedHeading = text("div", "", "ai-section-heading"); recommendedHeading.append(text("h4", "添加更多模型"), text("span", `官方预设 · ${snapshot.catalog.verified_at}`, "ai-model-meta")); recommendations.append(recommendedHeading);
+      const cards = text("div", "", "ai-provider-cards");
+      for (const provider of [...new Map(snapshot.catalog.providers.map(item => [item.type, item])).values()]) {
+        const available = snapshot.catalog.models.filter(model => model.provider_type === provider.type);
+        const card = text("article", "", "ai-provider-card"), title = text("div", "", "ai-model-title"); title.append(providerMark(provider), text("strong", provider.label));
+        const add = button("选择模型", () => openAdd(provider.type)); add.setAttribute("aria-label", `选择 ${provider.label} 模型`); add.dataset.actionId = `add-${provider.type}`;
+        card.append(title, text("p", available.map(model => model.display_name).join(" · "), "ai-model-meta"), add); cards.append(card);
+      }
+      recommendations.append(cards);
+      for (const item of container.querySelectorAll("details[data-disclosure-id]")) item.open = expanded.has(item.dataset.disclosureId);
+      if (focused) [...container.querySelectorAll("[data-action-id]")].find(control => control.dataset.actionId === focused)?.focus();
     }
     function renderPreferences() {
       if (preferencesDraft?.dirty) return;

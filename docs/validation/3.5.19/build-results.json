@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "version": "3.5.19",
+  "status": "Passed",
+  "sourceFingerprint": "dfb7f56b246e4b6c1e488130219577c5135fb0700f0342d6fbc02fec16678d0c",
+  "command": "cargo tauri build --bundles nsis",
+  "log": "tests/native-artifacts/ai-settings-3.5.19-build.log",
+  "installer": "C:\\Users\\Administrator\\Desktop\\Stuart\\tauri\\src-tauri\\target\\release\\bundle\\nsis\\StuartMD_3.5.19_x64-setup.exe",
+  "installerBytes": 86924612,
+  "installerSha256": "04daec991d13d370186240a6e41e1e044b2d308f88b8ad25cc43e0c9d8cd0382",
+  "buildOutputSha256": "00429b039b819318fafe2f012e34b1b397ae3eb990ed3a76e102e265fc3d085b"
+}

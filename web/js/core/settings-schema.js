@@ -5,7 +5,7 @@
 (function (global) {
   "use strict";
 
-  const SCHEMA_VERSION = 6;
+  const SCHEMA_VERSION = 7;
 
   function defaultAi() {
     return {

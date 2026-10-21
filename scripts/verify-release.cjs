@@ -8,7 +8,7 @@ const { JSDOM } = require('jsdom');
 const root = path.resolve(__dirname, '..');
 const version = toml.parse(fs.readFileSync(path.join(root, 'tauri/src-tauri/Cargo.toml'), 'utf8')).package.version;
 const configuration = JSON.parse(fs.readFileSync(path.join(root, 'tauri/src-tauri/tauri.conf.json'), 'utf8'));
-assert.equal(version, '3.5.18');
+assert.equal(version, '3.5.19');
 assert.equal(configuration.version, version);
 assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version, version);
 for (const file of ['README.md', 'samples/示例文档.md', 'samples/欢迎使用 StuartMD.md']) {

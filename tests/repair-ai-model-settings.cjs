@@ -40,10 +40,33 @@ async function verifySavedConfiguration() {
   const secondPanel = window.document.getElementById(secondAnchor.getAttribute("aria-controls"));
   secondPanel.querySelector("input").dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   assert.equal(secondPanel.hidden, true); assert.equal(window.document.activeElement, secondAnchor);
+  window.document.querySelector("#settings-modal").hidden = false;
   const settings = window.StuartAISettings.mount(window.document.querySelector("#set-ai-section"), before);
   assert.equal(window.document.querySelectorAll("#ai-saved-models > [data-model-id]").length, before.ai.models.length);
+  const tabs = [...window.document.querySelectorAll('.ai-settings [role="tab"]')];
+  assert.equal(tabs.length, 3);
+  assert.equal(tabs[0].getAttribute("aria-selected"), "true");
+  assert.equal(window.document.querySelector("#ai-connections").closest('[role="tabpanel"]').hidden, true);
+  tabs[0].dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+  assert.equal(tabs[1].getAttribute("aria-selected"), "true");
+  assert.equal(window.document.activeElement, tabs[1], `分类切换后焦点位置：${window.document.activeElement.outerHTML}`);
+  tabs[1].dispatchEvent(new window.KeyboardEvent("keydown", { key: "Home", bubbles: true }));
+  assert.equal(tabs[0].getAttribute("aria-selected"), "true");
+  assert.equal(window.document.querySelectorAll(".ai-provider-card").length, new Set(before.catalog.providers.map(p => p.type)).size);
+  assert.ok(window.document.querySelector(".ai-recommendations").textContent.includes("Kimi K3"));
+  assert.ok(window.document.querySelector(".ai-recommendations").textContent.includes("Qwen3.8"));
+  for (const row of window.document.querySelectorAll("#ai-saved-models > [data-model-id]")) {
+    assert.ok(row.querySelector(".ai-row-actions").children.length <= 2);
+    assert.equal(row.querySelector(".ai-more").open, false);
+  }
+  const more = window.document.querySelector("#ai-saved-models .ai-more"); more.open = true; settings.refresh(before);
+  assert.equal(window.document.querySelector("#ai-saved-models .ai-more").open, true);
+  await settings.openAdd("qwen");
+  assert.equal(window.document.querySelector(".ai-editor select").value, "qwen");
+  assert.equal(window.document.querySelectorAll(".ai-catalog-option").length, before.catalog.models.filter(m => m.provider_type === "qwen" && m.regions.includes("cn-beijing")).length);
   await settings.openAdd();
   assert.equal(window.document.querySelectorAll(".ai-catalog-option input[type=checkbox]").length, 2);
+  assert.equal(window.document.querySelectorAll(".ai-catalog-option input:disabled").length, 2);
   assert.equal(window.document.querySelector(".ai-editor input[type=password]").value, "");
   settings.dispose();
   const model = before.ai.models.find(item => item.provider_id === before.ai.providers.find(provider => provider.type === "deepseek").id);

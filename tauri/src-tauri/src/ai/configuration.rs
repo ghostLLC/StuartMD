@@ -304,6 +304,47 @@ pub fn load_ai_configuration() -> Result<AiConfigSnapshot, String> {
     let settings = crate::fs_api::load_settings_checked()?;
     snapshot(serde_json::from_value(settings["ai"].clone()).map_err(|e|e.to_string())?)
 }
+pub fn remove_unused_legacy_presets(config: &mut AiConfig) -> Result<(), String> {
+    let catalog = load_catalog()?;
+    let mut unused = HashSet::new();
+    for provider in &config.providers {
+        let old_model = match provider.r#type.as_str() {
+            "qwen" => "qwen-plus",
+            "kimi" => "moonshot-v1-8k",
+            _ => continue,
+        };
+        if !provider.builtin || provider.id != provider.r#type || !provider.enabled
+            || provider.credential_revision != "legacy" || provider.credential_ref.is_some()
+            || provider.discovered.is_some() || crate::ai_chat::provider_has_key(&provider.id)? {
+            continue;
+        }
+        let default_labels: &[&str] = if provider.r#type == "qwen" { &["通义千问 Qwen"] } else { &["Kimi (Moonshot)"] };
+        if !default_labels.contains(&provider.label.as_str()) { continue; }
+        let official = catalog.provider(&provider.r#type, &provider.region)?;
+        if provider.base_url.trim_end_matches('/') != official.base_url.trim_end_matches('/') { continue; }
+        let models: Vec<_> = config.models.iter().filter(|model| model.provider_id == provider.id).collect();
+        if models.len() != 1 { continue; }
+        let model = models[0];
+        let inherited_thinking = config.models.iter().find(|saved| Some(&saved.id) == config.active_model_id.as_ref())
+            .filter(|saved| saved.overrides == json!({"legacy_provider":{}}))
+            .map(|saved| saved.thinking.as_str());
+        // 仅清理旧版自动创建且没有使用或修改记录的预设。
+        if model.model_id == old_model && model.display_name == old_model && model.enabled
+            && model.catalog_id.is_none() && model.catalog_version.is_none()
+            && model.token_counting.is_none() && model.verification.is_none()
+            && model.max_output_tokens == 2048
+            && (model.thinking == "default" || inherited_thinking == Some(model.thinking.as_str()))
+            && model.overrides == json!({"legacy_provider":{}})
+            && config.active_model_id.as_ref() != Some(&model.id)
+            && config.default_model_id.as_ref() != Some(&model.id)
+            && !config.recent_model_ids.contains(&model.id) {
+            unused.insert(provider.id.clone());
+        }
+    }
+    config.models.retain(|model| !unused.contains(&model.provider_id));
+    config.providers.retain(|provider| !unused.contains(&provider.id));
+    validate(config)
+}
 pub fn validate(config: &AiConfig) -> Result<(), String> {
     let mut connections = HashSet::new();
     for p in &config.providers {
@@ -381,7 +422,39 @@ mod checks {
     fn settings_file_probe() {
         let directory=std::path::PathBuf::from(std::env::var("STUART_DATA_DIR").expect("必须指定独立目录"));
         assert!(directory.to_string_lossy().contains("native-artifacts"));
+        let original: Value=serde_json::from_slice(&std::fs::read(directory.join("settings.json")).unwrap()).unwrap();
         let snapshot=load_ai_configuration().unwrap();
+        if original["schema_version"] == 6 {
+            let before: AiConfig=serde_json::from_value(original["ai"].clone()).unwrap();
+            let mut expected=before.clone();
+            remove_unused_legacy_presets(&mut expected).unwrap();
+            assert_eq!(stored_value(&snapshot.ai).unwrap(),stored_value(&expected).unwrap());
+            for provider in before.providers.iter().filter(|p|p.credential_ref.is_some()) {
+                assert_eq!(stored_value(&before).unwrap()["providers"].as_array().unwrap().iter().find(|p|p["id"]==provider.id),
+                    stored_value(&snapshot.ai).unwrap()["providers"].as_array().unwrap().iter().find(|p|p["id"]==provider.id));
+                for model in before.models.iter().filter(|m|m.provider_id==provider.id) {
+                    assert_eq!(serde_json::to_value(model).unwrap(),serde_json::to_value(snapshot.ai.models.iter().find(|m|m.id==model.id).unwrap()).unwrap());
+                }
+            }
+            for model in before.models.iter().filter(|m|!expected.models.iter().any(|saved|saved.id==m.id)) {
+                for protection in ["name","selected","recent","budget","disabled","connection_name","thinking"] {
+                    let mut protected=before.clone();
+                    let saved=protected.models.iter_mut().find(|m|m.id==model.id).unwrap();
+                    match protection {
+                        "name"=>saved.display_name="用户保存的阅读模型".into(),
+                        "selected"=>protected.active_model_id=Some(model.id.clone()),
+                        "recent"=>protected.recent_model_ids.push(model.id.clone()),
+                        "budget"=>saved.max_output_tokens=1024,
+                        "disabled"=>saved.enabled=false,
+                        "connection_name"=>protected.providers.iter_mut().find(|p|p.id==model.provider_id).unwrap().label="用户保存的连接".into(),
+                        "thinking"=>saved.thinking=if model.thinking=="off" {"max"}else{"off"}.into(),
+                        _=>unreachable!(),
+                    }
+                    remove_unused_legacy_presets(&mut protected).unwrap();
+                    assert!(protected.models.iter().any(|saved|saved.id==model.id));
+                }
+            }
+        }
         for connection in &snapshot.ai.providers {
             if let Some(reference)=&connection.credential_ref {assert!(!crate::ai_chat::read_api_key(reference).unwrap().is_empty());}
         }

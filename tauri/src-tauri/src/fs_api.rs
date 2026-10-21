@@ -14,7 +14,7 @@ const APP_ID: &str = "StuartMD";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const PROG_ID: &str = "StuartMD.Markdown";
 pub const PROG_ID_PDF: &str = "StuartMD.PDF";
-pub const SETTINGS_SCHEMA: i64 = 6;
+pub const SETTINGS_SCHEMA: i64 = 7;
 const PDF_MAX: u64 = 40 * 1024 * 1024;
 pub const PDF_MAX_BYTES: u64 = 100 * 1024 * 1024; // 100 MB 上限
 pub use crate::folder_tree::{display_path, MD_EXTS};
@@ -284,6 +284,11 @@ pub fn migrate_settings(raw: Option<Value>) -> Value {
 
     if from_v < 6 {
         let ai=crate::ai::configuration::migrate_ai(s.get("ai").unwrap_or(&crate::ai_chat::builtin_ai_defaults())).expect("迁移 AI 设置失败");
+        s["ai"]=crate::ai::configuration::stored_value(&ai).expect("AI 设置序列化失败");
+    }
+    if from_v < 7 {
+        let mut ai=serde_json::from_value(s["ai"].clone()).expect("AI 设置格式无效");
+        crate::ai::configuration::remove_unused_legacy_presets(&mut ai).expect("更新 AI 预设失败");
         s["ai"]=crate::ai::configuration::stored_value(&ai).expect("AI 设置序列化失败");
     }
 
