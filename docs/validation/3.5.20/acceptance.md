@@ -17,6 +17,8 @@ Ctrl+A 根据当前选区选择本段；本段已经全部选中时选择全文�
 | 构建和安装 | Passed | 3.5.19 静默升级至 3.5.20；本机程序与安装包内程序一致，20 项资源核对通过 |
 | 用户资料 | Passed | 32 个文件、6 个数据库及 260 条记录保持一致 |
 | 文件图标 | Passed | Windows Markdown 文件关联继续使用安装目录中的 `file-md.ico` |
+| 模型和资料 | Passed | 独立 Python ONNX 参考计算及 3 项真实 Rust 检查，覆盖语义向量、索引生成与取消、PDFium 和 OCR |
+| DeepSeek 在线接口 | Passed | 实际配置副本与真实接口，覆盖流式回答、预算、摘要、取消及停用行为 |
 | 窗口交互 | SkippedByUser | 用户禁止 computer use；未启动应用或浏览器执行交互验证 |
 
 DOM 检查使用 jsdom 的实际 Range 和 Selection，并通过 DOM 节点重建验证端点恢复。该检查不提供浏览器原生拖选、contenteditable 焦点或应用整体提交过程的运行证据。文件保存和撤销相关的底层行为由现有前端、Rust、文件及进程检查覆盖。
@@ -38,3 +40,5 @@ pwsh -NoProfile -File scripts/prepare-resources.ps1 -VerifyOnly
 本机程序：`C:/Users/Administrator/AppData/Local/StuartMD/stuartmd.exe`，文件版本 `3.5.20`，SHA-256 为 `97590977043c10aca92b2ca52e84a81d8cc1c658a68f7db5b360c3826b9fd894`。
 
 安装与用户资料备份：`tests/native-artifacts/installer-c0356f60-75a6-49f3-b87d-4e14cae65e82`。构建和安装日志分别为 `tests/native-artifacts/selection-3.5.20-build.log` 与 `tests/native-artifacts/selection-3.5.20-installer.log`。安装采用 `scripts/verify-installer.ps1 -SkipStartup`，没有启动应用窗口。
+
+2026-10-22 发布前完成 Models 与 Providers 检查，记录与上述源代码指纹一致。日志为 `tests/native-artifacts/release-3.5.20-models.log` 和 `tests/native-artifacts/release-3.5.20-providers.log`；在线服务商验收范围为 DeepSeek。Browser 与 Native 状态按照用户明确要求保留为 `SkippedByUser`。
