@@ -731,7 +731,10 @@
       } catch (_) {}
       const range = sel.getRangeAt(0);
       const blockFor = node => (node.nodeType === 1 ? node : node.parentElement)?.closest(".md-block");
-      const first = blockFor(range.startContainer), last = blockFor(range.endContainer);
+      const first = range.startContainer === el.preview
+        ? el.preview.children[range.startOffset] : blockFor(range.startContainer);
+      const last = range.endContainer === el.preview
+        ? el.preview.children[range.endOffset - 1] : blockFor(range.endContainer);
       state._selCache = {
         text,
         inPreview,
@@ -1222,7 +1225,7 @@
         const hasLiveSel = !!(sel && !sel.isCollapsed && String(sel.toString() || "").trim());
         // Accidental click near the toolbar: keep selection instead of killing it.
         // Never preventDefault globally — that blocks focus/caret in source editors.
-        if (pointerNearSelToolbar(e.clientX, e.clientY, 36) && (hasLiveSel || getSelectionCache(15000))) {
+        if (!el.preview.contains(e.target) && pointerNearSelToolbar(e.clientX, e.clientY, 36) && (hasLiveSel || getSelectionCache(15000))) {
           e.preventDefault();
         } else if (!e.target.closest("#sel-toolbar") && !e.target.closest("#sel-dropdown")) {
           hideSelToolbar();
@@ -1734,6 +1737,9 @@
   function bindPreviewDelegates() {
     if (el.preview.dataset.delegated === "1") return;
     el.preview.dataset.delegated = "1";
+    new window.StuartCore.PreviewSelection(el.preview, () => {
+      for (const node of el.preview.querySelectorAll(".md-block.editing")) node._stuartCommit();
+    }, () => state.mode !== "source" && activeDocument?.kind === "markdown" && !el.editorArea.hidden).bind();
 
     // Paste must never inject raw HTML (XSS via contenteditable)
     el.preview.addEventListener(
@@ -2381,6 +2387,7 @@
     if (!eds.length) return null;
     const ae = document.activeElement;
     for (const ed of eds) {
+      if (ed._stuartSelecting) return ed;
       if (ae && (ae === ed || ed.contains(ae))) return ed;
       const ta = ed.querySelector("textarea.md-block-source");
       if (ta && ae === ta) return ed;
@@ -2868,7 +2875,7 @@
     node.addEventListener(
       "blur",
       (e) => {
-        if (!node.contains(e.relatedTarget)) commit();
+        if (!node._stuartSelecting && !node.contains(e.relatedTarget)) commit();
       },
       true
     );
@@ -2876,6 +2883,7 @@
       if (done) return;
       if (node.contains(e.target)) return;
       // Clicking handle / toolbar / elsewhere ends the edit so the handle can return
+      if (node._stuartSelecting) return;
       commit();
     };
     document.addEventListener("mousedown", onDocDown, true);
@@ -2963,6 +2971,7 @@
     const onDocDown = (e) => {
       if (done) return;
       if (node.contains(e.target)) return;
+      if (node._stuartSelecting) return;
       commit();
     };
     const cleanupDocDown = () => document.removeEventListener("mousedown", onDocDown, true);
@@ -3028,7 +3037,7 @@
     node.addEventListener(
       "blur",
       (e) => {
-        if (!node.contains(e.relatedTarget)) commit();
+        if (!node._stuartSelecting && !node.contains(e.relatedTarget)) commit();
       },
       true
     );
