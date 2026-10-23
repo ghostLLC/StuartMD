@@ -1,9 +1,9 @@
 {
   "name": "stuartmd-validation",
-  "version": "3.5.20",
+  "version": "3.5.21",
   "private": true,
   "scripts": {
-    "test": "node --test tests/project-audit-core.cjs tests/repair-document-state.cjs tests/repair-document-view.cjs tests/repair-text-buffer.cjs tests/repair-write-coordinator.cjs tests/repair-selection-formatting.cjs tests/repair-preview-selection.cjs",
+    "test": "node --test tests/project-audit-core.cjs tests/repair-document-state.cjs tests/repair-document-view.cjs tests/repair-text-buffer.cjs tests/repair-write-coordinator.cjs tests/repair-selection-formatting.cjs tests/repair-preview-selection.cjs tests/repair-preview-commands.cjs tests/repair-release-policy.cjs tests/repair-pdf-safety.cjs",
     "test:companion": "node tests/verify-companion.cjs",
     "test:folder": "cargo build --manifest-path tauri/src-tauri/Cargo.toml --locked --example folder-tree && node --test tests/repair-folder-refresh.cjs",
     "verify:release": "node scripts/verify-release.cjs"
@@ -12,7 +12,9 @@
     "diff": "8.0.2",
     "markdown-it-texmath": "1.0.0",
     "pdfjs-dist": "3.11.174",
-    "textarea-caret": "3.1.0"
+    "textarea-caret": "3.1.0",
+    "turndown": "7.2.4",
+    "turndown-plugin-gfm": "1.0.2"
   },
   "devDependencies": {
     "@iarna/toml": "2.2.5",

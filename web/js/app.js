@@ -13,6 +13,7 @@
 
   window.addEventListener("error", (event) => {
     console.error("[StuartMD GlobalError]", event.error || event.message);
+    toast("操作异常：" + (event.error?.message || event.message));
   });
 
   let activeDocument = null;
@@ -958,31 +959,32 @@
     dd.style.left = Math.min(window.innerWidth - w - 12, Math.max(8, r.left)) + "px";
   }
 
+  let previewSelectionController;
+
+  function modifyPreviewSelection(format) {
+    const selection = window.getSelection();
+    if (!selection?.rangeCount || selection.isCollapsed || !el.preview.contains(selection.anchorNode) || !el.preview.contains(selection.focusNode)) return false;
+    if (activeDocument?.accessState !== "Editable") throw new Error("当前文档无法编辑");
+    previewSelectionController.commitSelection();
+    const text = window.StuartCore.editPreviewSelection({
+      preview: el.preview, selection, source: activeDocument.buffer.editorText,
+      documentId: activeDocument.documentId, revision: activeDocument.revision, format,
+    });
+    if (text === null) return false;
+    selection.removeAllRanges();
+    hideSelToolbar();
+    hideBlockHandle();
+    hideBlockMenu();
+    setContent(text, true);
+    clearTimeout(_histDebounce);
+    pushHistory(activeDocument.source);
+    return true;
+  }
+
   function wrapInlineMarkdown(pre, post, placeholder) {
     if (isMermaidFormattingSelection()) return;
-    const text = placeholder || "文本";
-    // Preview / contenteditable path
     if (state.mode !== "source") {
-      const sel = window.getSelection();
-      if (sel && !sel.isCollapsed && sel.toString()) {
-        const chosen = sel.toString();
-        const block = sel.anchorNode?.parentElement?.closest?.(".md-block");
-        if (block) {
-          // Operate via source model for reliability
-          const idx = Number(block.dataset.index || 0);
-          const all = splitMarkdownBlocks(el.source.value || "");
-          const src = all[idx] || "";
-          // Simple first-occurrence wrap of selected plain text in this block
-          if (src.includes(chosen)) {
-            all[idx] = src.replace(chosen, pre + chosen + post);
-          } else {
-            all[idx] = src + pre + chosen + post;
-          }
-          setContent(joinBlocks(all), true);
-          return;
-        }
-      }
-      // fallback source caret
+      if (modifyPreviewSelection({ before: pre, after: post })) return;
       el.source.focus();
       wrapSelection(pre, post);
       return;
@@ -1107,21 +1109,7 @@
       const sel = window.getSelection();
       const text = sel?.toString()?.trim() || "链接文字";
       const url = prompt("链接地址", "https://");
-      if (url) wrapInlineMarkdown("[", `](${url})`.replace(text, ""), text);
-      // simpler: rebuild
-      if (url) {
-        const chosen = sel?.toString() || "链接文字";
-        // redo cleanly
-        const block = sel?.anchorNode?.parentElement?.closest?.(".md-block");
-        if (block && state.mode !== "source") {
-          const idx = Number(block.dataset.index || 0);
-          const all = splitMarkdownBlocks(el.source.value || "");
-          const src = all[idx] || "";
-          const mdLink = `[${chosen}](${url})`;
-          all[idx] = src.includes(chosen) ? src.replace(chosen, mdLink) : src + mdLink;
-          setContent(joinBlocks(all), true);
-        }
-      }
+      if (url) wrapInlineMarkdown("[", `](${url})`, text);
     } else if (kind === "h1" || kind === "h2" || kind === "h3" || kind === "p" || kind === "ul" || kind === "ol" || kind === "task" || kind === "quote") {
       applyBlockLineAction(kind);
     } else if (kind.startsWith("align-") || kind === "indent+" || kind === "indent-") {
@@ -1737,9 +1725,19 @@
   function bindPreviewDelegates() {
     if (el.preview.dataset.delegated === "1") return;
     el.preview.dataset.delegated = "1";
-    new window.StuartCore.PreviewSelection(el.preview, () => {
+    previewSelectionController = new window.StuartCore.PreviewSelection(el.preview, () => {
       for (const node of el.preview.querySelectorAll(".md-block.editing")) node._stuartCommit();
-    }, () => state.mode !== "source" && activeDocument?.kind === "markdown" && !el.editorArea.hidden).bind();
+    }, () => state.mode !== "source" && activeDocument?.kind === "markdown" && !el.editorArea.hidden);
+    previewSelectionController.bind();
+
+    document.addEventListener("cut", event => {
+      const selection = window.getSelection();
+      if (state.mode === "source" || !selection?.rangeCount || selection.isCollapsed || !el.preview.contains(selection.anchorNode) || !el.preview.contains(selection.focusNode)) return;
+      if (event.target.closest?.("textarea, input")) return;
+      event.preventDefault();
+      event.clipboardData.setData("text/plain", selection.toString());
+      modifyPreviewSelection();
+    });
 
     // Paste must never inject raw HTML (XSS via contenteditable)
     el.preview.addEventListener(
@@ -2882,7 +2880,7 @@
     const onDocDown = (e) => {
       if (done) return;
       if (node.contains(e.target)) return;
-      // Clicking handle / toolbar / elsewhere ends the edit so the handle can return
+      if (e.target.closest?.("#sel-toolbar, #sel-dropdown")) return;
       if (node._stuartSelecting) return;
       commit();
     };
@@ -2972,6 +2970,7 @@
       if (done) return;
       if (node.contains(e.target)) return;
       if (node._stuartSelecting) return;
+      if (e.target.closest?.("#sel-toolbar, #sel-dropdown")) return;
       commit();
     };
     const cleanupDocDown = () => document.removeEventListener("mousedown", onDocDown, true);
@@ -5818,6 +5817,7 @@ ${previewHtml}
 
     // Keyboard shortcuts
     window.addEventListener("keydown", (e) => {
+      if (e.defaultPrevented) return;
       try {
         if (window.StuartAIUI?.handleShortcutKeydown?.(e)) return;
         // Alt+I — companion sidebar
@@ -5915,13 +5915,16 @@ ${previewHtml}
         if (inEditor) {
           e.preventDefault();
           e.stopPropagation();
-          wrapSelection("**", "**");
+          wrapInlineMarkdown("**", "**");
           return;
         }
         if (!e.shiftKey) {
           e.preventDefault();
           toggleSidebar();
         }
+      } else if (k === "i" && !e.altKey && state.mode !== "source" && el.preview.contains(window.getSelection()?.anchorNode)) {
+        e.preventDefault();
+        wrapInlineMarkdown("*", "*");
       } else if (k === "f") {
         e.preventDefault();
         openFind();
@@ -6161,113 +6164,9 @@ ${previewHtml}
     }
   }
 
-  /** Fast path: large selection delete in preview without entering per-block edit. */
-  function rangeSelectsWholeNode(range, node) {
-    try {
-      const r = document.createRange();
-      r.selectNodeContents(node);
-      return (
-        range.compareBoundaryPoints(Range.START_TO_START, r) <= 0 &&
-        range.compareBoundaryPoints(Range.END_TO_END, r) >= 0
-      );
-    } catch (_) {
-      return false;
-    }
-  }
-
-  function applySourceText(text) {
-    const prev = el.source.value || "";
-    if (prev && prev !== text) pushHistory(prev);
-    el.source.value = text;
-    state.content = text;
-    markDirty();
-    scheduleAutoSave();
-    lastPreviewSource = "";
-    lastPreviewBlocks = [];
-    if (state.mode !== "source") {
-      try {
-        el.preview.innerHTML = "";
-      } catch (_) {}
-      renderMarkdown(text);
-      lastPreviewSource = text;
-      lastPreviewBlocks = splitMarkdownBlocks(text);
-    }
-    updateStats();
-    pushHistory(text);
-    emitAgentEvent("document-changed", { source: "bulk-delete" });
-  }
-
-  /**
-   * Delete a preview selection spanning one or more md-blocks in a single
-   * source update + one render. Avoids contenteditable + per-keystroke rebuild.
-   * @returns {boolean} true if handled
-   */
   function deletePreviewSelection() {
     if (state.mode === "source") return false;
-    const sel = window.getSelection();
-    if (!sel || sel.isCollapsed || !sel.rangeCount || !el.preview) return false;
-    if (!el.preview.contains(sel.anchorNode) && !el.preview.contains(sel.focusNode)) {
-      return false;
-    }
-    const range = sel.getRangeAt(0);
-    const nodes = $$(".md-block", el.preview);
-    const affected = [];
-    for (const b of nodes) {
-      try {
-        if (range.intersectsNode(b)) affected.push(b);
-      } catch (_) {}
-    }
-    if (!affected.length) return false;
-
-    const srcBlocks = splitMarkdownBlocks(el.source.value || "");
-    const idxs = affected
-      .map((b) => Number(b.dataset.index))
-      .filter((n) => Number.isFinite(n) && n >= 0 && n < srcBlocks.length);
-    if (!idxs.length) return false;
-    idxs.sort((a, b) => a - b);
-    const from = idxs[0];
-    const to = idxs[idxs.length - 1];
-    const multi = to > from || affected.length > 1;
-
-    const next = srcBlocks.slice();
-    if (multi) {
-      // Large multi-block selection: drop whole covered blocks (fast)
-      for (let i = from; i <= to; i++) next[i] = "";
-    } else {
-      // Single block partial selection
-      const blockEl =
-        el.preview.querySelector(`.md-block[data-index="${from}"]`) || affected[0];
-      try {
-        // Mutate live DOM once, then convert back to markdown
-        range.deleteContents();
-        const mdText = htmlToMarkdown(blockEl).replace(/^\n+|\n+$/g, "");
-        // Conversion failure/emptiness must not wipe the unselected remainder:
-        // keep the opened source when the round-trip comes back empty.
-        if (String(mdText).trim() || !String(srcBlocks[from] || "").trim()) {
-          next[from] = mdText;
-        }
-      } catch (_) {
-        // Leave next[from] as the original block — never blank it on error.
-      }
-    }
-
-    const kept = [];
-    for (let i = 0; i < next.length; i++) {
-      if (i >= from && i <= to) {
-        if (next[i] && String(next[i]).trim()) kept.push(next[i]);
-      } else {
-        kept.push(next[i]);
-      }
-    }
-    const text = joinBlocks(kept);
-    try {
-      sel.removeAllRanges();
-    } catch (_) {}
-    hideSelToolbar();
-    hideBlockHandle();
-    hideBlockMenu();
-    applySourceText(text);
-    return true;
+    return modifyPreviewSelection();
   }
 
   /** Find source line index for the Nth list-marker line (0-based). */

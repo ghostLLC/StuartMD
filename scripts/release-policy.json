@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "authorizedSkips": [
+    {
+      "mode": "Browser",
+      "authorizedAt": "2026-10-22",
+      "reason": "用户禁止 computer use，并允许跳过依赖界面操作的检查。",
+      "scope": "当前项目维护；用户恢复界面检查授权时移除此项。"
+    },
+    {
+      "mode": "Native",
+      "authorizedAt": "2026-10-22",
+      "reason": "用户禁止 computer use，并允许跳过依赖界面操作的检查。",
+      "scope": "当前项目维护；用户恢复界面检查授权时移除此项。"
+    }
+  ]
+}

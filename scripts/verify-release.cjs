@@ -8,7 +8,7 @@ const { JSDOM } = require('jsdom');
 const root = path.resolve(__dirname, '..');
 const version = toml.parse(fs.readFileSync(path.join(root, 'tauri/src-tauri/Cargo.toml'), 'utf8')).package.version;
 const configuration = JSON.parse(fs.readFileSync(path.join(root, 'tauri/src-tauri/tauri.conf.json'), 'utf8'));
-assert.equal(version, '3.5.20');
+assert.equal(version, '3.5.21');
 assert.equal(configuration.version, version);
 assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version, version);
 for (const file of ['README.md', 'samples/示例文档.md', 'samples/欢迎使用 StuartMD.md']) {
@@ -31,6 +31,10 @@ assert.deepEqual(configuration.bundle.icon, ['../../assets/app.ico']);
 home.window.close();
 assert.equal(sha256(path.join(root, 'web/libs/textarea-caret.js')), sha256(path.join(root, 'node_modules/textarea-caret/index.js')));
 assert.equal(sha256(path.join(root, 'web/libs/textarea-caret-LICENSE')), sha256(path.join(root, 'node_modules/textarea-caret/LICENSE')));
+for (const name of ['turndown', 'turndown-plugin-gfm']) {
+  assert.equal(sha256(path.join(root, 'web/libs', name + '.js')), sha256(path.join(root, 'node_modules', name, 'dist', name + '.js')));
+  assert.equal(sha256(path.join(root, 'web/libs', name + '-LICENSE')), sha256(path.join(root, 'node_modules', name, 'LICENSE')));
+}
 const evidence = { version, pdfjs: require('pdfjs-dist/package.json').version, resourceManifestHash: sha256(path.join(root, 'resources/native-manifest.json')), nativeManifest: resources };
 assert.equal(evidence.pdfjs, '3.11.174');
 for (const resource of resources.files) assert.equal(sha256(path.join(root, 'resources/native', resource.path)), resource.sha256, resource.path);
@@ -48,12 +52,9 @@ fs.mkdirSync(path.join(root, 'docs/validation', version), { recursive: true });
 fs.writeFileSync(path.join(root, 'docs/validation', version, 'version-resources.json'), JSON.stringify(evidence, null, 2));
 console.log(JSON.stringify({ version, pdfjs: evidence.pdfjs, resourceManifestHash: evidence.resourceManifestHash }));
 if (process.argv.includes('--publication')) {
-  const { sourceFingerprint, modes } = require('./validation-state.cjs');
-  const fingerprint = sourceFingerprint();
-  for (const mode of modes) {
-    const result = JSON.parse(fs.readFileSync(path.join(root, 'docs/validation', version, mode.toLowerCase() + '-status.json'), 'utf8'));
-    assert.equal(result.status, 'Passed', mode + ' 必要验收尚未通过');
-    assert.equal(result.sourceFingerprint, fingerprint, mode + ' 验证记录与当前软件源码不同');
-  }
-  console.log('全部必要验收与当前软件源码一致，可以公开发布。');
+  const { sourceFingerprint, verificationFingerprint, validatePublication, modes } = require('./validation-state.cjs');
+  const records = modes.map(mode => JSON.parse(fs.readFileSync(path.join(root, 'docs/validation', version, mode.toLowerCase() + '-status.json'), 'utf8')));
+  const policy = JSON.parse(fs.readFileSync(path.join(__dirname, 'release-policy.json'), 'utf8'));
+  validatePublication(records, { sourceFingerprint: sourceFingerprint(), verificationFingerprint: verificationFingerprint() }, policy);
+  console.log(JSON.stringify({ publication: 'Passed', skippedByUser: records.filter(record => record.status === 'SkippedByUser').map(record => ({ mode: record.mode, reason: record.reason })) }));
 }

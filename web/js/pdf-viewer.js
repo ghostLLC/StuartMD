@@ -453,6 +453,7 @@
 
       const loading = window.pdfjsLib.getDocument({
         ...docInit,
+        isEvalSupported: false,
         cMapUrl: new URL("libs/pdfjs/cmaps/", window.location.href).href,
         cMapPacked: true,
         standardFontDataUrl: new URL("libs/pdfjs/standard_fonts/", window.location.href).href,
